@@ -83,3 +83,64 @@ export interface ExportResult {
 export async function exportProject(projectPath: string, outputPath: string, asZip?: boolean): Promise<ExportResult> {
   return invoke<ExportResult>('export_project', { projectPath, outputPath, asZip: asZip ?? false });
 }
+
+// ---------------------------------------------------------------------------
+// Runtime preview server
+// ---------------------------------------------------------------------------
+
+/** Get the local URL the WebGAL runtime is served at, e.g. "http://127.0.0.1:54321/". */
+export async function getRuntimeUrl(): Promise<string> {
+  return invoke<string>('get_runtime_url');
+}
+
+/** Point the runtime server's /game/* route at the given project (or clear with null). */
+export async function setRuntimeProject(projectPath: string | null): Promise<void> {
+  return invoke<void>('set_runtime_project', { projectPath });
+}
+
+/** Broadcast a debug-protocol message over the runtime WebSocket bus. */
+export async function runtimeBroadcast(message: string): Promise<void> {
+  return invoke<void>('runtime_broadcast', { message });
+}
+
+/**
+ * WebGAL debug-protocol command IDs.
+ * Source: WebGAL/packages/webgal/src/types/debugProtocol.ts.
+ * The runtime distinguishes commands by numeric enum value.
+ */
+export const DebugCommand = {
+  JUMP: 0,
+  SYNCFC: 1,
+  SYNCFE: 2,
+  EXE_COMMAND: 3,
+  REFETCH_TEMPLATE_FILES: 4,
+  SET_COMPONENT_VISIBILITY: 5,
+  TEMP_SCENE: 6,
+  FONT_OPTIMIZATION: 7,
+  SET_EFFECT: 8,
+  FAST_PREVIEW_TIMEOUT: 9,
+  SET_TEXT_READ_MODE: 10,
+} as const;
+
+/** Open a URL in the user's default external browser. */
+export async function openInBrowser(url: string): Promise<void> {
+  return invoke<void>('open_in_browser', { url });
+}
+
+/** Fast-forward the runtime to a target sentence in a scene. */
+export async function jumpToSentence(
+  sceneName: string,
+  sentence: number,
+  opts: { fastSyncExperimental?: boolean } = {},
+): Promise<void> {
+  const envelope = {
+    event: 'message',
+    data: {
+      command: DebugCommand.JUMP,
+      sceneMsg: { scene: sceneName, sentence },
+      message: opts.fastSyncExperimental ? 'exp' : 'Sync',
+      stageSyncMsg: {},
+    },
+  };
+  return runtimeBroadcast(JSON.stringify(envelope));
+}

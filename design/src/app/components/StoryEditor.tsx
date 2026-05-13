@@ -12,7 +12,6 @@ import { NodePanel } from './NodePanel';
 import { FlowCanvas } from './FlowCanvas';
 import { DetailPanel } from './DetailPanel';
 import { AiSettingsDialog } from './AiSettingsDialog';
-import { PreviewOverlay } from './PreviewOverlay';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
 import { CharacterPanel } from './CharacterPanel';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
@@ -20,6 +19,7 @@ import {
   parseScene, serializeScene, saveScene, loadScene,
   openProject, getScenePath, createScene,
   exportProject,
+  setRuntimeProject, getRuntimeUrl, jumpToSentence, openInBrowser,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
 import { aiChatStream, type AiChatMessage } from '../lib/ai-ipc';
@@ -76,7 +76,6 @@ export function StoryEditor() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [rightTab, setRightTab] = useState<'ai' | 'characters'>('ai');
   const [characterNames, setCharacterNames] = useState<string[]>([]);
@@ -119,6 +118,19 @@ export function StoryEditor() {
     const settings = loadAppSettings();
     setAutoSaveInterval(settings.autoSaveInterval);
   }, []);
+
+  useEffect(() => {
+    getRuntimeUrl()
+      .then((url) => console.info(`[runtime] preview URL: ${url}`))
+      .catch((e) => console.warn('[runtime] URL unavailable:', e));
+    (window as unknown as { __jumpTo?: typeof jumpToSentence }).__jumpTo = jumpToSentence;
+  }, []);
+
+  useEffect(() => {
+    setRuntimeProject(projectPath).catch((e) =>
+      console.warn('[runtime] failed to sync project path:', e),
+    );
+  }, [projectPath]);
 
   // ---------------------------------------------------------------------------
   // Initialization: try to load project from localStorage or URL params
@@ -569,12 +581,15 @@ export function StoryEditor() {
     }
   }, [projectPath, dirty, handleSave]);
 
-  // Load a scene by name (for PreviewOverlay)
-  const handleLoadScene = useCallback(async (sceneName: string): Promise<WebGalNode[]> => {
-    if (!projectPath) return [];
-    const scenePath = await getScenePath(projectPath, sceneName);
-    return loadScene(scenePath);
-  }, [projectPath]);
+  const handleOpenRuntime = useCallback(async () => {
+    try {
+      const url = await getRuntimeUrl();
+      await openInBrowser(url);
+    } catch (e) {
+      console.warn('[runtime] failed to open browser:', e);
+      alert(`无法打开预览窗口: ${e}`);
+    }
+  }, []);
 
   // ---------------------------------------------------------------------------
   // AI chat
@@ -833,10 +848,10 @@ export function StoryEditor() {
                 </button>
               )}
               <button
-                onClick={() => setPreviewOpen(true)}
+                onClick={handleOpenRuntime}
                 className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
-                title={projectPath ? '从头开始试玩游戏' : '预览当前场景'}
-                aria-label="预览游戏"
+                title="在浏览器中打开 WebGAL 预览窗口"
+                aria-label="打开预览窗口"
               >
                 <Play className="w-3.5 h-3.5" />
                 <span>试玩</span>
@@ -881,6 +896,11 @@ export function StoryEditor() {
               onSelectNode={setSelectedNode}
               onAddNode={addNode}
               characterColors={characterColors}
+              onJumpToIndex={(i) =>
+                jumpToSentence(currentSceneName, i + 1).catch((e) =>
+                  console.warn('[runtime] jumpToSentence failed:', e),
+                )
+              }
             />
 
             {selectedNode && (
@@ -1085,14 +1105,6 @@ export function StoryEditor() {
           onOpenAiSettings={() => setAiSettingsOpen(true)}
         />
 
-        {previewOpen && projectPath && (
-          <PreviewOverlay
-            initialScene="start.txt"
-            projectPath={projectPath}
-            onClose={() => setPreviewOpen(false)}
-            onLoadScene={handleLoadScene}
-          />
-        )}
       </div>
     </DndProvider>
   );

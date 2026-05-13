@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
   ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award, ChevronDown, ChevronRight,
+  Play,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandCategories, commandLabels, categoryLabels } from '../lib/webgal-types';
@@ -12,6 +13,8 @@ interface NodePanelProps {
   onSelectNode: (node: WebGalNode) => void;
   onAddNode: (type: WebGalCommandType) => void;
   characterColors?: Record<string, string>;
+  /** Called when the user clicks "执行到此句" on the node at `index` (0-based). */
+  onJumpToIndex?: (index: number) => void;
 }
 
 const commandIcons: Partial<Record<WebGalCommandType, typeof MessageCircle>> = {
@@ -103,7 +106,7 @@ function getNodeSummary(node: WebGalNode): string {
   }
 }
 
-export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, characterColors }: NodePanelProps) {
+export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, characterColors, onJumpToIndex }: NodePanelProps) {
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   return (
@@ -152,17 +155,25 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, charac
 
       {/* Node List */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {nodes.map((node) => {
+        {nodes.map((node, index) => {
           const Icon = commandIcons[node.type] || Type;
           const isSelected = selectedNode?.id === node.id;
           const color = typeColorMap[node.type] || 'text-muted-foreground';
 
           return (
-            <button
+            <div
               key={node.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectNode(node)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelectNode(node);
+                }
+              }}
               className={`
-                w-full px-2.5 py-2 rounded border transition-all text-left
+                group relative w-full px-2.5 py-2 rounded border transition-all text-left cursor-pointer
                 ${isSelected
                   ? 'border-primary bg-primary/10 shadow-[0_0_12px_rgba(212,165,116,0.15)]'
                   : 'border-transparent hover:border-border hover:bg-secondary/30'
@@ -178,15 +189,30 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, charac
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family">
-                    {commandLabels[node.type]}
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family flex items-center gap-1.5">
+                    <span className="opacity-50">{index + 1}</span>
+                    <span>{commandLabels[node.type]}</span>
                   </div>
                   <div className="text-xs text-foreground/80 truncate">
                     {getNodeSummary(node) || '(空)'}
                   </div>
                 </div>
+                {onJumpToIndex && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onJumpToIndex(index);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary shrink-0"
+                    title="执行到此句"
+                    aria-label="执行到此句"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
