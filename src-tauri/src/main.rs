@@ -7,7 +7,10 @@ mod webgal;
 
 use std::path::PathBuf;
 use tauri::Manager;
+use webgal::runtime_manager::{self, RuntimeInfo};
 use webgal::runtime_server::RuntimeServer;
+
+const DEFAULT_WEBGAL_VERSION: &str = "4.6.0";
 
 #[tauri::command]
 async fn get_runtime_url(server: tauri::State<'_, RuntimeServer>) -> Result<String, String> {
@@ -47,24 +50,58 @@ fn open_in_browser(url: String) -> Result<(), String> {
     result.map(|_| ()).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_runtime_info(server: tauri::State<'_, RuntimeServer>) -> Result<RuntimeInfo, String> {
+    let dir = server.template_dir().await;
+    Ok(runtime_manager::read_info(&dir))
+}
+
+fn user_install_target(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runtime/WebGAL_Template"))
+}
+
+#[tauri::command]
+async fn install_runtime(
+    app: tauri::AppHandle,
+    server: tauri::State<'_, RuntimeServer>,
+    version: Option<String>,
+) -> Result<RuntimeInfo, String> {
+    let version = version.unwrap_or_else(|| DEFAULT_WEBGAL_VERSION.to_string());
+    let target = user_install_target(&app)?;
+    runtime_manager::install(&version, &target).await?;
+    server.set_template_dir(target.clone()).await;
+    Ok(runtime_manager::read_info(&target))
+}
+
 fn resolve_template_dir(app: &tauri::AppHandle) -> PathBuf {
     // 1. Explicit override (debug builds, custom setups).
     if let Ok(p) = std::env::var("WEBGAL_TEMPLATE_DIR") {
         return PathBuf::from(p);
     }
-    // 2. Bundled resources (production builds).
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join("runtime/WebGAL_Template");
-        if candidate.exists() {
+    // 2. User-installed runtime (via Settings → 安装/重装).
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let candidate = data_dir.join("runtime/WebGAL_Template");
+        if candidate.join("index.html").is_file() {
             return candidate;
         }
     }
-    // 3. Source tree path (dev builds — populated by scripts/setup-runtime.sh).
+    // 3. Bundled resources (production builds).
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let candidate = resource_dir.join("runtime/WebGAL_Template");
+        if candidate.join("index.html").is_file() {
+            return candidate;
+        }
+    }
+    // 4. Source tree path (dev builds — populated by scripts/setup-runtime.sh).
     let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/WebGAL_Template");
-    if dev_path.exists() {
+    if dev_path.join("index.html").is_file() {
         return dev_path;
     }
-    // 4. Last-resort legacy path.
+    // 5. Last-resort legacy path.
     dirs::home_dir()
         .map(|h| h.join("Downloads/webgal/WebGAL/assets/templates/WebGAL_Template"))
         .unwrap_or_else(|| PathBuf::from("./WebGAL_Template"))
@@ -113,6 +150,8 @@ fn main() {
             set_runtime_project,
             runtime_broadcast,
             open_in_browser,
+            get_runtime_info,
+            install_runtime,
             // AI
             ai::commands::get_ai_config,
             ai::commands::set_ai_config,

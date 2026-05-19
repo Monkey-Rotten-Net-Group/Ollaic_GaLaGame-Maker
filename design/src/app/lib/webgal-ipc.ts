@@ -103,6 +103,22 @@ export async function runtimeBroadcast(message: string): Promise<void> {
   return invoke<void>('runtime_broadcast', { message });
 }
 
+export interface RuntimeInfo {
+  installed: boolean;
+  path: string;
+  version: string | null;
+}
+
+/** Inspect the currently-active WebGAL runtime install (path + version). */
+export async function getRuntimeInfo(): Promise<RuntimeInfo> {
+  return invoke<RuntimeInfo>('get_runtime_info');
+}
+
+/** Download a WebGAL release and install it into the user data directory. */
+export async function installRuntime(version?: string): Promise<RuntimeInfo> {
+  return invoke<RuntimeInfo>('install_runtime', { version: version ?? null });
+}
+
 /**
  * WebGAL debug-protocol command IDs.
  * Source: WebGAL/packages/webgal/src/types/debugProtocol.ts.

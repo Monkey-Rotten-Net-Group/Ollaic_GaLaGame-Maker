@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { X, Save, FolderOpen } from 'lucide-react';
+import { X, Save, FolderOpen, Download, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { getRuntimeInfo, installRuntime, type RuntimeInfo } from '../lib/webgal-ipc';
 
 export interface AppSettings {
   defaultProjectDir: string;
@@ -42,17 +43,37 @@ export function AppSettingsDialog({ open, onClose, onOpenAiSettings }: Props) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setSettings(loadAppSettings());
     setError(null);
+    setRuntimeError(null);
+    getRuntimeInfo()
+      .then(setRuntime)
+      .catch((e) => setRuntimeError(String(e)));
   }, [open]);
 
   if (!open) return null;
 
   const update = (patch: Partial<AppSettings>) =>
     setSettings((s) => ({ ...s, ...patch }));
+
+  const handleInstallRuntime = async () => {
+    setRuntimeBusy(true);
+    setRuntimeError(null);
+    try {
+      const info = await installRuntime();
+      setRuntime(info);
+    } catch (e) {
+      setRuntimeError(String(e));
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
 
   const handlePickDir = async () => {
     const dir = await openDialog({
@@ -179,6 +200,62 @@ export function AppSettingsDialog({ open, onClose, onOpenAiSettings }: Props) {
               </button>
             </div>
           )}
+
+          {/* WebGAL runtime */}
+          <div className="pt-2 border-t border-border space-y-2">
+            <label className="block text-xs uppercase tracking-widest text-muted-foreground font-mono-family">
+              WebGAL 运行时
+            </label>
+
+            <div className="flex items-start gap-2">
+              {runtime?.installed ? (
+                <CheckCircle2 className="w-4 h-4 mt-0.5 text-green-500 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 mt-0.5 text-yellow-500 shrink-0" />
+              )}
+              <div className="flex-1 min-w-0 text-sm">
+                <div className="font-mono-family">
+                  {runtime?.installed
+                    ? `已安装 v${runtime.version ?? '(未知)'}`
+                    : '未安装'}
+                </div>
+                <div
+                  className="text-xs text-muted-foreground font-mono-family truncate"
+                  title={runtime?.path ?? ''}
+                >
+                  {runtime?.path ?? '—'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleInstallRuntime}
+              disabled={runtimeBusy}
+              className="w-full px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {runtimeBusy ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>下载安装中…</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  <span>{runtime?.installed ? '重新下载' : '下载并安装'}</span>
+                </>
+              )}
+            </button>
+
+            <p className="text-xs text-muted-foreground">
+              从 OpenWebGAL Release 下载,安装到应用数据目录(优先于内置版本)
+            </p>
+
+            {runtimeError && (
+              <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/30 text-xs text-destructive">
+                {runtimeError}
+              </div>
+            )}
+          </div>
 
           {error && (
             <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/30 text-sm text-destructive">

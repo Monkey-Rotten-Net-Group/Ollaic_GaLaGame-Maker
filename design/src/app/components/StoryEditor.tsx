@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import {
-  Sparkles, Save, Play, Settings, Image, ArrowLeft, Send,
+  Sparkles, Save, Play, Image, ArrowLeft, Send,
   Upload, Download, FileText, FolderOpen, FilePlus, Check, Loader2, SlidersHorizontal, Users,
   Undo2, Redo2, Package,
 } from 'lucide-react';
@@ -800,14 +800,6 @@ export function StoryEditor() {
                   <span>人物</span>
                 </button>
               )}
-              <button
-                onClick={() => setAiSettingsOpen(true)}
-                className="p-2 rounded-md hover:bg-secondary/50 transition-colors"
-                title="AI 设置"
-                aria-label="AI 设置"
-              >
-                <Settings className="w-4 h-4" />
-              </button>
               <button
                 onClick={() => setAppSettingsOpen(true)}
                 className="p-2 rounded-md hover:bg-secondary/50 transition-colors"

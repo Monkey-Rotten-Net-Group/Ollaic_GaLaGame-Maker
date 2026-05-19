@@ -18,7 +18,7 @@ use tokio::{
 
 #[derive(Clone)]
 pub struct RuntimeServer {
-    template_dir: PathBuf,
+    template_dir: Arc<RwLock<PathBuf>>,
     project_dir: Arc<RwLock<Option<PathBuf>>>,
     broadcast_tx: broadcast::Sender<String>,
     port: u16,
@@ -33,7 +33,7 @@ impl RuntimeServer {
         let port = addr.port();
 
         let server = RuntimeServer {
-            template_dir,
+            template_dir: Arc::new(RwLock::new(template_dir)),
             project_dir: Arc::new(RwLock::new(None)),
             broadcast_tx,
             port,
@@ -61,6 +61,14 @@ impl RuntimeServer {
 
     pub fn url(&self) -> String {
         format!("http://127.0.0.1:{}/", self.port)
+    }
+
+    pub async fn template_dir(&self) -> PathBuf {
+        self.template_dir.read().await.clone()
+    }
+
+    pub async fn set_template_dir(&self, dir: PathBuf) {
+        *self.template_dir.write().await = dir;
     }
 
     pub async fn set_project(&self, dir: Option<PathBuf>) {
@@ -120,7 +128,7 @@ async fn static_handler(
     } else {
         let stripped = decoded.trim_start_matches('/');
         let rel = if stripped.is_empty() { "index.html" } else { stripped };
-        (server.template_dir.clone(), rel.to_string())
+        (server.template_dir.read().await.clone(), rel.to_string())
     };
 
     serve_file(base, rel).await
