@@ -50,6 +50,16 @@ pnpm install --frozen-lockfile
 
 Do not install from `design/` directly. The repo uses the root `pnpm-workspace.yaml` and root `pnpm-lock.yaml`.
 
+## Install WebGAL Runtime
+
+The preview feature embeds the official WebGAL runtime. Run once after cloning:
+
+```bash
+bash scripts/setup-runtime.sh
+```
+
+This downloads `WebGAL-<version>-web.zip` from the OpenWebGAL release page and extracts it to `src-tauri/runtime/WebGAL_Template/` (gitignored). Override the version with `WEBGAL_VERSION=x.y.z`. The Tauri bundle picks the directory up as a resource for release builds; for dev builds the same path is read directly from the source tree.
+
 ## Run
 
 Start the Tauri desktop app:

@@ -4,4 +4,5 @@
 /design/node_modules
 /design/dist
 /src-tauri/target
+/src-tauri/runtime
 /.codex

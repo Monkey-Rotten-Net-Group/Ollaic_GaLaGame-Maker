@@ -47,24 +47,37 @@ fn open_in_browser(url: String) -> Result<(), String> {
     result.map(|_| ()).map_err(|e| e.to_string())
 }
 
-fn resolve_template_dir() -> PathBuf {
+fn resolve_template_dir(app: &tauri::AppHandle) -> PathBuf {
+    // 1. Explicit override (debug builds, custom setups).
     if let Ok(p) = std::env::var("WEBGAL_TEMPLATE_DIR") {
         return PathBuf::from(p);
     }
-    if let Some(home) = dirs::home_dir() {
-        return home.join("Downloads/webgal/WebGAL/assets/templates/WebGAL_Template");
+    // 2. Bundled resources (production builds).
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let candidate = resource_dir.join("runtime/WebGAL_Template");
+        if candidate.exists() {
+            return candidate;
+        }
     }
-    PathBuf::from("./WebGAL_Template")
+    // 3. Source tree path (dev builds — populated by scripts/setup-runtime.sh).
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/WebGAL_Template");
+    if dev_path.exists() {
+        return dev_path;
+    }
+    // 4. Last-resort legacy path.
+    dirs::home_dir()
+        .map(|h| h.join("Downloads/webgal/WebGAL/assets/templates/WebGAL_Template"))
+        .unwrap_or_else(|| PathBuf::from("./WebGAL_Template"))
 }
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let template_dir = resolve_template_dir();
+            let template_dir = resolve_template_dir(app.handle());
             if !template_dir.exists() {
                 eprintln!(
-                    "[main] WebGAL template directory missing: {} — set WEBGAL_TEMPLATE_DIR or place the template at the default path",
+                    "[main] WebGAL template missing: {} — run scripts/setup-runtime.sh or set WEBGAL_TEMPLATE_DIR",
                     template_dir.display()
                 );
             }
