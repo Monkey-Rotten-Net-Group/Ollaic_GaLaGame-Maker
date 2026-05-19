@@ -92,10 +92,7 @@ pub fn init_project(app: AppHandle, base_dir: String, name: String) -> Result<Pr
     // Write default config.txt
     let mut config = HashMap::new();
     config.insert("Game_name".to_string(), name.clone());
-    config.insert(
-        "Game_key".to_string(),
-        format!("{:x}", rand_u64()),
-    );
+    config.insert("Game_key".to_string(), format!("{:x}", rand_u64()));
     config.insert(
         "Title_img".to_string(),
         "WebGAL_New_Enter_Image.webp".to_string(),
@@ -162,13 +159,8 @@ pub fn open_project(app: AppHandle, path: String) -> Result<ProjectInfo, String>
 
 /// Update config.txt for a project.
 #[tauri::command]
-pub fn save_config(
-    project_path: String,
-    config: HashMap<String, String>,
-) -> Result<(), String> {
-    let config_path = PathBuf::from(&project_path)
-        .join("game")
-        .join("config.txt");
+pub fn save_config(project_path: String, config: HashMap<String, String>) -> Result<(), String> {
+    let config_path = PathBuf::from(&project_path).join("game").join("config.txt");
     fs::write(&config_path, serialize_config(&config))
         .map_err(|e| format!("Failed to write config.txt: {}", e))
 }
@@ -187,8 +179,7 @@ pub fn get_scene_path(project_path: String, scene_name: String) -> Result<String
 #[tauri::command]
 pub fn create_scene(project_path: String, scene_name: String) -> Result<String, String> {
     let scene_dir = PathBuf::from(&project_path).join("game").join("scene");
-    fs::create_dir_all(&scene_dir)
-        .map_err(|e| format!("Failed to create scene dir: {}", e))?;
+    fs::create_dir_all(&scene_dir).map_err(|e| format!("Failed to create scene dir: {}", e))?;
 
     let name = if scene_name.ends_with(".txt") {
         scene_name
@@ -216,8 +207,7 @@ fn list_txt_files(dir: &Path) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
     let mut files = Vec::new();
-    let entries =
-        fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("Read entry error: {}", e))?;
         let path = entry.path();
@@ -290,8 +280,8 @@ fn validate_assets(game_dir: &Path) -> Result<Vec<String>, String> {
         return Ok(warnings);
     }
 
-    let entries = fs::read_dir(&scene_dir)
-        .map_err(|e| format!("Failed to read scene dir: {}", e))?;
+    let entries =
+        fs::read_dir(&scene_dir).map_err(|e| format!("Failed to read scene dir: {}", e))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Read entry error: {}", e))?;
@@ -300,7 +290,8 @@ fn validate_assets(game_dir: &Path) -> Result<Vec<String>, String> {
             continue;
         }
 
-        let scene_name = path.file_name()
+        let scene_name = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
         let content = fs::read_to_string(&path)
@@ -341,8 +332,12 @@ fn validate_assets(game_dir: &Path) -> Result<Vec<String>, String> {
 fn extract_asset_ref(line: &str) -> Option<(&str, String)> {
     // Commands that take an asset filename as their first argument
     let commands = [
-        "changeBg:", "changeFigure:", "miniAvatar:",
-        "bgm:", "playEffect:", "playVideo:",
+        "changeBg:",
+        "changeFigure:",
+        "miniAvatar:",
+        "bgm:",
+        "playEffect:",
+        "playVideo:",
     ];
 
     for cmd in &commands {
@@ -377,8 +372,14 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         if path.is_dir() {
             copy_dir_recursive(&path, &dest_path)?;
         } else {
-            fs::copy(&path, &dest_path)
-                .map_err(|e| format!("Failed to copy {} -> {}: {}", path.display(), dest_path.display(), e))?;
+            fs::copy(&path, &dest_path).map_err(|e| {
+                format!(
+                    "Failed to copy {} -> {}: {}",
+                    path.display(),
+                    dest_path.display(),
+                    e
+                )
+            })?;
         }
     }
     Ok(())
@@ -402,8 +403,16 @@ mod tests {
 
         // Write some content
         fs::write(tmp.join("game").join("config.txt"), "Game_name:Test;").unwrap();
-        fs::write(tmp.join("game").join("scene").join("start.txt"), "dialogue:Hello;").unwrap();
-        fs::write(tmp.join("game").join("background").join("bg.webp"), "fake-image").unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            "dialogue:Hello;",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("game").join("background").join("bg.webp"),
+            "fake-image",
+        )
+        .unwrap();
         fs::write(tmp.join("game").join("bgm").join("music.mp3"), "fake-audio").unwrap();
         fs::write(tmp.join("game").join("sfx").join("click.wav"), "fake-sfx").unwrap();
 
@@ -472,11 +481,22 @@ mod tests {
         assert!(result.success);
 
         // Should warn about missing_figure.webp and peaceful.mp3 and click.wav
-        assert!(result.warnings.len() >= 2, "expected at least 2 warnings, got {}: {:?}", result.warnings.len(), result.warnings);
+        assert!(
+            result.warnings.len() >= 2,
+            "expected at least 2 warnings, got {}: {:?}",
+            result.warnings.len(),
+            result.warnings
+        );
 
-        let has_missing_figure = result.warnings.iter().any(|w| w.contains("missing_figure.webp"));
+        let has_missing_figure = result
+            .warnings
+            .iter()
+            .any(|w| w.contains("missing_figure.webp"));
         let has_missing_bgm = result.warnings.iter().any(|w| w.contains("peaceful.mp3"));
-        assert!(has_missing_figure, "missing_figure.webp should trigger a warning");
+        assert!(
+            has_missing_figure,
+            "missing_figure.webp should trigger a warning"
+        );
         assert!(has_missing_bgm, "peaceful.mp3 should trigger a warning");
 
         // Should NOT warn about existing asset

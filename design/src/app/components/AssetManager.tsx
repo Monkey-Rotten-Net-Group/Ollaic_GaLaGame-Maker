@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import {
@@ -30,11 +30,32 @@ import {
   listAllAssets,
   importAsset,
   deleteAsset,
+  findAssetUsages,
   renameAsset,
   type AssetInfo,
+  type AssetUsage,
 } from '../lib/assets-ipc';
+import { CharacterPanel } from './CharacterPanel';
 
 type TabId = 'scene' | 'music' | 'character';
+type MusicCategory = 'bgm' | 'sfx' | 'vocal';
+
+const musicTabs: { id: MusicCategory; label: string }[] = [
+  { id: 'bgm', label: 'BGM 背景音乐' },
+  { id: 'sfx', label: 'SFX 音效' },
+  { id: 'vocal', label: '语音 Vocal' },
+];
+
+const musicCategoryLabels: Record<MusicCategory, string> = {
+  bgm: 'BGM',
+  sfx: '音效',
+  vocal: '语音',
+};
+
+const sceneTagGroups = [
+  { title: '时段', tags: ['白天', '黄昏', '夜晚', '雨天'] },
+  { title: '场景类型', tags: ['室内', '室外', '幻想', '战斗'] },
+];
 
 function tabToCategories(tab: TabId): string[] {
   switch (tab) {
@@ -45,17 +66,71 @@ function tabToCategories(tab: TabId): string[] {
 }
 
 function isImageExt(ext: string): boolean {
-  return ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].some(e => ext.endsWith(e));
+  const normalized = ext.toLowerCase().replace(/^\./, '');
+  return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(normalized);
 }
 
 function isAudioExt(ext: string): boolean {
-  return ['.mp3', '.ogg', '.wav', '.flac', '.aac'].some(e => ext.endsWith(e));
+  const normalized = ext.toLowerCase().replace(/^\./, '');
+  return ['mp3', 'ogg', 'wav', 'flac', 'aac'].includes(normalized);
 }
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatCategory(category: string): string {
+  const labels: Record<string, string> = {
+    background: '背景',
+    figure: '立绘',
+    bgm: '背景音乐',
+    sfx: '音效',
+    vocal: '语音',
+  };
+  return labels[category] || category;
+}
+
+function formatDuration(seconds?: number): string {
+  if (!seconds || !Number.isFinite(seconds)) return '--:--';
+  const total = Math.floor(seconds);
+  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
+}
+
+function getSafeAudioDuration(audio: HTMLAudioElement): number {
+  return Number.isFinite(audio.duration) ? audio.duration : 0;
+}
+
+function getImportConfig(tab: TabId, musicCategory: MusicCategory) {
+  if (tab === 'scene') {
+    return {
+      title: '上传背景素材',
+      buttonLabel: '上传背景',
+      filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }],
+    };
+  }
+  if (tab === 'music') {
+    return {
+      title: `上传${musicCategoryLabels[musicCategory]}`,
+      buttonLabel: `上传${musicCategoryLabels[musicCategory]}`,
+      filters: [{ name: '音频文件', extensions: ['mp3', 'ogg', 'wav', 'flac', 'aac'] }],
+    };
+  }
+  return {
+    title: '上传立绘素材',
+    buttonLabel: '上传立绘素材',
+    filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }],
+  };
+}
+
+function getAudioDurationLabel(
+  assetPath: string,
+  audioDurations: Record<string, number>,
+  audioMetadataErrors: Record<string, boolean>,
+): string {
+  if (audioMetadataErrors[assetPath]) return '无法读取时长';
+  return formatDuration(audioDurations[assetPath]);
 }
 
 const tabConfig: { id: TabId; label: string; icon: typeof Image }[] = [
@@ -67,12 +142,26 @@ const tabConfig: { id: TabId; label: string; icon: typeof Image }[] = [
 export function AssetManager() {
   const navigate = useNavigate();
   const { projectId } = useParams();
+  const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<TabId>('scene');
+  const [activeTab, setActiveTab] = useState<TabId>(
+    searchParams.get('tab') === 'character' ? 'character' : 'scene',
+  );
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAsset, setSelectedAsset] = useState<AssetInfo | null>(null);
   const [playingAudio, setPlayingAudio] = useState<string | null>(null);
+  const [musicCategory, setMusicCategory] = useState<MusicCategory>('bgm');
+  const [characterCount, setCharacterCount] = useState(0);
+  const [characterGenerationRequestToken, setCharacterGenerationRequestToken] = useState(0);
+  const [figureLibraryRefreshToken, setFigureLibraryRefreshToken] = useState(0);
+  const [audioDurations, setAudioDurations] = useState<Record<string, number>>({});
+  const [audioMetadataErrors, setAudioMetadataErrors] = useState<Record<string, boolean>>({});
+  const [audioProgress, setAudioProgress] = useState<Record<string, number>>({});
+  const [assetUsages, setAssetUsages] = useState<AssetUsage[]>([]);
+  const [tagsByAsset, setTagsByAsset] = useState<Record<string, string[]>>({});
+  const [referencesByAsset, setReferencesByAsset] = useState<Record<string, string[]>>({});
+  const [referenceUploading, setReferenceUploading] = useState(false);
 
   // Real data state
   const [projectPath, setProjectPath] = useState<string>('');
@@ -92,12 +181,18 @@ export function AssetManager() {
     }
   }, [projectId]);
 
+  useEffect(() => {
+    if (searchParams.get('tab') === 'character') {
+      setActiveTab('character');
+    }
+  }, [searchParams]);
+
   // Load assets on mount and tab change
-  const loadAssetsForTab = useCallback(async (tab: TabId, path: string) => {
+  const loadAssetsForTab = useCallback(async (tab: TabId, path: string, musicSubtab: MusicCategory) => {
     setLoading(true);
     setError(null);
     try {
-      const cats = tabToCategories(tab);
+      const cats = tab === 'music' ? [musicSubtab] : tabToCategories(tab);
       const results = await Promise.all(cats.map(c => listAssets(path, c)));
       const all = results.flat();
       setAssets(all);
@@ -121,9 +216,20 @@ export function AssetManager() {
 
   useEffect(() => {
     if (!projectPath) return;
-    loadAssetsForTab(activeTab, projectPath);
+    loadAssetsForTab(activeTab, projectPath, musicCategory);
     loadAllAssets(projectPath);
-  }, [projectPath, activeTab, loadAssetsForTab, loadAllAssets]);
+  }, [projectPath, activeTab, musicCategory, loadAssetsForTab, loadAllAssets]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    try {
+      setTagsByAsset(JSON.parse(localStorage.getItem(`asset-tags-${projectId}`) || '{}'));
+      setReferencesByAsset(JSON.parse(localStorage.getItem(`asset-references-${projectId}`) || '{}'));
+    } catch {
+      setTagsByAsset({});
+      setReferencesByAsset({});
+    }
+  }, [projectId]);
 
   const filteredAssets = assets.filter((a) =>
     a.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -132,28 +238,40 @@ export function AssetManager() {
   // Tab counts from all assets
   const tabCounts = {
     scene: allAssets.filter(a => a.category === 'background').length,
-    music: allAssets.filter(a => a.category === 'bgm' || a.category === 'vocal').length,
-    character: allAssets.filter(a => a.category === 'figure').length,
+    music: allAssets.filter(a => a.category === 'bgm' || a.category === 'sfx' || a.category === 'vocal').length,
+    character: characterCount,
   };
+
+  const importConfig = getImportConfig(activeTab, musicCategory);
+  const aiActionLabel = activeTab === 'scene'
+    ? 'AI 生成背景'
+    : activeTab === 'music'
+      ? `AI 生成${musicCategoryLabels[musicCategory]}`
+      : '批量生成当前角色立绘';
+  const scopedActionHint = activeTab === 'scene'
+    ? '将文件导入背景素材库。'
+    : activeTab === 'music'
+      ? `将文件导入${musicCategoryLabels[musicCategory]}素材库。`
+      : '将图片导入立绘素材库；当前角色可在下方立绘素材库中管理并选作主体。';
 
   // --- Actions ---
   const handleImport = useCallback(async () => {
-    if (!projectPath) return;
+    if (!projectPath || !importConfig) return;
     const path = await openDialog({
-      title: '选择素材文件',
-      filters: [{
-        name: '媒体文件',
-        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'mp3', 'ogg', 'wav', 'flac', 'aac', 'mp4', 'webm'],
-      }],
+      title: importConfig.title,
+      filters: importConfig.filters,
     });
     if (!path) return;
 
     setImporting(true);
     setError(null);
     try {
-      const cats = tabToCategories(activeTab);
-      const info = await importAsset(path, projectPath, cats[0]);
+      const cats = activeTab === 'music' ? [musicCategory] : tabToCategories(activeTab);
+      const info = await importAsset(Array.isArray(path) ? path[0] : path, projectPath, cats[0]);
       setAssets(prev => [info, ...prev]);
+      if (activeTab === 'character') {
+        setFigureLibraryRefreshToken((value) => value + 1);
+      }
       // Refresh all assets for updated counts
       loadAllAssets(projectPath);
     } catch (e) {
@@ -161,7 +279,7 @@ export function AssetManager() {
     } finally {
       setImporting(false);
     }
-  }, [projectPath, activeTab, loadAllAssets]);
+  }, [projectPath, activeTab, importConfig, musicCategory, loadAllAssets]);
 
   const handleDelete = useCallback(async () => {
     if (!selectedAsset || !projectPath) return;
@@ -224,22 +342,130 @@ export function AssetManager() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const handlePlayToggle = useCallback((assetPath: string) => {
-    setPlayingAudio(prev => prev === assetPath ? null : assetPath);
-  }, []);
+  const handlePlayToggle = useCallback(async (assetPath: string) => {
+    const audio = audioRef.current;
+    if (!audio) return;
 
-  // Audio playback wiring
+    if (playingAudio === assetPath) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.removeAttribute('src');
+      audio.load();
+      setPlayingAudio(null);
+      return;
+    }
+
+    setError(null);
+    setAudioProgress((prev) => ({ ...prev, [assetPath]: 0 }));
+    audio.pause();
+    audio.src = convertFileSrc(assetPath);
+    audio.load();
+
+    try {
+      await audio.play();
+      setPlayingAudio(assetPath);
+    } catch (e) {
+      setPlayingAudio(null);
+      setError(`无法播放音频：${String(e)}`);
+    }
+  }, [playingAudio]);
+
+  const persistTags = useCallback((next: Record<string, string[]>) => {
+    setTagsByAsset(next);
+    if (projectId) localStorage.setItem(`asset-tags-${projectId}`, JSON.stringify(next));
+  }, [projectId]);
+
+  const toggleTag = useCallback((assetName: string, tag: string) => {
+    const current = tagsByAsset[assetName] ?? [];
+    const nextTags = current.includes(tag)
+      ? current.filter((item) => item !== tag)
+      : [...current, tag];
+    persistTags({ ...tagsByAsset, [assetName]: nextTags });
+  }, [persistTags, tagsByAsset]);
+
+  const persistReferences = useCallback((next: Record<string, string[]>) => {
+    setReferencesByAsset(next);
+    if (projectId) localStorage.setItem(`asset-references-${projectId}`, JSON.stringify(next));
+  }, [projectId]);
+
+  const handleReferenceUpload = useCallback(async () => {
+    if (!selectedAsset || !projectPath) return;
+    const isAudioReference = activeTab === 'music';
+    const referenceCategory = isAudioReference
+      ? `reference/audio/${selectedAsset.name}`
+      : `reference/backgrounds/${selectedAsset.name}`;
+    const path = await openDialog({
+      title: isAudioReference ? '上传参考音频' : '上传参考图',
+      filters: [{
+        name: isAudioReference ? '音频文件' : '图片文件',
+        extensions: isAudioReference ? ['mp3', 'ogg', 'wav', 'flac', 'aac'] : ['png', 'jpg', 'jpeg', 'webp'],
+      }],
+    });
+    if (!path) return;
+
+    setReferenceUploading(true);
+    setError(null);
+    try {
+      const info = await importAsset(Array.isArray(path) ? path[0] : path, projectPath, referenceCategory);
+      persistReferences({
+        ...referencesByAsset,
+        [selectedAsset.name]: [...(referencesByAsset[selectedAsset.name] ?? []), info.name],
+      });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setReferenceUploading(false);
+    }
+  }, [activeTab, persistReferences, projectPath, referencesByAsset, selectedAsset]);
+
+  const handleReferenceRemove = useCallback(async (filename: string) => {
+    if (!selectedAsset || !projectPath) return;
+    const referenceCategory = activeTab === 'music'
+      ? `reference/audio/${selectedAsset.name}`
+      : `reference/backgrounds/${selectedAsset.name}`;
+    try {
+      await deleteAsset(projectPath, referenceCategory, filename);
+    } catch {
+      // Keep the local reference list clean even if the backing file was already gone.
+    }
+    persistReferences({
+      ...referencesByAsset,
+      [selectedAsset.name]: (referencesByAsset[selectedAsset.name] ?? []).filter((name) => name !== filename),
+    });
+  }, [activeTab, persistReferences, projectPath, referencesByAsset, selectedAsset]);
+
+  // Keep the shared audio element in sync when playback is cleared externally.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (playingAudio) {
-      audio.src = convertFileSrc(playingAudio);
-      audio.play().catch(() => {});
-    } else {
+    if (!playingAudio) {
       audio.pause();
-      audio.src = '';
+      audio.currentTime = 0;
+      audio.removeAttribute('src');
+      audio.load();
     }
   }, [playingAudio]);
+
+  useEffect(() => {
+    if (!selectedAsset || !projectPath) {
+      setAssetUsages([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const usages = await findAssetUsages(projectPath, selectedAsset.name);
+        if (!cancelled) setAssetUsages(usages);
+      } catch {
+        if (!cancelled) setAssetUsages([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectPath, selectedAsset]);
+
+  const openUsage = useCallback((usage: AssetUsage) => {
+    navigate(`/editor/${projectId}?scene=${encodeURIComponent(usage.sceneFile)}&line=${usage.lineNumber}`);
+  }, [navigate, projectId]);
 
   // Thumbnail URL
   const getThumbnail = (asset: AssetInfo): string | null => {
@@ -274,25 +500,41 @@ export function AssetManager() {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className="hidden max-w-xs text-right md:block">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {activeTab === 'scene' ? '背景' : activeTab === 'music' ? musicCategoryLabels[musicCategory] : '人物'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {scopedActionHint}
+              </div>
+            </div>
             <button
-              onClick={() => alert('AI 素材生成即将推出')}
+              onClick={() => {
+                if (activeTab === 'character') {
+                  setCharacterGenerationRequestToken((value) => value + 1);
+                  return;
+                }
+                alert(`${aiActionLabel} 即将推出`);
+              }}
               className="px-4 py-2 rounded-md bg-primary/10 text-primary flex items-center gap-2 hover:bg-primary/20 transition-all border border-primary/30"
             >
               <Sparkles className="w-4 h-4" />
-              <span>AI 生成</span>
+              <span>{aiActionLabel}</span>
             </button>
-            <button
-              onClick={handleImport}
-              disabled={!projectPath || importing}
-              className="px-4 py-2 rounded-md bg-primary text-primary-foreground flex items-center gap-2 hover:opacity-90 transition-all hover:shadow-[0_0_20px_rgba(212,165,116,0.4)] disabled:opacity-50"
-            >
-              {importing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Upload className="w-4 h-4" />
-              )}
-              <span>{importing ? '导入中…' : '上传素材'}</span>
-            </button>
+            {importConfig && (
+              <button
+                onClick={handleImport}
+                disabled={!projectPath || importing}
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground flex items-center gap-2 hover:opacity-90 transition-all hover:shadow-[0_0_20px_rgba(212,165,116,0.4)] disabled:opacity-50"
+              >
+                {importing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4" />
+                )}
+                <span>{importing ? '导入中…' : importConfig.buttonLabel}</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -369,9 +611,35 @@ export function AssetManager() {
 
           {/* Main Content */}
           <main className="flex-1 flex flex-col overflow-hidden">
+            {activeTab === 'character' ? (
+              <CharacterPanel
+                projectPath={projectPath}
+                embedded
+                onCharacterCountChange={setCharacterCount}
+                generationRequestToken={characterGenerationRequestToken}
+                figureLibraryRefreshToken={figureLibraryRefreshToken}
+              />
+            ) : (
+              <>
             {/* Toolbar */}
-            <div className="px-6 py-4 border-b border-border bg-card/20 flex items-center justify-between">
-              <div className="flex items-center gap-4 flex-1 max-w-xl">
+            <div className="px-6 py-4 border-b border-border bg-card/20 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4 flex-1">
+                {activeTab === 'music' && (
+                  <div className="flex items-center gap-1 bg-secondary/50 rounded-md p-1 flex-shrink-0">
+                    {musicTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => { setMusicCategory(tab.id); setSelectedAsset(null); }}
+                        className={`px-3 py-1.5 rounded text-xs transition-colors ${
+                          musicCategory === tab.id ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
@@ -427,13 +695,20 @@ export function AssetManager() {
                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
                   <FolderOpen className="w-16 h-16 mb-4 opacity-50" />
                   <p className="text-lg mb-2">暂无素材</p>
-                  <p className="text-sm">点击右上角"上传素材"按钮开始添加</p>
+                  <p className="text-sm">点击右上角“{importConfig?.buttonLabel ?? 'AI 生成'}”开始添加</p>
                 </div>
               ) : viewMode === 'grid' ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                <div className={`grid gap-4 ${
+                  activeTab === 'scene'
+                    ? 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'
+                    : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
+                }`}>
                   {filteredAssets.map((asset) => {
                     const thumbnail = getThumbnail(asset);
                     const isSelected = selectedAsset?.path === asset.path;
+                    const progress = audioProgress[asset.path] ?? 0;
+                    const hasAudioDuration = audioDurations[asset.path] !== undefined;
+                    const hasAudioMetadataError = audioMetadataErrors[asset.path] === true;
                     return (
                       <div
                         key={asset.path}
@@ -444,7 +719,7 @@ export function AssetManager() {
                             : 'hover:ring-1 hover:ring-border'
                         }`}
                       >
-                        <div className="aspect-square bg-secondary/30 relative overflow-hidden">
+                        <div className={`${activeTab === 'scene' ? 'aspect-video' : 'aspect-square'} bg-secondary/30 relative overflow-hidden`}>
                           {thumbnail ? (
                             <img
                               src={thumbnail}
@@ -453,12 +728,20 @@ export function AssetManager() {
                               onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
                             />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center">
+                            <div className="w-full h-full flex flex-col items-center justify-center gap-4">
                               {isAudioExt(asset.extension) ? (
-                                <Music className="w-12 h-12 text-muted-foreground" />
+                                <>
+                                  <Music className="w-10 h-10 text-muted-foreground" />
+                                  <div className="w-2/3 h-8 rounded overflow-hidden bg-[repeating-linear-gradient(90deg,hsl(var(--primary)/0.25)_0_3px,transparent_3px_7px)]" />
+                                </>
                               ) : (
                                 <Image className="w-12 h-12 text-muted-foreground/30" />
                               )}
+                            </div>
+                          )}
+                          {isAudioExt(asset.extension) && progress > 0 && (
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-background/50">
+                              <div className="h-full bg-primary transition-all" style={{ width: `${Math.min(progress * 100, 100)}%` }} />
                             </div>
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
@@ -467,7 +750,7 @@ export function AssetManager() {
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handlePlayToggle(asset.path); }}
                                   className="p-2 rounded-full bg-primary/90 hover:bg-primary transition-colors"
-                                  aria-label="Toggle audio playback"
+                                  aria-label="切换音频播放"
                                 >
                                   {playingAudio === asset.path ? (
                                     <Pause className="w-3 h-3 text-primary-foreground" />
@@ -479,7 +762,7 @@ export function AssetManager() {
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleDownload(asset); }}
                                 className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors"
-                                aria-label="Download asset"
+                                aria-label="导出素材"
                               >
                                 <Download className="w-3 h-3" />
                               </button>
@@ -490,8 +773,31 @@ export function AssetManager() {
                           <h3 className="text-sm font-medium truncate mb-1">{asset.name}</h3>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <span>{asset.extension.toUpperCase()}</span>
+                            {isAudioExt(asset.extension) && (
+                              <span>{getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)}</span>
+                            )}
                             <span>{formatSize(asset.size)}</span>
                           </div>
+                          {isAudioExt(asset.extension) && !hasAudioDuration && !hasAudioMetadataError && (
+                            <audio
+                              preload="metadata"
+                              src={convertFileSrc(asset.path)}
+                              onLoadedMetadata={(event) => {
+                                const duration = getSafeAudioDuration(event.currentTarget);
+                                setAudioDurations((prev) => ({ ...prev, [asset.path]: duration }));
+                                setAudioMetadataErrors((prev) => {
+                                  if (!prev[asset.path]) return prev;
+                                  const next = { ...prev };
+                                  delete next[asset.path];
+                                  return next;
+                                });
+                              }}
+                              onError={() => {
+                                setAudioMetadataErrors((prev) => ({ ...prev, [asset.path]: true }));
+                              }}
+                              className="hidden"
+                            />
+                          )}
                         </div>
                       </div>
                     );
@@ -502,6 +808,9 @@ export function AssetManager() {
                   {filteredAssets.map((asset) => {
                     const thumbnail = getThumbnail(asset);
                     const isSelected = selectedAsset?.path === asset.path;
+                    const progress = audioProgress[asset.path] ?? 0;
+                    const hasAudioDuration = audioDurations[asset.path] !== undefined;
+                    const hasAudioMetadataError = audioMetadataErrors[asset.path] === true;
                     return (
                       <div
                         key={asset.path}
@@ -528,8 +837,33 @@ export function AssetManager() {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-medium truncate">{asset.name}</h3>
                           <p className="text-sm text-muted-foreground">
-                            {asset.category} · {asset.extension.toUpperCase()} · {formatSize(asset.size)}
+                            {formatCategory(asset.category)} · {asset.extension.toUpperCase()} · {isAudioExt(asset.extension) ? `${getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)} · ` : ''}{formatSize(asset.size)}
                           </p>
+                          {isAudioExt(asset.extension) && progress > 0 && (
+                            <div className="mt-2 h-1 rounded bg-secondary overflow-hidden">
+                              <div className="h-full bg-primary transition-all" style={{ width: `${Math.min(progress * 100, 100)}%` }} />
+                            </div>
+                          )}
+                          {isAudioExt(asset.extension) && !hasAudioDuration && !hasAudioMetadataError && (
+                            <audio
+                              preload="metadata"
+                              src={convertFileSrc(asset.path)}
+                              onLoadedMetadata={(event) => {
+                                const duration = getSafeAudioDuration(event.currentTarget);
+                                setAudioDurations((prev) => ({ ...prev, [asset.path]: duration }));
+                                setAudioMetadataErrors((prev) => {
+                                  if (!prev[asset.path]) return prev;
+                                  const next = { ...prev };
+                                  delete next[asset.path];
+                                  return next;
+                                });
+                              }}
+                              onError={() => {
+                                setAudioMetadataErrors((prev) => ({ ...prev, [asset.path]: true }));
+                              }}
+                              className="hidden"
+                            />
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">{asset.extension.toUpperCase()}</span>
@@ -537,7 +871,7 @@ export function AssetManager() {
                             <button
                               onClick={(e) => { e.stopPropagation(); handlePlayToggle(asset.path); }}
                               className="p-2 rounded-full hover:bg-secondary transition-colors"
-                              aria-label="Toggle audio playback"
+                              aria-label="切换音频播放"
                             >
                               {playingAudio === asset.path ? (
                                 <Pause className="w-4 h-4" />
@@ -553,9 +887,12 @@ export function AssetManager() {
                 </div>
               )}
             </div>
+              </>
+            )}
           </main>
 
           {/* Right Sidebar - Details */}
+          {activeTab !== 'character' && (
           <aside className="w-80 border-l border-border bg-card/30 overflow-auto">
             {selectedAsset ? (
               <div className="p-6">
@@ -594,7 +931,7 @@ export function AssetManager() {
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">类型</span>
-                        <span>{selectedAsset.category}</span>
+                        <span>{formatCategory(selectedAsset.category)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">格式</span>
@@ -607,18 +944,97 @@ export function AssetManager() {
                     </div>
                   </div>
 
-                  {/* Tags placeholder */}
+                  {activeTab === 'scene' && (
+                    <div>
+                      <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
+                        场景标签
+                      </label>
+                      <div className="space-y-3">
+                        {sceneTagGroups.map((group) => (
+                          <div key={group.title}>
+                            <div className="mb-1 text-[10px] text-muted-foreground">{group.title}</div>
+                            <div className="flex flex-wrap gap-2">
+                              {group.tags.map((tagName) => {
+                                const active = (tagsByAsset[selectedAsset.name] ?? []).includes(tagName);
+                                return (
+                                  <button
+                                    key={tagName}
+                                    type="button"
+                                    onClick={() => toggleTag(selectedAsset.name, tagName)}
+                                    className={`px-2 py-1 rounded-full text-xs border transition-colors ${
+                                      active
+                                        ? 'bg-primary/20 text-primary border-primary/30'
+                                        : 'bg-secondary/40 border-border hover:bg-secondary'
+                                    }`}
+                                  >
+                                    {tagName}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs uppercase tracking-wide text-muted-foreground">
+                        {activeTab === 'music' ? '参考音频' : '参考图'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleReferenceUpload}
+                        disabled={referenceUploading}
+                        className="px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 text-xs flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {referenceUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                        上传
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {(referencesByAsset[selectedAsset.name] ?? []).length === 0 ? (
+                        <div className="text-xs text-muted-foreground rounded-md border border-dashed border-border p-3">暂无参考资料。</div>
+                      ) : (referencesByAsset[selectedAsset.name] ?? []).map((filename) => (
+                        <div key={filename} className="flex items-center gap-2 rounded-md bg-secondary/20 p-2">
+                          {activeTab === 'music' ? (
+                            <audio controls src={convertFileSrc(`${projectPath}/game/config/references/audio/${selectedAsset.name}/${filename}`)} className="min-w-0 flex-1 h-8" />
+                          ) : (
+                            <img src={convertFileSrc(`${projectPath}/game/config/references/backgrounds/${selectedAsset.name}/${filename}`)} alt="" className="w-10 h-10 rounded object-cover bg-secondary" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-xs font-mono-family">{filename}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleReferenceRemove(filename)}
+                            className="p-1 rounded hover:bg-destructive/10"
+                            aria-label="删除参考资料"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
-                      标签
+                      剧本引用
                     </label>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => alert('标签管理即将推出')}
-                        className="px-3 py-1 rounded-full bg-secondary hover:bg-secondary/70 text-sm border border-border transition-colors flex items-center gap-1"                        aria-label="Add tags to asset"                      >
-                        <Plus className="w-3 h-3" />
-                        添加标签
-                      </button>
+                    <div className="space-y-2">
+                      {assetUsages.length === 0 ? (
+                        <div className="text-xs text-muted-foreground rounded-md border border-dashed border-border p-3">未在剧本中找到引用。</div>
+                      ) : assetUsages.map((usage, index) => (
+                        <button
+                          key={`${usage.sceneFile}-${usage.lineNumber}-${index}`}
+                          type="button"
+                          onClick={() => openUsage(usage)}
+                          className="w-full rounded-md bg-secondary/20 p-2 text-left hover:bg-primary/10 transition-colors"
+                        >
+                          <div className="text-xs text-primary">{usage.sceneFile} 第 {usage.lineNumber} 行</div>
+                          <div className="mt-1 truncate text-[10px] text-muted-foreground font-mono-family">{usage.lineContent}</div>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -627,7 +1043,7 @@ export function AssetManager() {
                   <button
                     onClick={handleRename}
                     className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all flex items-center justify-center gap-2"
-                    aria-label="Rename asset"
+                    aria-label="重命名素材"
                   >
                     <Edit3 className="w-4 h-4" />
                     重命名
@@ -635,7 +1051,7 @@ export function AssetManager() {
                   <button
                     onClick={() => handleDownload()}
                     className="w-full px-4 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center justify-center gap-2"
-                    aria-label="Copy asset file path"
+                    aria-label="复制素材文件路径"
                   >
                     <Copy className="w-4 h-4" />
                     复制路径
@@ -643,7 +1059,7 @@ export function AssetManager() {
                   <button
                     onClick={handleDelete}
                     className="w-full px-4 py-2 rounded-md bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors flex items-center justify-center gap-2"
-                    aria-label="Delete asset"
+                    aria-label="删除素材"
                   >
                     <Trash2 className="w-4 h-4" />
                     删除素材
@@ -657,11 +1073,31 @@ export function AssetManager() {
               </div>
             )}
           </aside>
+          )}
         </div>
       )}
       <audio
         ref={audioRef}
         onEnded={() => setPlayingAudio(null)}
+        onError={() => {
+          const current = playingAudio;
+          if (current) {
+            setAudioMetadataErrors((prev) => ({ ...prev, [current]: true }));
+            setError('当前音频无法解码或播放，请尝试转换为常规 MP3/WAV/Ogg 后重新导入。');
+          }
+          setPlayingAudio(null);
+        }}
+        onLoadedMetadata={(event) => {
+          if (!playingAudio) return;
+          const duration = getSafeAudioDuration(event.currentTarget);
+          setAudioDurations((prev) => ({ ...prev, [playingAudio]: duration }));
+        }}
+        onTimeUpdate={(event) => {
+          if (!playingAudio) return;
+          const { currentTime } = event.currentTarget;
+          const duration = getSafeAudioDuration(event.currentTarget);
+          setAudioProgress((prev) => ({ ...prev, [playingAudio]: duration ? currentTime / duration : 0 }));
+        }}
         className="hidden"
         aria-label="音频播放器"
       />

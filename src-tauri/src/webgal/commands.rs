@@ -33,12 +33,10 @@ pub fn save_scene(path: String, nodes: Vec<WebGalNode>) -> Result<(), String> {
 
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    fs::write(&path, text)
-        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    fs::write(&path, text).map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
     Ok(())
 }
 
@@ -51,8 +49,7 @@ pub fn list_scenes(dir: String) -> Result<Vec<String>, String> {
     }
 
     let mut scenes = Vec::new();
-    let entries = fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries = fs::read_dir(&dir).map_err(|e| format!("Failed to read directory: {}", e))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Read entry error: {}", e))?;

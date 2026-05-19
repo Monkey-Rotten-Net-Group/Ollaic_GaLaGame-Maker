@@ -5,6 +5,7 @@ import { getRuntimeInfo, installRuntime, type RuntimeInfo } from '../lib/webgal-
 
 export interface AppSettings {
   defaultProjectDir: string;
+  runtimeTemplateDir: string;
   autoSaveInterval: number; // seconds, 0 = disabled
   language: 'zh-CN' | 'en';
   theme: 'dark' | 'light';
@@ -14,6 +15,7 @@ const STORAGE_KEY = 'webgal-app-settings';
 
 const DEFAULTS: AppSettings = {
   defaultProjectDir: '',
+  runtimeTemplateDir: '',
   autoSaveInterval: 30,
   language: 'zh-CN',
   theme: 'dark',
@@ -37,9 +39,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onOpenAiSettings?: () => void;
+  onApplyRuntimeTemplateDir?: (dir: string) => Promise<void> | void;
 }
 
-export function AppSettingsDialog({ open, onClose, onOpenAiSettings }: Props) {
+export function AppSettingsDialog({
+  open,
+  onClose,
+  onOpenAiSettings,
+  onApplyRuntimeTemplateDir,
+}: Props) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,10 +91,21 @@ export function AppSettingsDialog({ open, onClose, onOpenAiSettings }: Props) {
     if (dir) update({ defaultProjectDir: dir });
   };
 
-  const handleSave = () => {
+  const handlePickTemplateDir = async () => {
+    const dir = await openDialog({
+      title: '选择 WebGAL 预览模板目录',
+      directory: true,
+    });
+    if (dir) update({ runtimeTemplateDir: dir });
+  };
+
+  const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
+      if (settings.runtimeTemplateDir.trim() && onApplyRuntimeTemplateDir) {
+        await onApplyRuntimeTemplateDir(settings.runtimeTemplateDir.trim());
+      }
       saveAppSettings(settings);
       onClose();
     } catch (e) {
@@ -132,6 +151,27 @@ export function AppSettingsDialog({ open, onClose, onOpenAiSettings }: Props) {
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               创建新项目时默认选择此目录
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-1.5 font-mono-family">
+              预览模板目录
+            </label>
+            <div className="flex gap-2">
+              <div className="flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family">
+                {settings.runtimeTemplateDir || '（未设置）'}
+              </div>
+              <button
+                onClick={handlePickTemplateDir}
+                className="px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors border border-border"
+                aria-label="选择预览模板目录"
+              >
+                <FolderOpen className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              请选择 WebGAL 的 `WebGAL_Template` 目录，用于浏览器预览运行时。
             </p>
           </div>
 

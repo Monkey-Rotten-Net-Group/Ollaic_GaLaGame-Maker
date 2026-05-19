@@ -98,6 +98,11 @@ export async function setRuntimeProject(projectPath: string | null): Promise<voi
   return invoke<void>('set_runtime_project', { projectPath });
 }
 
+/** Update the WebGAL template directory used by the runtime preview server. */
+export async function setRuntimeTemplateDir(templateDir: string): Promise<void> {
+  return invoke<void>('set_runtime_template_dir', { templateDir });
+}
+
 /** Broadcast a debug-protocol message over the runtime WebSocket bus. */
 export async function runtimeBroadcast(message: string): Promise<void> {
   return invoke<void>('runtime_broadcast', { message });

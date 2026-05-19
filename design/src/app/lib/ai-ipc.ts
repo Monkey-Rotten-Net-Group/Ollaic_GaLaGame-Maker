@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+export { extractWebGalJson, webGalJsonToScript } from './webgal-schema';
+export type { WebGalScene } from './webgal-schema';
 
 export type AiProvider =
   | 'openai'
@@ -18,6 +20,14 @@ export interface AiConfig {
   api_key: string;
   base_url: string;
   system_prompt: string;
+}
+
+export interface AiValidationResult {
+  ok: boolean;
+  provider: string;
+  model: string;
+  endpoint: string;
+  message: string;
 }
 
 export interface AiChatMessage {
@@ -43,6 +53,10 @@ export async function getDefaultSystemPrompt(): Promise<string> {
   return invoke<string>('default_ai_system_prompt');
 }
 
+export async function validateAiConfig(config: AiConfig): Promise<AiValidationResult> {
+  return invoke<AiValidationResult>('validate_ai_config', { config });
+}
+
 export interface StreamHandlers {
   onChunk?: (content: string) => void;
   onDone?: () => void;
@@ -50,11 +64,6 @@ export interface StreamHandlers {
   onStart?: () => void;
 }
 
-/**
- * Start a streaming chat. Subscribes to the per-request event channel,
- * dispatches handlers, and auto-unlistens on done/error.
- * Returns a function to manually cancel listening.
- */
 export async function aiChatStream(
   messages: AiChatMessage[],
   handlers: StreamHandlers,

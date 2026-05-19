@@ -27,12 +27,10 @@ fn load_doc(project_path: &str) -> Result<CharactersDocument, String> {
 fn save_doc(project_path: &str, doc: &CharactersDocument) -> Result<(), String> {
     let path = characters_path(project_path);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config dir: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {}", e))?;
     }
     let json = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+    fs::write(&path, json).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
 fn make_id() -> String {
@@ -123,10 +121,7 @@ pub fn list_character_names(project_path: String) -> Result<Vec<CharacterRef>, S
 
 /// Bulk-save the entire character list (used after re-ordering or batch edits).
 #[tauri::command]
-pub fn save_characters(
-    project_path: String,
-    characters: Vec<Character>,
-) -> Result<(), String> {
+pub fn save_characters(project_path: String, characters: Vec<Character>) -> Result<(), String> {
     let doc = CharactersDocument {
         version: 1,
         characters,

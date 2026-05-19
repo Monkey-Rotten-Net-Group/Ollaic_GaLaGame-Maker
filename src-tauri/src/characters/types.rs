@@ -39,6 +39,12 @@ pub struct Character {
     /// Personality traits.
     #[serde(default)]
     pub personality: String,
+    /// Stable image-generation prompt prefix for visual consistency.
+    #[serde(default)]
+    pub consistency_prompt: Option<String>,
+    /// Uploaded subject reference images stored in game/config/references/{characterId}/.
+    #[serde(default)]
+    pub reference_images: Vec<String>,
     /// Moral / faction stance: e.g. "正义", "混沌", "中立", "邪恶".
     #[serde(default)]
     pub stance: String,

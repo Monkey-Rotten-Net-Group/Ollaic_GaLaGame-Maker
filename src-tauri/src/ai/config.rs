@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 const CONFIG_DIR: &str = "ciallo";
 const CONFIG_FILE: &str = "ai.json";
+const LOG_FILE: &str = "ai-log.jsonl";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -28,19 +29,38 @@ impl Default for AiConfig {
 }
 
 pub fn default_system_prompt() -> String {
-    r#"你是 WebGAL 视觉小说脚本的创作助手。WebGAL 脚本由若干指令组成，每行一条，以 `;` 结尾。常用指令：
+    r##"You are a WebGAL visual novel script assistant. WebGAL scripts are line-based and each command ends with `;`.
 
-- 旁白：`:旁白文本;`
-- 对话：`角色名:台词;`
-- 切换背景：`changeBg:bg_file.webp -next;`
-- 切换立绘：`changeFigure:char.webp -left -next;`（位置 -left/-center/-right，可省略）
-- 播放 BGM：`bgm:track.mp3;`
-- 选项：`choose:选项A:branch_a.txt|选项B:branch_b.txt;`
-- 跳转场景：`changeScene:next.txt;`
-- 注释行以 `;` 开头
+Common commands:
+- Narration: `:Narration text;`
+- Dialogue: `Character:Dialogue text;`
+- Background: `changeBg:bg_file.webp -next;`
+- Figure: `changeFigure:char.webp -left -next;` with `-left`, `-center`, or `-right`.
+- BGM: `bgm:track.mp3;`
+- Choice: `choose:Choice A:branch_a.txt|Choice B:branch_b.txt;`
+- Scene jump: `changeScene:next.txt;`
+- Comment lines start with `;`.
 
-请根据用户需求生成符合上述语法的 WebGAL 片段，输出时只给出脚本内容（必要时附简短说明），保持每行以 `;` 结尾。"#
-        .to_string()
+When the user asks you to generate a scene, dialogue, branch, or continuation that should be inserted into the editor, include a structured JSON block using this exact fence:
+
+```webgal-json
+{
+  "nodes": [
+    { "type": "changeBg", "file": "background.webp", "transition": "next" },
+    { "type": "changeFigure", "file": "character.webp", "position": "left", "transition": "next" },
+    { "type": "dialogue", "character": "Character", "text": "Line text" },
+    { "type": "narration", "text": "Narration text" },
+    { "type": "bgm", "file": "music.mp3" },
+    { "type": "choice", "options": [{ "label": "Choice A", "scene": "branch_a.txt" }] },
+    { "type": "changeScene", "scene": "next.txt" },
+    { "type": "comment", "text": "optional note" }
+  ]
+}
+```
+
+For ordinary conversation, answer naturally without JSON. Keep JSON valid and use only these node types: dialogue, narration, changeBg, changeFigure, bgm, choice, changeScene, comment.
+"##
+    .to_string()
 }
 
 fn config_path() -> Option<PathBuf> {
@@ -58,10 +78,26 @@ pub fn load_config() -> AiConfig {
 }
 
 pub fn save_config(config: &AiConfig) -> Result<(), String> {
-    let path = config_path().ok_or_else(|| "无法定位用户配置目录".to_string())?;
+    let path = config_path().ok_or_else(|| "Unable to locate user config directory".to_string())?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config directory: {e}"))?;
     }
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| format!("写入配置失败: {e}"))
+    fs::write(&path, json).map_err(|e| format!("Failed to write config: {e}"))
+}
+
+pub fn append_log_line(line: &str) -> Result<(), String> {
+    let dir = dirs::config_dir()
+        .ok_or_else(|| "Unable to locate user config directory".to_string())?
+        .join(CONFIG_DIR);
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create log directory: {e}"))?;
+    let path = dir.join(LOG_FILE);
+
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("Failed to open log file: {e}"))?;
+    writeln!(file, "{line}").map_err(|e| format!("Failed to write log: {e}"))
 }

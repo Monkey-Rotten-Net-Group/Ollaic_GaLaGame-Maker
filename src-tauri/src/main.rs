@@ -22,9 +22,23 @@ async fn set_runtime_project(
     server: tauri::State<'_, RuntimeServer>,
     project_path: Option<String>,
 ) -> Result<(), String> {
-    server
-        .set_project(project_path.map(PathBuf::from))
-        .await;
+    server.set_project(project_path.map(PathBuf::from)).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_runtime_template_dir(
+    server: tauri::State<'_, RuntimeServer>,
+    template_dir: String,
+) -> Result<(), String> {
+    let path = PathBuf::from(template_dir);
+    if !path.exists() {
+        return Err(format!(
+            "WebGAL template directory not found: {}",
+            path.display()
+        ));
+    }
+    server.set_template_dir(path).await;
     Ok(())
 }
 
@@ -148,6 +162,7 @@ fn main() {
             // Runtime preview server
             get_runtime_url,
             set_runtime_project,
+            set_runtime_template_dir,
             runtime_broadcast,
             open_in_browser,
             get_runtime_info,
@@ -163,6 +178,7 @@ fn main() {
             assets::commands::import_asset,
             assets::commands::delete_asset,
             assets::commands::rename_asset,
+            assets::commands::find_asset_usages,
             // Characters
             characters::commands::list_characters,
             characters::commands::get_character,

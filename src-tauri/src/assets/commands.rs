@@ -11,16 +11,37 @@ pub struct AssetInfo {
     pub extension: String,
 }
 
-fn category_to_dir(category: &str) -> Option<&'static str> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetUsage {
+    pub scene_file: String,
+    pub line_number: usize,
+    pub line_content: String,
+    pub command: String,
+}
+
+fn category_to_dir(category: &str) -> Option<String> {
     match category {
-        "scene" | "background" => Some("background"),
-        "character" | "figure" => Some("figure"),
-        "music" | "bgm" => Some("bgm"),
-        "sfx" => Some("sfx"),
-        "vocal" => Some("vocal"),
-        "video" => Some("video"),
-        "animation" => Some("animation"),
-        "tex" => Some("tex"),
+        "scene" | "background" => Some("background".to_string()),
+        "character" | "figure" => Some("figure".to_string()),
+        "music" | "bgm" => Some("bgm".to_string()),
+        "sfx" => Some("sfx".to_string()),
+        "vocal" => Some("vocal".to_string()),
+        "video" => Some("video".to_string()),
+        "animation" => Some("animation".to_string()),
+        "tex" => Some("tex".to_string()),
+        "reference" => Some("config/references".to_string()),
+        _ if category.starts_with("reference/") => {
+            let tail = category.trim_start_matches("reference/");
+            if tail
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == ".." || part.contains('\\'))
+            {
+                None
+            } else {
+                Some(format!("config/references/{tail}"))
+            }
+        }
         _ => None,
     }
 }
@@ -28,8 +49,7 @@ fn category_to_dir(category: &str) -> Option<&'static str> {
 fn is_media_file(name: &str) -> bool {
     let lower = name.to_lowercase();
     let exts = [
-        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
-        ".mp3", ".ogg", ".wav", ".flac", ".aac",
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".mp3", ".ogg", ".wav", ".flac", ".aac",
         ".mp4", ".webm", ".avi",
     ];
     exts.iter().any(|e| lower.ends_with(e))
@@ -75,9 +95,8 @@ fn list_dir_files(dir: &PathBuf) -> Result<Vec<AssetInfo>, String> {
 /// `category` maps to one of the `game/` subdirs: background, figure, bgm, vocal, video, animation, tex.
 #[tauri::command]
 pub fn list_assets(project_path: String, category: String) -> Result<Vec<AssetInfo>, String> {
-    let subdir = category_to_dir(&category)
-        .ok_or_else(|| format!("未知素材类型: {category}"))?;
-    let dir = PathBuf::from(&project_path).join("game").join(subdir);
+    let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
+    let dir = PathBuf::from(&project_path).join("game").join(&subdir);
 
     if !dir.exists() {
         return Ok(Vec::new());
@@ -93,7 +112,16 @@ pub fn list_assets(project_path: String, category: String) -> Result<Vec<AssetIn
 /// List assets across all subdirectories (used for "all" view).
 #[tauri::command]
 pub fn list_all_assets(project_path: String) -> Result<Vec<AssetInfo>, String> {
-    let dirs = ["background", "figure", "bgm", "sfx", "vocal", "video", "animation", "tex"];
+    let dirs = [
+        "background",
+        "figure",
+        "bgm",
+        "sfx",
+        "vocal",
+        "video",
+        "animation",
+        "tex",
+    ];
     let mut all = Vec::new();
     for d in &dirs {
         let dir = PathBuf::from(&project_path).join("game").join(d);
@@ -116,11 +144,9 @@ pub fn import_asset(
     project_path: String,
     category: String,
 ) -> Result<AssetInfo, String> {
-    let subdir = category_to_dir(&category)
-        .ok_or_else(|| format!("未知素材类型: {category}"))?;
-    let target_dir = PathBuf::from(&project_path).join("game").join(subdir);
-    fs::create_dir_all(&target_dir)
-        .map_err(|e| format!("创建目录失败: {e}"))?;
+    let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
+    let target_dir = PathBuf::from(&project_path).join("game").join(&subdir);
+    fs::create_dir_all(&target_dir).map_err(|e| format!("创建目录失败: {e}"))?;
 
     let source = PathBuf::from(&source_path);
     let filename = source
@@ -157,9 +183,12 @@ pub fn import_asset(
 
 /// Delete an asset file from the project.
 #[tauri::command]
-pub fn delete_asset(project_path: String, category: String, filename: String) -> Result<(), String> {
-    let subdir = category_to_dir(&category)
-        .ok_or_else(|| format!("未知素材类型: {category}"))?;
+pub fn delete_asset(
+    project_path: String,
+    category: String,
+    filename: String,
+) -> Result<(), String> {
+    let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let path = PathBuf::from(&project_path)
         .join("game")
         .join(subdir)
@@ -190,15 +219,14 @@ pub fn rename_asset(
     old_name: String,
     new_name: String,
 ) -> Result<AssetInfo, String> {
-    let subdir = category_to_dir(&category)
-        .ok_or_else(|| format!("未知素材类型: {category}"))?;
+    let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let old_path = PathBuf::from(&project_path)
         .join("game")
-        .join(subdir)
+        .join(&subdir)
         .join(&old_name);
     let new_path = PathBuf::from(&project_path)
         .join("game")
-        .join(subdir)
+        .join(&subdir)
         .join(&new_name);
 
     if !old_path.exists() {
@@ -224,6 +252,70 @@ pub fn rename_asset(
         size: metadata.len(),
         extension: ext,
     })
+}
+
+#[tauri::command]
+pub async fn find_asset_usages(
+    project_path: String,
+    filename: String,
+) -> Result<Vec<AssetUsage>, String> {
+    let scene_dir = PathBuf::from(&project_path).join("game").join("scene");
+    if !scene_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut usages = Vec::new();
+    let commands = [
+        "changeBg",
+        "changeFigure",
+        "bgm",
+        "playEffect",
+        "vocal",
+        "miniAvatar",
+        "changeScene",
+    ];
+
+    let entries = fs::read_dir(&scene_dir)
+        .map_err(|e| format!("无法读取场景目录 {}: {e}", scene_dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("txt") {
+            continue;
+        }
+
+        let scene_file = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("无法读取场景文件 {}: {e}", path.display()))?;
+
+        for (line_index, line) in content.lines().enumerate() {
+            if !line.contains(&filename) {
+                continue;
+            }
+            let command = commands
+                .iter()
+                .find(|cmd| line.contains(&format!("{cmd}:")))
+                .unwrap_or(&"unknown")
+                .to_string();
+            usages.push(AssetUsage {
+                scene_file: scene_file.clone(),
+                line_number: line_index + 1,
+                line_content: line.trim().to_string(),
+                command,
+            });
+        }
+    }
+
+    usages.sort_by(|a, b| {
+        a.scene_file
+            .cmp(&b.scene_file)
+            .then(a.line_number.cmp(&b.line_number))
+    });
+    Ok(usages)
 }
 
 fn unique_path(path: PathBuf) -> PathBuf {

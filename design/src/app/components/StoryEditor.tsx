@@ -3,8 +3,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import {
-  Sparkles, Save, Play, Image, ArrowLeft, Send,
-  Upload, Download, FileText, FolderOpen, FilePlus, Check, Loader2, SlidersHorizontal, Users,
+  Sparkles, Save, Play, Settings, Image, ArrowLeft, Send,
+  Upload, Download, FileText, FolderOpen, FilePlus, Check, Loader2, SlidersHorizontal,
   Undo2, Redo2, Package,
 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -13,16 +13,20 @@ import { FlowCanvas } from './FlowCanvas';
 import { DetailPanel } from './DetailPanel';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
-import { CharacterPanel } from './CharacterPanel';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import {
   parseScene, serializeScene, saveScene, loadScene,
   openProject, getScenePath, createScene,
   exportProject,
-  setRuntimeProject, getRuntimeUrl, jumpToSentence, openInBrowser,
+  setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
-import { aiChatStream, type AiChatMessage } from '../lib/ai-ipc';
+import {
+  aiChatStream,
+  extractWebGalJson,
+  webGalJsonToScript,
+  type AiChatMessage,
+} from '../lib/ai-ipc';
 import { listCharacterNames, listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
 
@@ -34,15 +38,15 @@ interface AiMessage {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-const DEMO_SCRIPT = `; 序章 —— 宁静的午后
+const DEMO_SCRIPT = `; 序章 - 安静的午后
 changeBg:afternoon_park.webp -next;
 bgm:peaceful_afternoon.mp3;
 changeFigure:girl_smile.webp -left -next;
 setAnimation:enter-from-left -target=fig-left -next;
 未知少女:你好，我是……;
 未知少女:你也是这个学校的学生吗？;
-:这时候，一阵微风吹过，带来了樱花的香气;
-choose:友好地打招呼:branch_friendly.txt|保持沉默:branch_silent.txt;
+:一阵微风穿过庭院。;
+choose:打招呼:branch_friendly.txt|保持沉默:branch_silent.txt;
 `;
 
 export function StoryEditor() {
@@ -70,14 +74,13 @@ export function StoryEditor() {
     {
       id: '1',
       role: 'assistant',
-      content: '你好！我是 AI 创作助手。我可以帮你生成 WebGAL 脚本——对话、场景切换、选项分支等。请告诉我你需要什么帮助？',
+      content: '你好，我是 AI 创作助手。可以帮你生成 WebGAL 对话、场景切换、分支选项，并输出可插入脚本的 webgal-json 结构。',
     },
   ]);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const [rightTab, setRightTab] = useState<'ai' | 'characters'>('ai');
   const [characterNames, setCharacterNames] = useState<string[]>([]);
   const [characterColors, setCharacterColors] = useState<Record<string, string>>({});
   const [charactersForAi, setCharactersForAi] = useState<Character[]>([]);
@@ -95,9 +98,9 @@ export function StoryEditor() {
       if (c.stance) parts.push(`  立场: ${c.stance}`);
       if (c.keywords.length > 0) parts.push(`  关键词: ${c.keywords.join(', ')}`);
       if (c.description) parts.push(`  简介: ${c.description}`);
-      if (c.dialogueStyle) parts.push(`  口吻风格: ${c.dialogueStyle}`);
+      if (c.dialogueStyle) parts.push(`  对话风格: ${c.dialogueStyle}`);
       if (c.relations.length > 0) {
-        const rels = c.relations.map(r => `${r.relationType}(→${r.targetId})`).join(', ');
+        const rels = c.relations.map(r => `${r.relationType}->${r.targetId}`).join(', ');
         if (rels) parts.push(`  关系: ${rels}`);
       }
       return parts.join('\n');
@@ -117,6 +120,11 @@ export function StoryEditor() {
   useEffect(() => {
     const settings = loadAppSettings();
     setAutoSaveInterval(settings.autoSaveInterval);
+    if (settings.runtimeTemplateDir) {
+      setRuntimeTemplateDir(settings.runtimeTemplateDir).catch((e) => {
+        console.warn('[runtime] failed to set template dir from app settings:', e);
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -162,7 +170,7 @@ export function StoryEditor() {
             setScriptSource(DEMO_SCRIPT);
           }
         } catch {
-          // Stored path no longer valid — fall back to demo
+          // Stored path no longer valid, fall back to demo.
           const parsed = await parseScene(DEMO_SCRIPT);
           setNodes(parsed);
         }
@@ -184,7 +192,7 @@ export function StoryEditor() {
           setCharactersForAi([]);
         }
       } else {
-        // No project path — just load demo script
+        // No project path, just load demo script.
         const parsed = await parseScene(DEMO_SCRIPT);
         setNodes(parsed);
       }
@@ -195,7 +203,7 @@ export function StoryEditor() {
   }, [projectId, searchParams]);
 
   // ---------------------------------------------------------------------------
-  // Sync nodes → script text
+  // 同步节点到脚本文本
   // ---------------------------------------------------------------------------
   const syncScript = useCallback(async (nextNodes: WebGalNode[]) => {
     try {
@@ -313,7 +321,7 @@ export function StoryEditor() {
         connections: [],
       };
       if (type === 'dialogue') newNode.character = '';
-      if (type === 'choose') newNode.choices = [{ text: '选项1', target: '' }];
+      if (type === 'choose') newNode.choices = [{ text: '选项 1', target: '' }];
       if (type === 'intro') newNode.introLines = [''];
       if (type === 'setVar') { newNode.varName = ''; newNode.varValue = ''; }
 
@@ -347,7 +355,7 @@ export function StoryEditor() {
         const scenePath = await getScenePath(projectPath, currentSceneName);
         await saveScene(scenePath, nodes);
       } else {
-        // No project open — prompt user to pick a save location
+        // No project open, prompt user to pick a save location.
         const selected = await saveDialog({
           title: '保存场景文件',
           defaultPath: currentSceneName,
@@ -501,7 +509,7 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   const handleNewScene = useCallback(async () => {
     if (!projectPath) return;
-    const name = prompt('新场景文件名 (不含 .txt 后缀):');
+    const name = prompt('新场景文件名（不含 .txt）:');
     if (!name) return;
     try {
       await createScene(projectPath, name);
@@ -562,7 +570,7 @@ export function StoryEditor() {
     if (dirty) await handleSave();
 
     const dest = await saveDialog({
-      title: '选择导出目录',
+      title: 'Select export directory',
       directory: true,
     });
     if (!dest) return;
@@ -570,7 +578,7 @@ export function StoryEditor() {
     try {
       const result = await exportProject(projectPath, dest, false);
       if (result.success) {
-        let msg = `导出成功！游戏已保存至 ${dest}`;
+        let msg = `导出成功。游戏已保存到 ${dest}`;
         if (result.warnings.length > 0) {
           msg += `\n\n警告:\n${result.warnings.join('\n')}`;
         }
@@ -655,7 +663,7 @@ export function StoryEditor() {
           setAiMessages(prev =>
             prev.map(m =>
               m.id === assistantId && !m.content
-                ? { ...m, content: `（出错：${msg}）` }
+                ? { ...m, content: `（错误：${msg}）` }
                 : m,
             ),
           );
@@ -669,6 +677,42 @@ export function StoryEditor() {
   }, [aiBusy, aiMessages, buildAiPayload, buildCharacterContext, charactersForAi]);
 
   const handleAiSend = () => { void sendAiPrompt(aiInput); };
+
+  const handleInsertAiScene = useCallback(async (content: string) => {
+    const scene = extractWebGalJson(content);
+    if (!scene) return;
+    try {
+      const script = webGalJsonToScript(scene);
+      const parsed = await parseScene(script);
+      setNodes((prev) => {
+        pushHistory(prev);
+        const lastNode = prev[prev.length - 1];
+        const startX = lastNode ? lastNode.position.x : 100;
+        const startY = lastNode ? lastNode.position.y + 130 : 60;
+        const imported = parsed.map((node, index) => ({
+          ...node,
+          id: `ai-${Date.now()}-${index}`,
+          position: { x: startX, y: startY + index * 110 },
+        }));
+        const next = [...prev, ...imported];
+        if (lastNode && imported.length > 0) {
+          const lastIndex = next.findIndex((node) => node.id === lastNode.id);
+          if (lastIndex >= 0) {
+            next[lastIndex] = {
+              ...next[lastIndex],
+              connections: [...next[lastIndex].connections, imported[0].id],
+            };
+          }
+        }
+        syncScript(next);
+        return next;
+      });
+      setShowScript(false);
+      markDirty();
+    } catch (e) {
+      setAiError(String(e));
+    }
+  }, [markDirty, pushHistory, syncScript]);
 
   const handleQuickAction = (text: string) => {
     if (aiBusy) return;
@@ -686,8 +730,7 @@ export function StoryEditor() {
     );
   }
 
-  const gameName = projectInfo?.config?.Game_name
-    || (projectId === '1' ? '苍穹之下的誓言' : projectId === '2' ? '雨夜侦探' : projectId === '3' ? '夏日回忆' : '新项目');
+  const gameName = projectInfo?.config?.Game_name || `项目 ${projectId ?? ''}`;
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -750,7 +793,7 @@ export function StoryEditor() {
                 aria-label="打开 WebGAL 项目文件夹"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
-                <span>打开项目</span>
+                <span>打开</span>
               </button>
               <button
                 onClick={handleImport}
@@ -787,19 +830,14 @@ export function StoryEditor() {
                 <Image className="w-3.5 h-3.5" />
                 <span>素材库</span>
               </button>
-              {projectPath && (
-                <button
-                  onClick={() => setRightTab(prev => prev === 'characters' ? 'ai' : 'characters')}
-                  className={`px-3 py-1.5 rounded-md transition-colors flex items-center gap-2 text-sm ${
-                    rightTab === 'characters'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary hover:bg-secondary/70'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>人物</span>
-                </button>
-              )}
+              <button
+                onClick={() => setAiSettingsOpen(true)}
+                className="p-2 rounded-md hover:bg-secondary/50 transition-colors"
+                title="AI 设置"
+                aria-label="AI 设置"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => setAppSettingsOpen(true)}
                 className="p-2 rounded-md hover:bg-secondary/50 transition-colors"
@@ -832,17 +870,17 @@ export function StoryEditor() {
                 <button
                   onClick={handleExportProject}
                   className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
-                  title="导出为 WebGAL 可运行包"
+                  title="导出可运行的 WebGAL 包"
                   aria-label="导出项目"
                 >
                   <Package className="w-3.5 h-3.5" />
-                  <span>导出</span>
+                  <span>打包</span>
                 </button>
               )}
               <button
                 onClick={handleOpenRuntime}
                 className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
-                title="在浏览器中打开 WebGAL 预览窗口"
+                title="在浏览器中打开 WebGAL 预览"
                 aria-label="打开预览窗口"
               >
                 <Play className="w-3.5 h-3.5" />
@@ -912,7 +950,7 @@ export function StoryEditor() {
             <div className="flex-1 flex flex-col bg-background/50">
               <div className="p-3 border-b border-border flex items-center justify-between">
                 <span className="text-sm text-muted-foreground font-mono-family">
-                  WebGAL 脚本编辑器 — {currentSceneName}
+                  WebGAL 脚本编辑器 - {currentSceneName}
                 </span>
                 <button
                   onClick={handleApplyScript}
@@ -926,7 +964,7 @@ export function StoryEditor() {
                 onChange={(e) => setScriptSource(e.target.value)}
                 className="flex-1 p-4 bg-transparent resize-none focus:outline-none text-sm leading-relaxed font-mono-family"
                 spellCheck={false}
-                aria-label="WebGAL 脚本编辑"
+                aria-label="WebGAL 脚本编辑器"
               />
             </div>
           ) : (
@@ -939,47 +977,8 @@ export function StoryEditor() {
             />
           )}
 
-          {/* Right Panel - Tabbed: AI Chat / Characters */}
+          {/* Right Panel - AI Chat */}
           <div className="w-80 border-l border-border bg-card/30 backdrop-blur-sm flex flex-col">
-            {/* Tabs */}
-            <div className="flex border-b border-border">
-              <button
-                onClick={() => setRightTab('ai')}
-                className={`flex-1 py-2.5 text-xs font-medium transition-all border-b-2 ${
-                  rightTab === 'ai'
-                    ? 'border-primary text-primary bg-primary/5'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                <span className="flex items-center justify-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  AI 助手
-                </span>
-              </button>
-              <button
-                onClick={() => setRightTab('characters')}
-                className={`flex-1 py-2.5 text-xs font-medium transition-all border-b-2 ${
-                  rightTab === 'characters'
-                    ? 'border-primary text-primary bg-primary/5'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                <span className="flex items-center justify-center gap-1.5">
-                  <Users className="w-3.5 h-3.5" />
-                  人物
-                </span>
-              </button>
-            </div>
-
-            {rightTab === 'characters' && projectPath ? (
-              <CharacterPanel
-                projectPath={projectPath}
-                onClose={() => setRightTab('ai')}
-              />
-            ) : (
-              <>
             <div className="p-4 border-b border-border flex items-center gap-3">
               <div className="p-2 rounded-full bg-primary/20">
                 <Sparkles className="w-4 h-4 text-primary" />
@@ -992,12 +991,12 @@ export function StoryEditor() {
             {/* Quick Actions */}
             <div className="p-3 border-b border-border">
               <div className="grid grid-cols-2 gap-2">
-                {[
-                  { label: '生成对话', text: '请生成一段两位角色的日常对话，至少 6 行，包含称呼。' },
-                  { label: '生成场景', text: '请生成一个新场景的开头：换背景、播放 BGM、加入立绘并写一段开场旁白。' },
-                  { label: '生成分支', text: '请基于当前剧情写一个 choose 选项，包含 2-3 个分支并指向对应 .txt 文件。' },
-                  { label: '续写剧情', text: '请基于当前已有的剧情上下文继续往下写一段 8 行左右的对话。' },
-                ].map((a) => (
+                  {[
+                    { label: '生成对话', text: '请生成一段两位角色的日常对话，至少 6 行，并附带 webgal-json 结构块。' },
+                    { label: '生成场景', text: '请生成一个开场场景，包含背景、BGM、立绘入场、旁白，并附带 webgal-json 结构块。' },
+                    { label: '生成分支', text: '请生成一个 choose 分支，包含 2-3 个选项，并附带 webgal-json 结构块。' },
+                    { label: '续写剧情', text: '请基于当前上下文续写约 8 行对话，并附带 webgal-json 结构块。' },
+                  ].map((a) => (
                   <button
                     key={a.label}
                     onClick={() => handleQuickAction(a.text)}
@@ -1014,10 +1013,11 @@ export function StoryEditor() {
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {aiMessages.map((msg) => {
                 const isStreaming = aiBusy && aiStreamingIdRef.current === msg.id;
+                const webGalScene = msg.role === 'assistant' ? extractWebGalJson(msg.content) : null;
                 return (
                   <div
                     key={msg.id}
-                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                   >
                     <div
                       className={`max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap break-words ${
@@ -1026,9 +1026,17 @@ export function StoryEditor() {
                           : 'bg-secondary border border-border'
                       } ${msg.role === 'assistant' ? 'font-mono-family' : 'font-body-family'}`}
                     >
-                      {msg.content || (isStreaming ? '正在思考…' : '')}
+                      {msg.content || (isStreaming ? '思考中...' : '')}
                       {isStreaming && msg.content && <span className="inline-block w-2 h-3 ml-1 bg-current align-middle animate-pulse" />}
                     </div>
+                    {webGalScene && (
+                      <button
+                        onClick={() => handleInsertAiScene(msg.content)}
+                        className="mt-2 px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs border border-primary/30"
+                      >
+                        插入到脚本
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1059,8 +1067,8 @@ export function StoryEditor() {
                 }}
                 disabled={aiBusy}
                 className="w-full h-20 bg-input-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none disabled:opacity-60"
-                placeholder={aiBusy ? '正在生成中…' : '输入你的创作想法...'}
-                aria-label="AI 创作输入框"
+                placeholder={aiBusy ? '生成中...' : '输入你的创作想法...'}
+                aria-label="AI 创作输入"
               />
               {aiBusy ? (
                 <button
@@ -1081,8 +1089,6 @@ export function StoryEditor() {
                 </button>
               )}
             </div>
-              </>
-            )}
           </div>
         </div>
 
@@ -1095,6 +1101,7 @@ export function StoryEditor() {
           open={appSettingsOpen}
           onClose={() => setAppSettingsOpen(false)}
           onOpenAiSettings={() => setAiSettingsOpen(true)}
+          onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />
 
       </div>

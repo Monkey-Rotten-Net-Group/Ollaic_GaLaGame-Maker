@@ -44,10 +44,7 @@ fn parse_flags(raw: &str) -> ParsedContent {
 
     for token in raw.split_whitespace() {
         // A flag starts with '-' followed by a letter
-        if token.len() >= 2
-            && token.starts_with('-')
-            && token.as_bytes()[1].is_ascii_alphabetic()
-        {
+        if token.len() >= 2 && token.starts_with('-') && token.as_bytes()[1].is_ascii_alphabetic() {
             in_content = false;
         }
 
@@ -319,9 +316,7 @@ fn build_command_node(
         }
 
         CommandType::Intro => {
-            node.intro_lines = Some(
-                content.split('|').map(|s| s.trim().to_string()).collect(),
-            );
+            node.intro_lines = Some(content.split('|').map(|s| s.trim().to_string()).collect());
         }
 
         CommandType::Bgm | CommandType::PlayEffect | CommandType::PlayVideo => {

@@ -8,6 +8,13 @@ export interface AssetInfo {
   extension: string;
 }
 
+export interface AssetUsage {
+  sceneFile: string;
+  lineNumber: number;
+  lineContent: string;
+  command: string;
+}
+
 /** List media files in a project's asset subdirectory. */
 export async function listAssets(projectPath: string, category: string): Promise<AssetInfo[]> {
   return invoke<AssetInfo[]>('list_assets', { projectPath, category });
@@ -44,4 +51,12 @@ export async function renameAsset(
   newName: string,
 ): Promise<AssetInfo> {
   return invoke<AssetInfo>('rename_asset', { projectPath, category, oldName, newName });
+}
+
+/** Find scene-script lines that reference an asset filename. */
+export async function findAssetUsages(
+  projectPath: string,
+  filename: string,
+): Promise<AssetUsage[]> {
+  return invoke<AssetUsage[]>('find_asset_usages', { projectPath, filename });
 }

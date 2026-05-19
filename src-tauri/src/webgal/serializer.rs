@@ -5,7 +5,16 @@ fn serialize_flags(node: &WebGalNode) -> String {
 
     // Pass through custom flags (skip ones we reconstruct below)
     let managed_keys = [
-        "left", "right", "id", "next", "when", "volume", "title", "buttonText", "target", "name",
+        "left",
+        "right",
+        "id",
+        "next",
+        "when",
+        "volume",
+        "title",
+        "buttonText",
+        "target",
+        "name",
     ];
     for flag in &node.flags {
         if managed_keys.contains(&flag.key.as_str()) {
@@ -92,12 +101,12 @@ fn serialize_node(node: &WebGalNode) -> String {
         CommandType::Narrator => format!(":{}{};", node.content, flags),
 
         CommandType::Intro => {
-            let lines = node
-                .intro_lines
-                .as_deref()
-                .unwrap_or(&[])
-                .join("|");
-            let text = if lines.is_empty() { &node.content } else { &lines };
+            let lines = node.intro_lines.as_deref().unwrap_or(&[]).join("|");
+            let text = if lines.is_empty() {
+                &node.content
+            } else {
+                &lines
+            };
             format!("intro:{}{};", text, flags)
         }
 
