@@ -159,8 +159,12 @@ export function AppSettingsDialog({
               预览模板目录
             </label>
             <div className="flex gap-2">
-              <div className="flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family">
-                {settings.runtimeTemplateDir || '（未设置）'}
+              <div
+                className="flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family"
+                title={settings.runtimeTemplateDir || runtime?.path || ''}
+              >
+                {settings.runtimeTemplateDir
+                  || (runtime?.path ? `${runtime.path}（自动检测）` : '（未设置）')}
               </div>
               <button
                 onClick={handlePickTemplateDir}
@@ -171,7 +175,7 @@ export function AppSettingsDialog({
               </button>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              请选择 WebGAL 的 `WebGAL_Template` 目录，用于浏览器预览运行时。
+              默认使用运行时自动检测的路径。如有需要可选择本地 `WebGAL_Template` 目录覆盖。
             </p>
           </div>
 
