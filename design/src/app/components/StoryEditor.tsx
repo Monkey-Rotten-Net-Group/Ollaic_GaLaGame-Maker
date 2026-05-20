@@ -304,19 +304,25 @@ export function StoryEditor() {
     markDirty();
   }, [syncScript, markDirty, pushHistory]);
 
-  const addNode = useCallback((type: WebGalCommandType) => {
+  const insertNode = useCallback((type: WebGalCommandType, atIndex: number) => {
     setNodes(prev => {
       pushHistory(prev);
+      const idx = Math.max(0, Math.min(atIndex, prev.length));
+      const prevNode = idx > 0 ? prev[idx - 1] : undefined;
+      const nextNode = idx < prev.length ? prev[idx] : undefined;
       const id = Date.now().toString();
-      const lastNode = prev[prev.length - 1];
       const newNode: WebGalNode = {
         id,
         type,
         content: '',
         flags: [],
         position: {
-          x: lastNode ? lastNode.position.x : 100,
-          y: lastNode ? lastNode.position.y + 110 : 60,
+          x: prevNode?.position.x ?? nextNode?.position.x ?? 100,
+          y: prevNode
+            ? prevNode.position.y + 110
+            : nextNode
+              ? Math.max(60, nextNode.position.y - 110)
+              : 60,
         },
         connections: [],
       };
@@ -326,23 +332,34 @@ export function StoryEditor() {
       if (type === 'setVar') { newNode.varName = ''; newNode.varValue = ''; }
 
       const terminalTypes = new Set(['choose', 'changeScene', 'end', 'jumpLabel']);
-      const updated = [...prev];
-      if (lastNode && !terminalTypes.has(lastNode.type)) {
-        const lastIdx = updated.findIndex(n => n.id === lastNode.id);
-        if (lastIdx >= 0) {
-          updated[lastIdx] = {
-            ...updated[lastIdx],
-            connections: [...updated[lastIdx].connections, id],
-          };
-        }
+      const updated = [...prev.slice(0, idx), newNode, ...prev.slice(idx)];
+
+      // Wire prev → new (replacing prev → next link if present, else appending)
+      if (prevNode && !terminalTypes.has(prevNode.type)) {
+        const prevIdx = idx - 1;
+        const conns = updated[prevIdx].connections;
+        const linkedToNext = nextNode ? conns.includes(nextNode.id) : false;
+        const newConns = linkedToNext
+          ? conns.map(c => (c === nextNode!.id ? id : c))
+          : [...conns, id];
+        updated[prevIdx] = { ...updated[prevIdx], connections: newConns };
       }
-      updated.push(newNode);
+
+      // Wire new → next (only when new node is non-terminal and a next exists)
+      if (nextNode && !terminalTypes.has(type)) {
+        updated[idx] = { ...updated[idx], connections: [nextNode.id] };
+      }
+
       syncScript(updated);
       setSelectedNode(newNode);
       return updated;
     });
     markDirty();
   }, [syncScript, markDirty, pushHistory]);
+
+  const addNode = useCallback((type: WebGalCommandType) => {
+    insertNode(type, Number.MAX_SAFE_INTEGER);
+  }, [insertNode]);
 
   // ---------------------------------------------------------------------------
   // Save
@@ -917,6 +934,7 @@ export function StoryEditor() {
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
               onAddNode={addNode}
+              onInsertNode={insertNode}
               characterColors={characterColors}
               onJumpToIndex={(i) =>
                 jumpToSentence(currentSceneName, i + 1).catch((e) =>
