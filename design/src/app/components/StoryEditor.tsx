@@ -361,10 +361,6 @@ export function StoryEditor() {
     markDirty();
   }, [syncScript, markDirty, pushHistory]);
 
-  const addNode = useCallback((type: WebGalCommandType) => {
-    insertNode(type, Number.MAX_SAFE_INTEGER);
-  }, [insertNode]);
-
   // ---------------------------------------------------------------------------
   // Save
   // ---------------------------------------------------------------------------
@@ -937,7 +933,6 @@ export function StoryEditor() {
               nodes={nodes}
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
-              onAddNode={addNode}
               onInsertNode={insertNode}
               onReorderNodes={reorderNodes}
               characterColors={characterColors}

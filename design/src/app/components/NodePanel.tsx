@@ -1,8 +1,8 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import {
   MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
-  ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award, ChevronDown, ChevronRight,
+  ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award,
   Play, Plus, GripVertical,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
@@ -15,7 +15,6 @@ interface NodePanelProps {
   nodes: WebGalNode[];
   selectedNode: WebGalNode | null;
   onSelectNode: (node: WebGalNode) => void;
-  onAddNode: (type: WebGalCommandType) => void;
   /** Insert a node at a specific position (0 = before first, nodes.length = append). */
   onInsertNode?: (type: WebGalCommandType, atIndex: number) => void;
   /** Reorder nodes by drag. */
@@ -79,6 +78,37 @@ const categoryColors: Record<string, string> = {
   effects: 'hover:border-primary hover:bg-primary/10',
 };
 
+const MINIMAP_TERMINAL = new Set<WebGalCommandType>([
+  'choose', 'changeScene', 'end', 'jumpLabel',
+]);
+
+/** Saturated background color for the minimap blocks (one swatch per type). */
+const miniBgClass: Partial<Record<WebGalCommandType, string>> = {
+  dialogue: 'bg-accent',
+  narrator: 'bg-accent/70',
+  intro: 'bg-accent/55',
+  choose: 'bg-primary',
+  changeBg: 'bg-chart-5',
+  changeFigure: 'bg-chart-5/80',
+  miniAvatar: 'bg-chart-5/60',
+  changeScene: 'bg-blue-400',
+  callScene: 'bg-blue-400/75',
+  end: 'bg-blue-400/55',
+  bgm: 'bg-purple-400',
+  playEffect: 'bg-purple-400/75',
+  playVideo: 'bg-purple-400/55',
+  label: 'bg-yellow-400',
+  jumpLabel: 'bg-yellow-400/75',
+  setVar: 'bg-yellow-400/55',
+  setTextbox: 'bg-yellow-400/40',
+  getUserInput: 'bg-yellow-400/40',
+  setAnimation: 'bg-primary/75',
+  setTransform: 'bg-primary/60',
+  unlockCg: 'bg-primary/45',
+  unlockBgm: 'bg-primary/45',
+  comment: 'bg-muted-foreground/30',
+};
+
 function getNodeSummary(node: WebGalNode): string {
   switch (node.type) {
     case 'dialogue':
@@ -112,6 +142,100 @@ function getNodeSummary(node: WebGalNode): string {
     default:
       return node.content || '—';
   }
+}
+
+interface FlowMinimapProps {
+  nodes: WebGalNode[];
+  selectedNode: WebGalNode | null;
+  onSelect: (node: WebGalNode) => void;
+}
+
+function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (selectedRef.current && containerRef.current) {
+      const block = selectedRef.current;
+      const container = containerRef.current;
+      const blockTop = block.offsetTop;
+      const blockBot = blockTop + block.offsetHeight;
+      const viewTop = container.scrollTop;
+      const viewBot = viewTop + container.clientHeight;
+      if (blockTop < viewTop || blockBot > viewBot) {
+        block.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+  }, [selectedNode?.id]);
+
+  return (
+    <div className="p-3 border-b border-border">
+      <h3 className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-mono-family flex items-center justify-between">
+        <span>场景缩略</span>
+        <span className="text-[10px] normal-case tracking-normal opacity-60">
+          {nodes.length}
+        </span>
+      </h3>
+      <div
+        ref={containerRef}
+        className="max-h-56 overflow-y-auto overflow-x-hidden"
+      >
+        {nodes.length === 0 ? (
+          <div className="text-[10px] text-muted-foreground/60 py-3 text-center font-mono-family">
+            (空场景)
+          </div>
+        ) : (
+          <div className="flex flex-col items-center py-1">
+            {nodes.map((node, i) => {
+              const prev = i > 0 ? nodes[i - 1] : null;
+              const prevTerminal = prev ? MINIMAP_TERMINAL.has(prev.type) : false;
+              const isSelected = selectedNode?.id === node.id;
+              const bg = miniBgClass[node.type] ?? 'bg-muted-foreground/40';
+              const isChoose = node.type === 'choose';
+              const choiceCount = isChoose ? Math.min(node.choices?.length ?? 0, 6) : 0;
+
+              return (
+                <Fragment key={node.id}>
+                  {prev && (
+                    prevTerminal ? (
+                      <span className="block h-2 w-px" aria-hidden="true" />
+                    ) : (
+                      <span className="block h-2 w-px bg-border" aria-hidden="true" />
+                    )
+                  )}
+                  <button
+                    ref={isSelected ? selectedRef : undefined}
+                    type="button"
+                    onClick={() => onSelect(node)}
+                    title={commandLabels[node.type]}
+                    className={`
+                      block rounded-sm transition-all
+                      ${bg}
+                      ${isChoose ? 'w-8 h-2' : 'w-6 h-1.5'}
+                      ${isSelected
+                        ? 'ring-1 ring-primary ring-offset-1 ring-offset-card scale-110'
+                        : 'opacity-80 hover:opacity-100 hover:scale-110'
+                      }
+                    `}
+                  />
+                  {isChoose && choiceCount > 0 && (
+                    <span className="flex items-center gap-0.5 mt-0.5" aria-hidden="true">
+                      {Array.from({ length: choiceCount }).map((_, idx) => (
+                        <span
+                          key={idx}
+                          className="block w-1 h-1 rounded-full bg-primary/80"
+                        />
+                      ))}
+                    </span>
+                  )}
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function InsertZone({
@@ -301,52 +425,14 @@ function NodeListItem({
   );
 }
 
-export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex }: NodePanelProps) {
-  const [expandedCat, setExpandedCat] = useState<string | null>(null);
-
+export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex }: NodePanelProps) {
   return (
     <div className="w-64 border-r border-border bg-card/30 backdrop-blur-sm flex flex-col">
-      {/* Add Node - categorized */}
-      <div className="p-3 border-b border-border">
-        <h3 className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-mono-family">
-          添加指令
-        </h3>
-        <div className="space-y-1">
-          {Object.entries(commandCategories).map(([catKey, types]) => (
-            <div key={catKey}>
-              <button
-                onClick={() => setExpandedCat(expandedCat === catKey ? null : catKey)}
-                className="w-full flex items-center justify-between px-2 py-1.5 rounded text-xs hover:bg-secondary/50 transition-colors"
-                aria-label={`${expandedCat === catKey ? '收起' : '展开'} ${categoryLabels[catKey]}`}
-              >
-                <span className="font-medium">{categoryLabels[catKey]}</span>
-                {expandedCat === catKey
-                  ? <ChevronDown className="w-3 h-3 text-muted-foreground" />
-                  : <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                }
-              </button>
-              {expandedCat === catKey && (
-                <div className="grid grid-cols-2 gap-1 mt-1 mb-2 pl-1">
-                  {types.map((type) => {
-                    const Icon = commandIcons[type] || Type;
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => onAddNode(type)}
-                        className={`p-1.5 rounded border border-border transition-all flex items-center gap-1.5 group text-xs ${categoryColors[catKey]}`}
-                        aria-label={`添加 ${commandLabels[type]}`}
-                      >
-                        <Icon className="w-3 h-3 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
-                        <span className="truncate">{commandLabels[type]}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
+      <FlowMinimap
+        nodes={nodes}
+        selectedNode={selectedNode}
+        onSelect={onSelectNode}
+      />
 
       {/* Node List */}
       <div className="flex-1 overflow-y-auto p-2">
