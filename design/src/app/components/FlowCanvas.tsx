@@ -1,7 +1,9 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
+import { useDrag, useDrop } from 'react-dnd';
 import {
   MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
   ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award,
+  GripVertical, ArrowDown,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandLabels } from '../lib/webgal-types';
@@ -10,9 +12,11 @@ interface FlowCanvasProps {
   nodes: WebGalNode[];
   selectedNode: WebGalNode | null;
   onSelectNode: (node: WebGalNode) => void;
-  onUpdateNode: (id: string, updates: Partial<WebGalNode>) => void;
+  onReorderNodes: (fromIndex: number, toIndex: number) => void;
   characterColors?: Record<string, string>;
 }
+
+const DND_ITEM = 'flow-node';
 
 const commandIcons: Partial<Record<WebGalCommandType, typeof MessageCircle>> = {
   dialogue: MessageCircle,
@@ -66,15 +70,9 @@ const typeColors: Partial<Record<WebGalCommandType, string>> = {
   comment: 'border-muted bg-muted/5',
 };
 
-const typeGlows: Partial<Record<WebGalCommandType, string>> = {
-  dialogue: 'shadow-[0_0_15px_rgba(201,148,74,0.12)]',
-  choose: 'shadow-[0_0_15px_rgba(212,165,116,0.15)]',
-  changeBg: 'shadow-[0_0_15px_rgba(124,152,133,0.12)]',
-  changeScene: 'shadow-[0_0_15px_rgba(96,165,250,0.12)]',
-  bgm: 'shadow-[0_0_15px_rgba(192,132,252,0.12)]',
-  label: 'shadow-[0_0_15px_rgba(250,204,21,0.12)]',
-  comment: 'shadow-none',
-};
+const TERMINAL_TYPES = new Set<WebGalCommandType>([
+  'choose', 'changeScene', 'end', 'jumpLabel',
+]);
 
 function getNodeSummary(node: WebGalNode): string {
   switch (node.type) {
@@ -113,287 +111,206 @@ function getNodeSummary(node: WebGalNode): string {
   }
 }
 
-export function FlowCanvas({ nodes, selectedNode, onSelectNode, onUpdateNode, characterColors }: FlowCanvasProps) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
+interface DragItem {
+  index: number;
+  id: string;
+}
 
-  // Drag state
-  const dragRef = useRef<{
-    nodeId: string | null;
-    offsetX: number;
-    offsetY: number;
-    startX: number;
-    startY: number;
-  }>({ nodeId: null, offsetX: 0, offsetY: 0, startX: 0, startY: 0 });
-  const nodeElRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [dragTick, setDragTick] = useState(0);
+interface FlowNodeCardProps {
+  node: WebGalNode;
+  index: number;
+  isLast: boolean;
+  isSelected: boolean;
+  characterColors?: Record<string, string>;
+  onSelect: (node: WebGalNode) => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+}
 
-  const handleMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
-    // Don't start drag on interactive elements (buttons, etc.)
-    const target = e.target as HTMLElement;
-    if (target.closest('button')) return;
+function FlowNodeCard({
+  node, index, isLast, isSelected, characterColors, onSelect, onReorder,
+}: FlowNodeCardProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const Icon = commandIcons[node.type] || Type;
+  const colors = typeColors[node.type] || 'border-border bg-card/50';
+  const terminal = TERMINAL_TYPES.has(node.type);
 
-    e.preventDefault();
-    const el = nodeElRefs.current.get(nodeId);
-    if (!el || !canvasRef.current) return;
+  const [{ handlerId, isOver }, drop] = useDrop<
+    DragItem,
+    void,
+    { handlerId: string | symbol | null; isOver: boolean }
+  >({
+    accept: DND_ITEM,
+    collect: (monitor) => ({
+      handlerId: monitor.getHandlerId(),
+      isOver: monitor.isOver({ shallow: true }),
+    }),
+    hover(item, monitor) {
+      if (!ref.current) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+      const rect = ref.current.getBoundingClientRect();
+      const hoverMidY = (rect.bottom - rect.top) / 2;
+      const offset = monitor.getClientOffset();
+      if (!offset) return;
+      const hoverClientY = offset.y - rect.top;
+      if (dragIndex < hoverIndex && hoverClientY < hoverMidY) return;
+      if (dragIndex > hoverIndex && hoverClientY > hoverMidY) return;
+      onReorder(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
 
-    const canvasRect = canvasRef.current.getBoundingClientRect();
-    const nodeLeft = parseInt(el.style.left, 10) || 0;
-    const nodeTop = parseInt(el.style.top, 10) || 0;
+  const [{ isDragging }, drag] = useDrag({
+    type: DND_ITEM,
+    item: (): DragItem => ({ index, id: node.id }),
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
 
-    dragRef.current = {
-      nodeId,
-      offsetX: e.clientX - canvasRect.left + canvasRef.current.scrollLeft - nodeLeft,
-      offsetY: e.clientY - canvasRect.top + canvasRef.current.scrollTop - nodeTop,
-      startX: nodeLeft,
-      startY: nodeTop,
-    };
-
-    el.style.zIndex = '20';
-    el.style.cursor = 'grabbing';
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const drag = dragRef.current;
-      if (!drag.nodeId || !canvasRef.current) return;
-
-      const el = nodeElRefs.current.get(drag.nodeId);
-      if (!el) return;
-
-      const canvasRect = canvasRef.current.getBoundingClientRect();
-      const newX = e.clientX - canvasRect.left + canvasRef.current.scrollLeft - drag.offsetX;
-      const newY = e.clientY - canvasRect.top + canvasRef.current.scrollTop - drag.offsetY;
-
-      el.style.left = `${newX}px`;
-      el.style.top = `${newY}px`;
-
-      // Update SVG connections in real-time for smooth feedback
-      setDragTick(n => n + 1);
-    };
-
-    const handleMouseUp = () => {
-      const drag = dragRef.current;
-      if (!drag.nodeId) return;
-
-      const el = nodeElRefs.current.get(drag.nodeId);
-      if (el) {
-        const newX = parseInt(el.style.left, 10) || 0;
-        const newY = parseInt(el.style.top, 10) || 0;
-
-        if (newX !== drag.startX || newY !== drag.startY) {
-          onUpdateNode(drag.nodeId, { position: { x: newX, y: newY } });
-        }
-
-        el.style.zIndex = '';
-        el.style.cursor = '';
-      }
-
-      dragRef.current = { nodeId: null, offsetX: 0, offsetY: 0, startX: 0, startY: 0 };
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [onUpdateNode]);
-
-  useEffect(() => {
-    if (!svgRef.current) return;
-    const svg = svgRef.current;
-    svg.innerHTML = '';
-
-    nodes.forEach(node => {
-      node.connections.forEach(targetId => {
-        const target = nodes.find(n => n.id === targetId);
-        if (!target) return;
-
-        // Use live DOM positions during drag for smoother visuals
-        let startX = node.position.x + 140;
-        let startY = node.position.y + 44;
-        let endX = target.position.x + 140;
-        let endY = target.position.y;
-
-        // Check if source node is being dragged
-        if (dragRef.current.nodeId === node.id) {
-          const el = nodeElRefs.current.get(node.id);
-          if (el) {
-            startX = (parseInt(el.style.left, 10) || node.position.x) + 140;
-            startY = (parseInt(el.style.top, 10) || node.position.y) + 44;
-          }
-        }
-        // Check if target node is being dragged
-        if (dragRef.current.nodeId === targetId) {
-          const el = nodeElRefs.current.get(targetId);
-          if (el) {
-            endX = (parseInt(el.style.left, 10) || target.position.x) + 140;
-            endY = (parseInt(el.style.top, 10) || target.position.y);
-          }
-        }
-
-        const midY = (startY + endY) / 2;
-
-        // Glow
-        const glow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        glow.setAttribute('d', `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`);
-        glow.setAttribute('stroke', 'rgba(212, 165, 116, 0.08)');
-        glow.setAttribute('stroke-width', '6');
-        glow.setAttribute('fill', 'none');
-        glow.setAttribute('filter', 'blur(3px)');
-        svg.appendChild(glow);
-
-        // Line
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`);
-        path.setAttribute('stroke', 'rgba(212, 165, 116, 0.25)');
-        path.setAttribute('stroke-width', '1.5');
-        path.setAttribute('fill', 'none');
-        svg.appendChild(path);
-
-        // Arrow
-        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        const size = 6;
-        arrow.setAttribute('points', `${endX},${endY} ${endX - size},${endY - size * 1.5} ${endX + size},${endY - size * 1.5}`);
-        arrow.setAttribute('fill', 'rgba(212, 165, 116, 0.4)');
-        svg.appendChild(arrow);
-      });
-    });
-  }, [nodes, dragTick]);
+  drag(drop(ref));
 
   return (
-    <div className="flex-1 relative overflow-hidden bg-background/50">
-      {/* Grid */}
-      <div className="absolute inset-0 opacity-30 flow-grid" />
-      <div className="absolute top-0 left-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl" />
-      <div className="absolute bottom-0 right-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
-
-      {/* Canvas */}
-      <div ref={canvasRef} className="relative size-full overflow-auto">
-        <div className="relative min-w-[2000px] min-h-[1500px] p-8">
-          <svg
-            ref={svgRef}
-            className="absolute inset-0 pointer-events-none w-full h-full"
-          />
-
-          {nodes.map((node) => {
-            const Icon = commandIcons[node.type] || Type;
-            const isSelected = selectedNode?.id === node.id;
-            const colors = typeColors[node.type] || 'border-border bg-card/50';
-            const glow = typeGlows[node.type] || '';
-
-            return (
-              <div
-                key={node.id}
-                ref={(el) => {
-                  if (el) nodeElRefs.current.set(node.id, el);
-                  else nodeElRefs.current.delete(node.id);
-                }}
-                onClick={() => onSelectNode(node)}
-                onMouseDown={(e) => handleMouseDown(e, node.id)}
-                className={`
-                  absolute w-[280px] cursor-grab transition-all duration-200
-                  ${isSelected ? 'z-10 scale-[1.03]' : 'z-0 hover:scale-[1.01]'}
-                `}
-                style={{ left: node.position.x, top: node.position.y }}
+    <div className="flex flex-col items-center w-full">
+      <div
+        ref={ref}
+        data-handler-id={handlerId}
+        onClick={() => onSelect(node)}
+        className={`
+          group relative w-[360px] max-w-full transition-all
+          ${isDragging ? 'opacity-30' : 'opacity-100'}
+          ${isOver && !isDragging ? 'scale-[1.01]' : ''}
+        `}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
+        <div
+          className={`
+            px-4 py-3 rounded-lg border backdrop-blur-sm transition-all
+            ${colors}
+            ${isSelected
+              ? 'border-primary shadow-[0_0_20px_rgba(212,165,116,0.25)] ring-1 ring-primary/40'
+              : 'hover:border-primary/40'
+            }
+          `}
+        >
+          <div className="flex items-center gap-2.5 mb-1.5">
+            <span
+              className="p-1 rounded text-muted-foreground/60 group-hover:text-foreground/80 transition-colors"
+              title="拖动整张卡片调整顺序"
+              aria-hidden="true"
+            >
+              <GripVertical className="w-4 h-4" />
+            </span>
+            <div className={`p-1.5 rounded ${isSelected ? 'bg-primary/20' : 'bg-background/50'}`}>
+              <Icon className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono-family flex items-center gap-1.5">
+                <span className="opacity-50">#{index + 1}</span>
+                <span>{commandLabels[node.type]}</span>
+              </div>
+            </div>
+            {node.type === 'dialogue' && node.character && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 flex items-center gap-1 bg-accent/20 text-accent"
+                style={characterColors?.[node.character] ? {
+                  backgroundColor: `${characterColors[node.character]}20`,
+                  color: characterColors[node.character],
+                } : undefined}
               >
-                <div
-                  className={`
-                    px-4 py-3 rounded-lg border backdrop-blur-sm transition-all
-                    ${colors}
-                    ${isSelected
-                      ? 'border-primary shadow-[0_0_25px_rgba(212,165,116,0.3)]'
-                      : glow
-                    }
-                  `}
-                >
-                  <div className="flex items-center gap-2.5 mb-1.5">
-                    <div className={`p-1.5 rounded ${isSelected ? 'bg-primary/20' : 'bg-background/50'}`}>
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono-family">
-                        {commandLabels[node.type]}
-                      </div>
-                    </div>
-                    {node.character && (
-                      <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 flex items-center gap-1 bg-accent/20 text-accent"
-                        style={characterColors?.[node.character] ? {
-                          backgroundColor: `${characterColors[node.character]}20`,
-                          color: characterColors[node.character],
-                        } : undefined}
-                      >
-                        {characterColors?.[node.character] && (
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: characterColors[node.character] }} />
-                        )}
-                        {node.character}
-                      </span>
-                    )}
-                  </div>
+                {characterColors?.[node.character] && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: characterColors[node.character] }}
+                  />
+                )}
+                {node.character}
+              </span>
+            )}
+          </div>
 
-                  <p className="text-sm text-foreground/80 line-clamp-2 font-body-family">
-                    {getNodeSummary(node) || '(空)'}
-                  </p>
+          <p className="text-sm text-foreground/80 line-clamp-2 font-body-family pl-1">
+            {getNodeSummary(node) || '(空)'}
+          </p>
 
-                  {node.type === 'choose' && node.choices && node.choices.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {node.choices.map((choice, idx) => (
-                        <div key={idx} className="text-xs px-2 py-1 rounded bg-primary/10 text-primary/80 truncate">
-                          → {choice.text}{choice.target ? ` → ${choice.target}` : ''}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {node.next && (
-                    <div className="mt-1.5 text-[10px] text-muted-foreground font-mono-family">
-                        -next
-                      </div>
-                  )}
-
-                  {/* Connection points */}
-                  <div className="absolute left-1/2 -translate-x-1/2 -bottom-2 w-3 h-3 rounded-full bg-primary/60 border-2 border-background" />
-                  <div className="absolute left-1/2 -translate-x-1/2 -top-2 w-3 h-3 rounded-full bg-primary/40 border-2 border-background" />
+          {node.type === 'choose' && node.choices && node.choices.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {node.choices.map((choice, idx) => (
+                <div key={idx} className="text-xs px-2 py-1 rounded bg-primary/10 text-primary/80 truncate">
+                  → {choice.text}{choice.target ? ` → ${choice.target}` : ''}
                 </div>
-              </div>
-            );
-          })}
-
-          {nodes.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-5xl mb-4 opacity-20">📖</div>
-                <p className="text-lg text-muted-foreground mb-2 font-display-family">
-                  开始编织你的故事
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  从左侧添加 WebGAL 指令，或导入 .txt 场景文件
-                </p>
-              </div>
+              ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* Mini Map */}
-      <div className="absolute bottom-4 right-4 w-44 h-28 bg-card/80 backdrop-blur-sm border border-border rounded-lg p-2">
-        <div className="text-[10px] text-muted-foreground mb-1 font-mono-family">
-          画布总览
+      {!isLast && (
+        <div className="flex flex-col items-center my-1 h-6 select-none">
+          {terminal ? (
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-mono-family">
+              · · ·
+            </span>
+          ) : (
+            <>
+              <div className="w-px flex-1 bg-gradient-to-b from-primary/40 to-primary/60" />
+              <ArrowDown className="w-3 h-3 text-primary/70 -mt-0.5" />
+            </>
+          )}
         </div>
-        <div className="relative w-full h-full bg-background/50 rounded">
-          {nodes.map(node => (
-            <div
-              key={node.id}
-              className={`absolute w-1.5 h-1.5 rounded-full ${selectedNode?.id === node.id ? 'bg-primary' : 'bg-muted-foreground/50'}`}
-              style={{
-                left: `${(node.position.x / 2000) * 100}%`,
-                top: `${(node.position.y / 1500) * 100}%`,
-              }}
-            />
-          ))}
+      )}
+    </div>
+  );
+}
+
+export function FlowCanvas({
+  nodes, selectedNode, onSelectNode, onReorderNodes, characterColors,
+}: FlowCanvasProps) {
+  const handleReorder = useCallback((from: number, to: number) => {
+    onReorderNodes(from, to);
+  }, [onReorderNodes]);
+
+  return (
+    <div className="flex-1 relative overflow-hidden bg-background/50">
+      <div className="absolute inset-0 opacity-30 flow-grid" />
+      <div className="absolute top-0 left-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="relative size-full overflow-auto">
+        <div className="min-h-full flex flex-col items-center px-6 py-10">
+          {nodes.length === 0 ? (
+            <div className="m-auto text-center">
+              <div className="text-5xl mb-4 opacity-20">📖</div>
+              <p className="text-lg text-muted-foreground mb-2 font-display-family">
+                开始编织你的故事
+              </p>
+              <p className="text-sm text-muted-foreground">
+                从左侧添加 WebGAL 指令，或导入 .txt 场景文件
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-mono-family mb-4">
+                ▼ 起点
+              </div>
+              <div className="flex flex-col items-center w-full max-w-md">
+                {nodes.map((node, index) => (
+                  <FlowNodeCard
+                    key={node.id}
+                    node={node}
+                    index={index}
+                    isLast={index === nodes.length - 1}
+                    isSelected={selectedNode?.id === node.id}
+                    characterColors={characterColors}
+                    onSelect={onSelectNode}
+                    onReorder={handleReorder}
+                  />
+                ))}
+              </div>
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-mono-family mt-4">
+                ▲ 终点
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

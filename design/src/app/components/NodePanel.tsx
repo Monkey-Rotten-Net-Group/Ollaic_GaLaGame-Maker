@@ -1,12 +1,15 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
+import { useDrag, useDrop } from 'react-dnd';
 import {
   MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
   ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award, ChevronDown, ChevronRight,
-  Play, Plus,
+  Play, Plus, GripVertical,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandCategories, commandLabels, categoryLabels } from '../lib/webgal-types';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+
+const DND_LIST_ITEM = 'flow-node';
 
 interface NodePanelProps {
   nodes: WebGalNode[];
@@ -15,6 +18,8 @@ interface NodePanelProps {
   onAddNode: (type: WebGalCommandType) => void;
   /** Insert a node at a specific position (0 = before first, nodes.length = append). */
   onInsertNode?: (type: WebGalCommandType, atIndex: number) => void;
+  /** Reorder nodes by drag. */
+  onReorderNodes?: (fromIndex: number, toIndex: number) => void;
   characterColors?: Record<string, string>;
   /** Called when the user clicks "执行到此句" on the node at `index` (0-based). */
   onJumpToIndex?: (index: number) => void;
@@ -185,7 +190,118 @@ function InsertZone({
   );
 }
 
-export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, onInsertNode, characterColors, onJumpToIndex }: NodePanelProps) {
+interface NodeListItemProps {
+  node: WebGalNode;
+  index: number;
+  isSelected: boolean;
+  characterColors?: Record<string, string>;
+  onSelect: (node: WebGalNode) => void;
+  onJump?: (index: number) => void;
+  onReorder?: (fromIndex: number, toIndex: number) => void;
+}
+
+function NodeListItem({
+  node, index, isSelected, characterColors, onSelect, onJump, onReorder,
+}: NodeListItemProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const Icon = commandIcons[node.type] || Type;
+  const color = typeColorMap[node.type] || 'text-muted-foreground';
+
+  const [, drop] = useDrop<{ index: number }>({
+    accept: DND_LIST_ITEM,
+    hover(item, monitor) {
+      if (!onReorder || !ref.current) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+      const rect = ref.current.getBoundingClientRect();
+      const mid = (rect.bottom - rect.top) / 2;
+      const offset = monitor.getClientOffset();
+      if (!offset) return;
+      const y = offset.y - rect.top;
+      if (dragIndex < hoverIndex && y < mid) return;
+      if (dragIndex > hoverIndex && y > mid) return;
+      onReorder(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
+
+  const [{ isDragging }, drag] = useDrag({
+    type: DND_LIST_ITEM,
+    item: () => ({ index }),
+    canDrag: () => Boolean(onReorder),
+    collect: (m) => ({ isDragging: m.isDragging() }),
+  });
+
+  drag(drop(ref));
+
+  return (
+    <div
+      ref={ref}
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(node)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(node);
+        }
+      }}
+      style={onReorder ? { cursor: isDragging ? 'grabbing' : 'grab' } : undefined}
+      className={`
+        group relative w-full px-2 py-2 rounded border transition-all text-left
+        ${isDragging ? 'opacity-30' : 'opacity-100'}
+        ${isSelected
+          ? 'border-primary bg-primary/10 shadow-[0_0_12px_rgba(212,165,116,0.15)]'
+          : 'border-transparent hover:border-border hover:bg-secondary/30'
+        }
+      `}
+    >
+      <div className="flex items-start gap-1.5">
+        {onReorder && (
+          <span
+            className="opacity-0 group-hover:opacity-60 transition-opacity -ml-1 mt-0.5 text-muted-foreground"
+            aria-hidden="true"
+          >
+            <GripVertical className="w-3 h-3" />
+          </span>
+        )}
+        <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${color}`} />
+        {node.type === 'dialogue' && node.character && characterColors?.[node.character] && (
+          <span
+            className="w-2 h-2 rounded-full mt-1 shrink-0"
+            style={{ backgroundColor: characterColors[node.character] }}
+          />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family flex items-center gap-1.5">
+            <span className="opacity-50">{index + 1}</span>
+            <span>{commandLabels[node.type]}</span>
+          </div>
+          <div className="text-xs text-foreground/80 truncate">
+            {getNodeSummary(node) || '(空)'}
+          </div>
+        </div>
+        {onJump && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onJump(index);
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary shrink-0"
+            title="执行到此句"
+            aria-label="执行到此句"
+          >
+            <Play className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex }: NodePanelProps) {
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   return (
@@ -234,70 +350,22 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onAddNode, onInse
 
       {/* Node List */}
       <div className="flex-1 overflow-y-auto p-2">
-        {nodes.map((node, index) => {
-          const Icon = commandIcons[node.type] || Type;
-          const isSelected = selectedNode?.id === node.id;
-          const color = typeColorMap[node.type] || 'text-muted-foreground';
-
-          return (
-            <Fragment key={node.id}>
-              {onInsertNode && (
-                <InsertZone atIndex={index} onInsert={onInsertNode} />
-              )}
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelectNode(node)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSelectNode(node);
-                  }
-                }}
-                className={`
-                  group relative w-full px-2.5 py-2 rounded border transition-all text-left cursor-pointer
-                  ${isSelected
-                    ? 'border-primary bg-primary/10 shadow-[0_0_12px_rgba(212,165,116,0.15)]'
-                    : 'border-transparent hover:border-border hover:bg-secondary/30'
-                  }
-                `}
-              >
-                <div className="flex items-start gap-2">
-                  <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${color}`} />
-                  {node.type === 'dialogue' && node.character && characterColors?.[node.character] && (
-                    <span
-                      className="w-2 h-2 rounded-full mt-1 shrink-0"
-                      style={{ backgroundColor: characterColors[node.character] }}
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family flex items-center gap-1.5">
-                      <span className="opacity-50">{index + 1}</span>
-                      <span>{commandLabels[node.type]}</span>
-                    </div>
-                    <div className="text-xs text-foreground/80 truncate">
-                      {getNodeSummary(node) || '(空)'}
-                    </div>
-                  </div>
-                  {onJumpToIndex && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onJumpToIndex(index);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary shrink-0"
-                      title="执行到此句"
-                      aria-label="执行到此句"
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </Fragment>
-          );
-        })}
+        {nodes.map((node, index) => (
+          <Fragment key={node.id}>
+            {onInsertNode && (
+              <InsertZone atIndex={index} onInsert={onInsertNode} />
+            )}
+            <NodeListItem
+              node={node}
+              index={index}
+              isSelected={selectedNode?.id === node.id}
+              characterColors={characterColors}
+              onSelect={onSelectNode}
+              onJump={onJumpToIndex}
+              onReorder={onReorderNodes}
+            />
+          </Fragment>
+        ))}
         {onInsertNode && (
           <InsertZone atIndex={nodes.length} onInsert={onInsertNode} />
         )}

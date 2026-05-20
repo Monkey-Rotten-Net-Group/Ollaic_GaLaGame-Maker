@@ -38,6 +38,23 @@ interface AiMessage {
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
+const TERMINAL_TYPES = new Set<WebGalCommandType>(['choose', 'changeScene', 'end', 'jumpLabel']);
+
+/** Rebuild visual `connections` purely from sequential order. */
+function rewireConnections(nodes: WebGalNode[]): WebGalNode[] {
+  return nodes.map((node, i) => {
+    const next = nodes[i + 1];
+    const connections = next && !TERMINAL_TYPES.has(node.type) ? [next.id] : [];
+    if (
+      connections.length === node.connections.length &&
+      connections.every((c, idx) => c === node.connections[idx])
+    ) {
+      return node;
+    }
+    return { ...node, connections };
+  });
+}
+
 const DEMO_SCRIPT = `; 序章 - 安静的午后
 changeBg:afternoon_park.webp -next;
 bgm:peaceful_afternoon.mp3;
@@ -294,9 +311,7 @@ export function StoryEditor() {
   const deleteNode = useCallback((id: string) => {
     setNodes(prev => {
       pushHistory(prev);
-      const next = prev
-        .filter(n => n.id !== id)
-        .map(n => ({ ...n, connections: n.connections.filter(c => c !== id) }));
+      const next = rewireConnections(prev.filter(n => n.id !== id));
       syncScript(next);
       return next;
     });
@@ -304,26 +319,32 @@ export function StoryEditor() {
     markDirty();
   }, [syncScript, markDirty, pushHistory]);
 
+  const reorderNodes = useCallback((fromIndex: number, toIndex: number) => {
+    setNodes(prev => {
+      if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= prev.length) return prev;
+      const clampedTo = Math.max(0, Math.min(toIndex, prev.length - 1));
+      pushHistory(prev);
+      const moved = [...prev];
+      const [node] = moved.splice(fromIndex, 1);
+      moved.splice(clampedTo, 0, node);
+      const next = rewireConnections(moved);
+      syncScript(next);
+      return next;
+    });
+    markDirty();
+  }, [syncScript, markDirty, pushHistory]);
+
   const insertNode = useCallback((type: WebGalCommandType, atIndex: number) => {
     setNodes(prev => {
       pushHistory(prev);
       const idx = Math.max(0, Math.min(atIndex, prev.length));
-      const prevNode = idx > 0 ? prev[idx - 1] : undefined;
-      const nextNode = idx < prev.length ? prev[idx] : undefined;
       const id = Date.now().toString();
       const newNode: WebGalNode = {
         id,
         type,
         content: '',
         flags: [],
-        position: {
-          x: prevNode?.position.x ?? nextNode?.position.x ?? 100,
-          y: prevNode
-            ? prevNode.position.y + 110
-            : nextNode
-              ? Math.max(60, nextNode.position.y - 110)
-              : 60,
-        },
+        position: { x: 100, y: 60 + idx * 110 },
         connections: [],
       };
       if (type === 'dialogue') newNode.character = '';
@@ -331,27 +352,10 @@ export function StoryEditor() {
       if (type === 'intro') newNode.introLines = [''];
       if (type === 'setVar') { newNode.varName = ''; newNode.varValue = ''; }
 
-      const terminalTypes = new Set(['choose', 'changeScene', 'end', 'jumpLabel']);
-      const updated = [...prev.slice(0, idx), newNode, ...prev.slice(idx)];
-
-      // Wire prev → new (replacing prev → next link if present, else appending)
-      if (prevNode && !terminalTypes.has(prevNode.type)) {
-        const prevIdx = idx - 1;
-        const conns = updated[prevIdx].connections;
-        const linkedToNext = nextNode ? conns.includes(nextNode.id) : false;
-        const newConns = linkedToNext
-          ? conns.map(c => (c === nextNode!.id ? id : c))
-          : [...conns, id];
-        updated[prevIdx] = { ...updated[prevIdx], connections: newConns };
-      }
-
-      // Wire new → next (only when new node is non-terminal and a next exists)
-      if (nextNode && !terminalTypes.has(type)) {
-        updated[idx] = { ...updated[idx], connections: [nextNode.id] };
-      }
-
+      const updated = rewireConnections([...prev.slice(0, idx), newNode, ...prev.slice(idx)]);
       syncScript(updated);
-      setSelectedNode(newNode);
+      const insertedNode = updated.find(n => n.id === id) ?? newNode;
+      setSelectedNode(insertedNode);
       return updated;
     });
     markDirty();
@@ -935,6 +939,7 @@ export function StoryEditor() {
               onSelectNode={setSelectedNode}
               onAddNode={addNode}
               onInsertNode={insertNode}
+              onReorderNodes={reorderNodes}
               characterColors={characterColors}
               onJumpToIndex={(i) =>
                 jumpToSentence(currentSceneName, i + 1).catch((e) =>
@@ -982,7 +987,7 @@ export function StoryEditor() {
               nodes={nodes}
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
-              onUpdateNode={updateNode}
+              onReorderNodes={reorderNodes}
               characterColors={characterColors}
             />
           )}
