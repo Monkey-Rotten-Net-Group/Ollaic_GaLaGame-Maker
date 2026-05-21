@@ -35,6 +35,8 @@ import {
   type AssetInfo,
   type AssetUsage,
 } from '../lib/assets-ipc';
+import { getAliasMap, setAlias as persistAssetAlias, removeAlias as removeAssetAlias } from '../lib/asset-alias';
+import { listCharacters } from '../lib/character-ipc';
 import { CharacterPanel } from './CharacterPanel';
 
 type TabId = 'scene' | 'music' | 'character';
@@ -161,6 +163,7 @@ export function AssetManager() {
   const [assetUsages, setAssetUsages] = useState<AssetUsage[]>([]);
   const [tagsByAsset, setTagsByAsset] = useState<Record<string, string[]>>({});
   const [referencesByAsset, setReferencesByAsset] = useState<Record<string, string[]>>({});
+  const [aliasesByAsset, setAliasesByAsset] = useState<Record<string, string>>({});
   const [referenceUploading, setReferenceUploading] = useState(false);
 
   // Real data state
@@ -221,19 +224,37 @@ export function AssetManager() {
   }, [projectPath, activeTab, musicCategory, loadAssetsForTab, loadAllAssets]);
 
   useEffect(() => {
+    if (!projectPath) return;
+    let cancelled = false;
+    listCharacters(projectPath)
+      .then((list) => {
+        if (!cancelled) setCharacterCount(list.length);
+      })
+      .catch(() => {
+        if (!cancelled) setCharacterCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPath, figureLibraryRefreshToken]);
+
+  useEffect(() => {
     if (!projectId) return;
     try {
       setTagsByAsset(JSON.parse(localStorage.getItem(`asset-tags-${projectId}`) || '{}'));
       setReferencesByAsset(JSON.parse(localStorage.getItem(`asset-references-${projectId}`) || '{}'));
+      setAliasesByAsset(getAliasMap(projectId));
     } catch {
       setTagsByAsset({});
       setReferencesByAsset({});
+      setAliasesByAsset({});
     }
   }, [projectId]);
 
-  const filteredAssets = assets.filter((a) =>
-    a.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredAssets = assets.filter((a) => {
+    const q = searchQuery.toLowerCase();
+    return a.name.toLowerCase().includes(q) || (aliasesByAsset[a.name] || '').toLowerCase().includes(q);
+  });
 
   // Tab counts from all assets
   const tabCounts = {
@@ -473,6 +494,21 @@ export function AssetManager() {
       return convertFileSrc(asset.path);
     }
     return null;
+  };
+
+  const handleAliasChange = (filename: string, alias: string) => {
+    if (!projectId) return;
+    if (alias.trim()) {
+      persistAssetAlias(projectId, filename, alias);
+      setAliasesByAsset(prev => ({ ...prev, [filename]: alias.trim() }));
+    } else {
+      removeAssetAlias(projectId, filename);
+      setAliasesByAsset(prev => {
+        const next = { ...prev };
+        delete next[filename];
+        return next;
+      });
+    }
   };
 
   return (
@@ -770,7 +806,10 @@ export function AssetManager() {
                           </div>
                         </div>
                         <div className="p-3 bg-card border-t border-border">
-                          <h3 className="text-sm font-medium truncate mb-1">{asset.name}</h3>
+                          <h3 className="text-sm font-medium truncate mb-1">{aliasesByAsset[asset.name] || asset.name}</h3>
+                          {aliasesByAsset[asset.name] && (
+                            <div className="mb-1 truncate text-[11px] text-muted-foreground font-mono-family">{asset.name}</div>
+                          )}
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <span>{asset.extension.toUpperCase()}</span>
                             {isAudioExt(asset.extension) && (
@@ -835,9 +874,9 @@ export function AssetManager() {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-medium truncate">{asset.name}</h3>
+                          <h3 className="font-medium truncate">{aliasesByAsset[asset.name] || asset.name}</h3>
                           <p className="text-sm text-muted-foreground">
-                            {formatCategory(asset.category)} · {asset.extension.toUpperCase()} · {isAudioExt(asset.extension) ? `${getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)} · ` : ''}{formatSize(asset.size)}
+                            {aliasesByAsset[asset.name] ? `${asset.name} · ` : ''}{formatCategory(asset.category)} · {asset.extension.toUpperCase()} · {isAudioExt(asset.extension) ? `${getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)} · ` : ''}{formatSize(asset.size)}
                           </p>
                           {isAudioExt(asset.extension) && progress > 0 && (
                             <div className="mt-2 h-1 rounded bg-secondary overflow-hidden">
@@ -924,6 +963,25 @@ export function AssetManager() {
                 </div>
 
                 <div className="space-y-4 mb-6">
+                  {(activeTab === 'scene' || activeTab === 'music') && (
+                    <div>
+                      <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
+                        显示名称
+                      </label>
+                      <input
+                        type="text"
+                        value={aliasesByAsset[selectedAsset.name] || ''}
+                        onChange={(e) => handleAliasChange(selectedAsset.name, e.target.value)}
+                        className="w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                        placeholder={activeTab === 'scene' ? '例：教室 · 白天' : '例：悲伤主旋律'}
+                        aria-label="素材显示名称"
+                      />
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        设置后，剧本编辑器的素材选择弹窗会优先显示这个名称。
+                      </p>
+                    </div>
+                  )}
+
                   <div>
                     <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
                       文件信息

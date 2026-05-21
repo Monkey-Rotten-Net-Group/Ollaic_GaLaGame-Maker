@@ -163,7 +163,7 @@ function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
       const viewTop = container.scrollTop;
       const viewBot = viewTop + container.clientHeight;
       if (blockTop < viewTop || blockBot > viewBot) {
-        block.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        container.scrollTop = blockTop - container.clientHeight / 2 + block.offsetHeight / 2;
       }
     }
   }, [selectedNode?.id]);
@@ -241,9 +241,11 @@ function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
 function InsertZone({
   atIndex,
   onInsert,
+  append = false,
 }: {
   atIndex: number;
   onInsert: (type: WebGalCommandType, atIndex: number) => void;
+  append?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -254,21 +256,23 @@ function InsertZone({
           type="button"
           aria-label={`在位置 ${atIndex + 1} 插入指令`}
           className={`group/zone relative w-full flex items-center justify-center cursor-pointer transition-all overflow-visible ${
-            open ? 'h-7' : 'h-1.5 hover:h-7'
+            append
+              ? 'h-20'
+              : open ? 'h-7' : 'h-1.5 hover:h-7'
           }`}
         >
           <div
             className={`absolute inset-x-2 top-1/2 -translate-y-1/2 h-px bg-border transition-opacity ${
-              open ? 'opacity-100' : 'opacity-0 group-hover/zone:opacity-100'
+              append || open ? 'opacity-100' : 'opacity-0 group-hover/zone:opacity-100'
             }`}
           />
           <div
             className={`relative z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/40 text-[10px] transition-opacity ${
-              open ? 'opacity-100' : 'opacity-0 group-hover/zone:opacity-100'
+              append || open ? 'opacity-100' : 'opacity-0 group-hover/zone:opacity-100'
             }`}
           >
             <Plus className="w-3 h-3" />
-            <span className="font-mono-family">插入</span>
+            <span className="font-mono-family">{append ? '新增指令' : '插入'}</span>
           </div>
         </button>
       </PopoverTrigger>
@@ -426,8 +430,27 @@ function NodeListItem({
 }
 
 export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex }: NodePanelProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    if (!selectedNode || !listRef.current) return;
+    const item = itemRefs.current[selectedNode.id];
+    const container = listRef.current;
+    if (!item) return;
+
+    const itemTop = item.offsetTop;
+    const itemBottom = itemTop + item.offsetHeight;
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+
+    if (itemTop < viewTop || itemBottom > viewBottom) {
+      container.scrollTop = Math.max(0, itemTop - container.clientHeight / 2 + item.offsetHeight / 2);
+    }
+  }, [selectedNode?.id]);
+
   return (
-    <div className="w-64 border-r border-border bg-card/30 backdrop-blur-sm flex flex-col">
+    <div className="w-64 h-full border-r border-border bg-card/30 backdrop-blur-sm flex flex-col overflow-hidden">
       <FlowMinimap
         nodes={nodes}
         selectedNode={selectedNode}
@@ -435,25 +458,27 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
       />
 
       {/* Node List */}
-      <div className="flex-1 overflow-y-auto p-2">
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto p-2 pb-24 scroll-pb-24">
         {nodes.map((node, index) => (
           <Fragment key={node.id}>
             {onInsertNode && (
               <InsertZone atIndex={index} onInsert={onInsertNode} />
             )}
-            <NodeListItem
-              node={node}
-              index={index}
-              isSelected={selectedNode?.id === node.id}
-              characterColors={characterColors}
-              onSelect={onSelectNode}
-              onJump={onJumpToIndex}
-              onReorder={onReorderNodes}
-            />
+            <div ref={(el) => { itemRefs.current[node.id] = el; }}>
+              <NodeListItem
+                node={node}
+                index={index}
+                isSelected={selectedNode?.id === node.id}
+                characterColors={characterColors}
+                onSelect={onSelectNode}
+                onJump={onJumpToIndex}
+                onReorder={onReorderNodes}
+              />
+            </div>
           </Fragment>
         ))}
         {onInsertNode && (
-          <InsertZone atIndex={nodes.length} onInsert={onInsertNode} />
+          <InsertZone atIndex={nodes.length} onInsert={onInsertNode} append />
         )}
       </div>
 

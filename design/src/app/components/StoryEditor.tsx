@@ -5,7 +5,7 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import {
   Sparkles, Save, Play, Image, ArrowLeft, Send,
   Upload, Download, FileText, FolderOpen, FilePlus, Check, Loader2, SlidersHorizontal,
-  Undo2, Redo2, Package,
+  Undo2, Redo2, Package, MoreHorizontal, PanelRightClose, PanelRightOpen,
 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { NodePanel } from './NodePanel';
@@ -29,6 +29,12 @@ import {
 } from '../lib/ai-ipc';
 import { listCharacterNames, listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 
 interface AiMessage {
   id: string;
@@ -101,6 +107,7 @@ export function StoryEditor() {
   const [characterNames, setCharacterNames] = useState<string[]>([]);
   const [characterColors, setCharacterColors] = useState<Record<string, string>>({});
   const [charactersForAi, setCharactersForAi] = useState<Character[]>([]);
+  const [aiCollapsed, setAiCollapsed] = useState(() => localStorage.getItem(`story-ai-collapsed-${projectId}`) === '1');
 
   // Build character context for AI system prompt
   const buildCharacterContext = useCallback((chars: Character[]): string => {
@@ -156,6 +163,10 @@ export function StoryEditor() {
       console.warn('[runtime] failed to sync project path:', e),
     );
   }, [projectPath]);
+
+  useEffect(() => {
+    localStorage.setItem(`story-ai-collapsed-${projectId}`, aiCollapsed ? '1' : '0');
+  }, [aiCollapsed, projectId]);
 
   // ---------------------------------------------------------------------------
   // Initialization: try to load project from localStorage or URL params
@@ -748,14 +759,21 @@ export function StoryEditor() {
   }
 
   const gameName = projectInfo?.config?.Game_name || `项目 ${projectId ?? ''}`;
+  const selectedIndex = selectedNode ? nodes.findIndex((node) => node.id === selectedNode.id) : -1;
+  const suggestedFigureCharacter =
+    selectedNode?.type === 'changeFigure' &&
+    selectedIndex > 0 &&
+    nodes[selectedIndex - 1]?.type === 'dialogue'
+      ? nodes[selectedIndex - 1].character
+      : undefined;
 
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="h-full flex flex-col bg-background">
         {/* Header */}
         <header className="border-b border-border bg-card/50 backdrop-blur-sm">
-          <div className="px-6 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="px-3 sm:px-6 py-3 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 xl:gap-4">
               <button
                 onClick={() => navigate('/')}
                 className="p-2 rounded-md hover:bg-secondary/50 transition-colors"
@@ -763,23 +781,23 @@ export function StoryEditor() {
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <div className="h-6 w-px bg-border" />
-              <h1 className="text-2xl tracking-tight font-display-family">
+              <div className="hidden xl:block h-6 w-px bg-border" />
+              <h1 className="hidden xl:block text-2xl tracking-tight font-display-family">
                 故事编织室
               </h1>
-              <div className="h-6 w-px bg-border" />
-              <span className="text-sm text-muted-foreground font-mono-family">
+              <div className="hidden xl:block h-6 w-px bg-border" />
+              <span className="min-w-0 max-w-[10rem] truncate text-sm text-muted-foreground font-mono-family">
                 {gameName}
               </span>
 
               {/* Scene selector */}
               {projectInfo && projectInfo.scenes.length > 0 && (
                 <>
-                  <div className="h-6 w-px bg-border" />
+                  <div className="hidden xl:block h-6 w-px bg-border" />
                   <select
                     value={currentSceneName}
                     onChange={(e) => handleSwitchScene(e.target.value)}
-                    className="px-2 py-1 text-sm bg-secondary border border-border rounded-md font-mono-family"
+                    className="max-w-[9rem] sm:max-w-[12rem] px-2 py-1 text-sm bg-secondary border border-border rounded-md font-mono-family"
                     aria-label="选择场景"
                   >
                     {projectInfo.scenes.map((s) => (
@@ -798,14 +816,14 @@ export function StoryEditor() {
               )}
 
               {dirty && (
-                <span className="text-xs text-muted-foreground">未保存</span>
+                <span className="hidden xl:inline text-xs text-muted-foreground">未保存</span>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-shrink-0 items-center gap-1 xl:gap-2">
               <button
                 onClick={handleOpenProject}
-                className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
+                className="hidden xl:flex px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors items-center gap-2 text-sm"
                 title="打开 WebGAL 项目文件夹"
                 aria-label="打开 WebGAL 项目文件夹"
               >
@@ -814,7 +832,7 @@ export function StoryEditor() {
               </button>
               <button
                 onClick={handleImport}
-                className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
+                className="hidden xl:flex px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors items-center gap-2 text-sm"
                 aria-label="导入场景文件"
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -822,7 +840,7 @@ export function StoryEditor() {
               </button>
               <button
                 onClick={handleExport}
-                className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
+                className="hidden xl:flex px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors items-center gap-2 text-sm"
                 aria-label="导出场景文件"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -838,7 +856,7 @@ export function StoryEditor() {
                 <FileText className="w-3.5 h-3.5" />
                 <span>脚本</span>
               </button>
-              <div className="h-6 w-px bg-border mx-1" />
+              <div className="hidden sm:block h-6 w-px bg-border mx-1" />
               <button
                 onClick={() => navigate(`/editor/${projectId}/assets`)}
                 className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
@@ -874,11 +892,11 @@ export function StoryEditor() {
               >
                 <Redo2 className="w-4 h-4" />
               </button>
-              <div className="h-6 w-px bg-border mx-1" />
+              <div className="hidden sm:block h-6 w-px bg-border mx-1" />
               {projectPath && (
                 <button
                   onClick={handleExportProject}
-                  className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
+                  className="hidden xl:flex px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors items-center gap-2 text-sm"
                   title="导出可运行的 WebGAL 包"
                   aria-label="导出项目"
                 >
@@ -886,6 +904,36 @@ export function StoryEditor() {
                   <span>打包</span>
                 </button>
               )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="xl:hidden p-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors"
+                    aria-label="更多操作"
+                  >
+                    <MoreHorizontal className="w-4 h-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuItem onClick={handleOpenProject}>
+                    <FolderOpen className="w-4 h-4" />
+                    打开文件夹
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleImport}>
+                    <Upload className="w-4 h-4" />
+                    导入场景
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExport}>
+                    <Download className="w-4 h-4" />
+                    导出场景
+                  </DropdownMenuItem>
+                  {projectPath && (
+                    <DropdownMenuItem onClick={handleExportProject}>
+                      <Package className="w-4 h-4" />
+                      打包
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <button
                 onClick={handleOpenRuntime}
                 className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
@@ -926,9 +974,9 @@ export function StoryEditor() {
         </header>
 
         {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Panel - Node List + Detail */}
-          <div className="flex">
+        <div className="relative flex-1 flex overflow-hidden">
+          {/* Left Panel - Node List */}
+          <div className="min-w-[200px] max-w-[260px] flex-shrink-0">
             <NodePanel
               nodes={nodes}
               selectedNode={selectedNode}
@@ -942,18 +990,21 @@ export function StoryEditor() {
                 )
               }
             />
-
-            {selectedNode && (
-              <DetailPanel
-                node={selectedNode}
-                onUpdateNode={(updates) => updateNode(selectedNode.id, updates)}
-                onDeleteNode={() => deleteNode(selectedNode.id)}
-                onClose={() => setSelectedNode(null)}
-                characterNames={characterNames}
-                projectPath={projectPath || undefined}
-              />
-            )}
           </div>
+
+          {selectedNode && (
+            <DetailPanel
+              node={selectedNode}
+              onUpdateNode={(updates) => updateNode(selectedNode.id, updates)}
+              onDeleteNode={() => deleteNode(selectedNode.id)}
+              onClose={() => setSelectedNode(null)}
+              characterNames={characterNames}
+              projectPath={projectPath || undefined}
+              characters={charactersForAi}
+              projectId={projectId}
+              suggestedFigureCharacter={suggestedFigureCharacter}
+            />
+          )}
 
           {/* Center - Flow Canvas or Script Editor */}
           {showScript ? (
@@ -988,18 +1039,31 @@ export function StoryEditor() {
           )}
 
           {/* Right Panel - AI Chat */}
-          <div className="w-80 border-l border-border bg-card/30 backdrop-blur-sm flex flex-col">
-            <div className="p-4 border-b border-border flex items-center gap-3">
+          <div className={`${aiCollapsed ? 'w-10' : 'w-80'} border-l border-border bg-card/30 backdrop-blur-sm flex flex-col transition-[width] duration-200`}>
+            <div className={`${aiCollapsed ? 'p-2 justify-center' : 'p-4'} border-b border-border flex items-center gap-3`}>
+              <button
+                type="button"
+                onClick={() => setAiCollapsed((value) => !value)}
+                className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
+                title={aiCollapsed ? '展开 AI 助手' : '折叠 AI 助手'}
+                aria-label={aiCollapsed ? '展开 AI 助手' : '折叠 AI 助手'}
+              >
+                {aiCollapsed ? <PanelRightOpen className="w-4 h-4" /> : <PanelRightClose className="w-4 h-4" />}
+              </button>
+              {!aiCollapsed && (
+                <>
               <div className="p-2 rounded-full bg-primary/20">
                 <Sparkles className="w-4 h-4 text-primary" />
               </div>
               <h3 className="text-sm uppercase tracking-widest text-muted-foreground font-mono-family">
                 AI 创作助手
               </h3>
+                </>
+              )}
             </div>
 
             {/* Quick Actions */}
-            <div className="p-3 border-b border-border">
+            {!aiCollapsed && <div className="p-3 border-b border-border">
               <div className="grid grid-cols-2 gap-2">
                   {[
                     { label: '生成对话', text: '请生成一段两位角色的日常对话，至少 6 行，并附带 webgal-json 结构块。' },
@@ -1017,10 +1081,10 @@ export function StoryEditor() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {!aiCollapsed && <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {aiMessages.map((msg) => {
                 const isStreaming = aiBusy && aiStreamingIdRef.current === msg.id;
                 const webGalScene = msg.role === 'assistant' ? extractWebGalJson(msg.content) : null;
@@ -1062,10 +1126,10 @@ export function StoryEditor() {
                 </div>
               )}
               <div ref={aiMessagesEndRef} />
-            </div>
+            </div>}
 
             {/* Input */}
-            <div className="p-3 border-t border-border">
+            {!aiCollapsed && <div className="p-3 border-t border-border">
               <textarea
                 value={aiInput}
                 onChange={(e) => setAiInput(e.target.value)}
@@ -1098,7 +1162,7 @@ export function StoryEditor() {
                   <span>发送</span>
                 </button>
               )}
-            </div>
+            </div>}
           </div>
         </div>
 

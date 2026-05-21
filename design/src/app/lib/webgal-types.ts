@@ -65,6 +65,8 @@ export interface WebGalNode {
   asset?: string;
   figurePosition?: 'left' | 'center' | 'right';
   figureId?: string;
+  figureCharacter?: string;
+  figureEmotion?: string;
 
   // choose
   choices?: ChoiceBranch[];

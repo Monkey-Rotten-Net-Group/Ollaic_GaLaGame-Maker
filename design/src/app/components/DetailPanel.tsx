@@ -1,7 +1,19 @@
-import { Sparkles, Trash2, Plus, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { Image, Loader2, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandLabels } from '../lib/webgal-types';
 import { AssetPickerButton } from './AssetPicker';
+import type { Character } from '../lib/character-types';
+import { getAliasMap } from '../lib/asset-alias';
+import { listScenes } from '../lib/webgal-ipc';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
 
 interface DetailPanelProps {
   node: WebGalNode;
@@ -10,6 +22,9 @@ interface DetailPanelProps {
   onClose: () => void;
   characterNames?: string[];
   projectPath?: string;
+  characters?: Character[];
+  projectId?: string;
+  suggestedFigureCharacter?: string;
 }
 
 const typeOptions: { value: WebGalCommandType; label: string }[] = [
@@ -41,9 +56,21 @@ const typeOptions: { value: WebGalCommandType; label: string }[] = [
 const inputClass = 'w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm';
 const labelClass = 'block text-xs uppercase tracking-widest text-muted-foreground mb-1.5';
 
-export function DetailPanel({ node, onUpdateNode, onDeleteNode, onClose, characterNames, projectPath }: DetailPanelProps) {
+export function DetailPanel({
+  node,
+  onUpdateNode,
+  onDeleteNode,
+  onClose,
+  characterNames,
+  projectPath,
+  characters = [],
+  projectId,
+  suggestedFigureCharacter,
+}: DetailPanelProps) {
+  const aliases = projectId ? getAliasMap(projectId) : {};
+
   return (
-    <div className="w-80 border-r border-border bg-card/30 backdrop-blur-sm flex flex-col overflow-hidden">
+    <div className="absolute left-[260px] top-0 z-20 h-full w-80 border-r border-border bg-card/90 backdrop-blur-sm shadow-xl flex flex-col overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between">
         <div>
@@ -77,7 +104,7 @@ export function DetailPanel({ node, onUpdateNode, onDeleteNode, onClose, charact
         </div>
 
         {/* Type-specific fields */}
-        {renderTypeFields(node, onUpdateNode, characterNames, projectPath)}
+        {renderTypeFields(node, onUpdateNode, characterNames, projectPath, characters, projectId, aliases, suggestedFigureCharacter)}
 
         {/* Common flags */}
         <div className="pt-3 border-t border-border space-y-3">
@@ -137,6 +164,10 @@ function renderTypeFields(
   onUpdate: (updates: Partial<WebGalNode>) => void,
   characterNames?: string[],
   projectPath?: string,
+  characters: Character[] = [],
+  projectId?: string,
+  aliases: Record<string, string> = {},
+  suggestedFigureCharacter?: string,
 ) {
   switch (node.type) {
     case 'dialogue':
@@ -227,6 +258,22 @@ function renderTypeFields(
       return (
         <div>
           <label className={`${labelClass} font-mono-family`}>背景图片</label>
+          {projectPath && node.asset && node.asset !== 'none' && (
+            <div className="mb-2 overflow-hidden rounded-md border border-border bg-secondary/20">
+              <div className="aspect-video bg-secondary/30">
+                <img
+                  src={convertFileSrc(`${projectPath}/game/background/${node.asset}`)}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={(e) => { (e.currentTarget.style.display = 'none'); }}
+                />
+              </div>
+              <div className="px-3 py-2 min-w-0">
+                <div className="truncate text-sm">{aliases[node.asset] || node.asset}</div>
+                {aliases[node.asset] && <div className="truncate text-[11px] text-muted-foreground font-mono-family">{node.asset}</div>}
+              </div>
+            </div>
+          )}
           <div className="flex gap-1">
             <input
               type="text"
@@ -241,10 +288,20 @@ function renderTypeFields(
                 projectPath={projectPath}
                 category="background"
                 currentValue={node.asset || node.content}
+                aliases={aliases}
                 onSelect={(name) => onUpdate({ asset: name, content: name })}
               />
             )}
           </div>
+          {(node.asset || node.content) && (node.asset || node.content) !== 'none' && (
+            <button
+              type="button"
+              onClick={() => onUpdate({ asset: 'none', content: 'none' })}
+              className="mt-2 px-2 py-1 rounded bg-secondary hover:bg-secondary/70 text-xs"
+            >
+              清除
+            </button>
+          )}
           <p className="text-[10px] text-muted-foreground mt-1">放在 game/background/ 目录下</p>
         </div>
       );
@@ -252,28 +309,13 @@ function renderTypeFields(
     case 'changeFigure':
       return (
         <>
-          <div>
-            <label className={`${labelClass} font-mono-family`}>立绘文件</label>
-            <div className="flex gap-1">
-              <input
-                type="text"
-                value={node.asset || node.content}
-                onChange={(e) => onUpdate({ asset: e.target.value, content: e.target.value })}
-                className={`${inputClass} flex-1 font-mono-family`}
-                placeholder="例: stand.webp 或 none"
-                aria-label="立绘文件"
-              />
-              {projectPath && (
-                <AssetPickerButton
-                  projectPath={projectPath}
-                  category="figure"
-                  currentValue={node.asset || node.content}
-                  onSelect={(name) => onUpdate({ asset: name, content: name })}
-                />
-              )}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">放在 game/figure/ 目录下</p>
-          </div>
+          <CharacterFigurePicker
+            node={node}
+            onUpdate={onUpdate}
+            characters={characters}
+            projectPath={projectPath}
+            suggestedFigureCharacter={suggestedFigureCharacter}
+          />
           <div>
             <label className={`${labelClass} font-mono-family`}>位置</label>
             <select
@@ -319,6 +361,7 @@ function renderTypeFields(
                 projectPath={projectPath}
                 category="figure"
                 currentValue={node.asset || node.content}
+                aliases={aliases}
                 onSelect={(name) => onUpdate({ asset: name, content: name })}
               />
             )}
@@ -333,14 +376,24 @@ function renderTypeFields(
           <label className={`${labelClass} font-mono-family`}>
             目标场景文件
           </label>
-          <input
-            type="text"
-            value={node.targetScene || node.content}
-            onChange={(e) => onUpdate({ targetScene: e.target.value, content: e.target.value })}
-            className={`${inputClass} font-mono-family`}
-            placeholder="例: Chapter-2.txt"
-            aria-label="目标场景文件"
-          />
+          <div className="flex gap-1">
+            <input
+              type="text"
+              value={node.targetScene || node.content}
+              onChange={(e) => onUpdate({ targetScene: e.target.value, content: e.target.value })}
+              className={`${inputClass} flex-1 font-mono-family`}
+              placeholder="例: Chapter-2.txt"
+              aria-label="目标场景文件"
+            />
+            {projectPath && (
+              <ScenePickerButton
+                projectPath={projectPath}
+                currentValue={node.targetScene || node.content}
+                aliases={aliases}
+                onSelect={(name) => onUpdate({ targetScene: name, content: name })}
+              />
+            )}
+          </div>
           <p className="text-[10px] text-muted-foreground mt-1">
             {node.type === 'callScene' ? 'callScene 执行完后会返回当前场景' : 'changeScene 会永久切换'}
           </p>
@@ -375,6 +428,7 @@ function renderTypeFields(
                   projectPath={projectPath}
                   category={node.type === 'playEffect' ? 'sfx' : node.type === 'playVideo' ? 'video' : 'bgm'}
                   currentValue={node.asset || node.content}
+                  aliases={aliases}
                   onSelect={(name) => onUpdate({ asset: name, content: name })}
                 />
               )}
@@ -596,6 +650,305 @@ function renderTypeFields(
         </div>
       );
   }
+}
+
+function findSpriteSelection(characters: Character[], filename: string) {
+  if (!filename || filename === 'none') return null;
+  for (const character of characters) {
+    const sprite = character.sprites.find((item) => item.file === filename);
+    if (sprite) return { character, sprite };
+  }
+  return null;
+}
+
+function CharacterFigurePicker({
+  node,
+  onUpdate,
+  characters,
+  projectPath,
+  suggestedFigureCharacter,
+}: {
+  node: WebGalNode;
+  onUpdate: (updates: Partial<WebGalNode>) => void;
+  characters: Character[];
+  projectPath?: string;
+  suggestedFigureCharacter?: string;
+}) {
+  const filename = node.asset || node.content;
+  const inferred = useMemo(() => findSpriteSelection(characters, filename), [characters, filename]);
+  const selectedCharacterName = node.figureCharacter || inferred?.character.name || suggestedFigureCharacter || '';
+  const selectedCharacter = characters.find((character) => character.name === selectedCharacterName);
+
+  useEffect(() => {
+    if (!node.figureCharacter && !node.figureEmotion && inferred) {
+      onUpdate({ figureCharacter: inferred.character.name, figureEmotion: inferred.sprite.emotion });
+    }
+  }, [inferred, node.figureCharacter, node.figureEmotion, onUpdate]);
+
+  const chooseCharacter = (name: string) => {
+    if (!name) {
+      onUpdate({ figureCharacter: undefined, figureEmotion: undefined });
+      return;
+    }
+    const character = characters.find((item) => item.name === name);
+    const firstSprite = character?.sprites[0];
+    onUpdate({
+      figureCharacter: name,
+      figureEmotion: firstSprite?.emotion,
+      asset: firstSprite?.file || filename,
+      content: firstSprite?.file || filename,
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className={`${labelClass} font-mono-family`}>关联角色</label>
+        <select
+          value={selectedCharacterName}
+          onChange={(e) => chooseCharacter(e.target.value)}
+          className={inputClass}
+          aria-label="关联角色"
+        >
+          <option value="">无（手动输入文件名）</option>
+          {characters.map((character) => (
+            <option key={character.id} value={character.name}>{character.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {selectedCharacter ? (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className={`${labelClass} font-mono-family mb-0`}>表情形态</label>
+            <span className="text-[10px] text-muted-foreground font-mono-family">{filename || 'none'}</span>
+          </div>
+          <CharacterEmotionDialog
+            character={selectedCharacter}
+            currentFile={filename}
+            projectPath={projectPath}
+            onSelect={(sprite) => onUpdate({
+              asset: sprite.file,
+              content: sprite.file,
+              figureCharacter: selectedCharacter.name,
+              figureEmotion: sprite.emotion,
+            })}
+          />
+        </div>
+      ) : (
+        <div>
+          <label className={`${labelClass} font-mono-family`}>立绘文件</label>
+          <div className="flex gap-1">
+            <input
+              type="text"
+              value={filename}
+              onChange={(e) => onUpdate({
+                asset: e.target.value,
+                content: e.target.value,
+                figureCharacter: undefined,
+                figureEmotion: undefined,
+              })}
+              className={`${inputClass} flex-1 font-mono-family`}
+              placeholder="例: stand.webp 或 none"
+              aria-label="立绘文件"
+            />
+            {projectPath && (
+              <AssetPickerButton
+                projectPath={projectPath}
+                category="figure"
+                currentValue={filename}
+                onSelect={(name) => onUpdate({
+                  asset: name,
+                  content: name,
+                  figureCharacter: undefined,
+                  figureEmotion: undefined,
+                })}
+              />
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">放在 game/figure/ 目录下</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CharacterEmotionDialog({
+  character,
+  currentFile,
+  projectPath,
+  onSelect,
+}: {
+  character: Character;
+  currentFile: string;
+  projectPath?: string;
+  onSelect: (sprite: Character['sprites'][number]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const selectedSprite = character.sprites.find((sprite) => sprite.file === currentFile);
+  const filtered = character.sprites.filter((sprite) =>
+    `${sprite.emotion} ${sprite.file}`.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-md border border-border bg-card/60 hover:bg-secondary/50 transition-colors overflow-hidden text-left"
+      >
+        {selectedSprite && projectPath ? (
+          <div className="flex items-center gap-3 p-2">
+            <div className="w-14 h-20 rounded bg-secondary/30 overflow-hidden flex-shrink-0">
+              <img src={convertFileSrc(`${projectPath}/game/figure/${selectedSprite.file}`)} alt="" className="w-full h-full object-cover object-top" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm truncate">{selectedSprite.emotion}</div>
+              <div className="mt-1 text-[11px] text-muted-foreground truncate font-mono-family">{selectedSprite.file}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 text-sm text-muted-foreground">选择表情形态</div>
+        )}
+      </button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-2xl p-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <DialogTitle className="text-base font-display-family">选择立绘 - {character.name}</DialogTitle>
+            <DialogDescription className="text-xs">点击表情卡片后会写入对应立绘文件名。</DialogDescription>
+          </DialogHeader>
+          <div className="px-5 py-3 border-b border-border">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索表情..."
+                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
+                aria-label="搜索表情"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto p-5">
+            {character.sprites.length === 0 ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">该角色暂无立绘，请先在素材库中添加。</div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {filtered.map((sprite) => {
+                  const selected = sprite.file === currentFile;
+                  return (
+                    <button
+                      type="button"
+                      key={`${character.id}-${sprite.file}-${sprite.emotion}`}
+                      onClick={() => { onSelect(sprite); setOpen(false); }}
+                      className={`w-24 h-32 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
+                        selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
+                      }`}
+                    >
+                      <div className="h-24 bg-secondary/30 flex items-center justify-center overflow-hidden">
+                        {projectPath ? (
+                          <img src={convertFileSrc(`${projectPath}/game/figure/${sprite.file}`)} alt="" className="w-full h-full object-cover object-top" />
+                        ) : (
+                          <Image className="w-7 h-7 text-muted-foreground/40" />
+                        )}
+                      </div>
+                      <div className="px-2 py-1 text-xs truncate text-center">{sprite.emotion}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function ScenePickerButton({
+  projectPath,
+  currentValue,
+  aliases,
+  onSelect,
+}: {
+  projectPath: string;
+  currentValue: string;
+  aliases: Record<string, string>;
+  onSelect: (scene: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [scenes, setScenes] = useState<string[]>([]);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    listScenes(`${projectPath}/game/scene`)
+      .then(setScenes)
+      .catch(() => setScenes([]))
+      .finally(() => setLoading(false));
+  }, [open, projectPath]);
+
+  const filtered = scenes.filter((scene) => {
+    const q = search.toLowerCase();
+    return scene.toLowerCase().includes(q) || (aliases[scene] || '').toLowerCase().includes(q);
+  });
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="px-2 py-1.5 text-xs rounded bg-secondary hover:bg-secondary/70 transition-colors border border-border flex items-center gap-1"
+      >
+        浏览
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <DialogTitle className="text-base font-display-family">选择场景文件</DialogTitle>
+            <DialogDescription className="text-xs">读取 game/scene/ 下的 .txt 场景。</DialogDescription>
+          </DialogHeader>
+          <div className="px-5 py-3 border-b border-border">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索场景..."
+                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
+                aria-label="搜索场景"
+              />
+            </div>
+          </div>
+          <div className="max-h-[55vh] overflow-y-auto p-3">
+            {loading ? (
+              <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+            ) : filtered.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">暂无场景文件</div>
+            ) : filtered.map((scene) => (
+              <button
+                key={scene}
+                type="button"
+                onClick={() => { onSelect(scene); setOpen(false); }}
+                className={`w-full px-3 py-2 rounded-md text-left hover:bg-secondary/50 transition-colors ${
+                  currentValue === scene ? 'bg-primary/10 text-primary' : ''
+                }`}
+              >
+                <div className="text-sm truncate">{aliases[scene] || scene}</div>
+                {aliases[scene] && <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono-family">{scene}</div>}
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 function ChoiceEditor({ node, onUpdate }: { node: WebGalNode; onUpdate: (u: Partial<WebGalNode>) => void }) {

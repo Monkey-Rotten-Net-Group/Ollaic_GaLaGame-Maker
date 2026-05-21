@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import {
   MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
@@ -265,9 +265,28 @@ function FlowNodeCard({
 export function FlowCanvas({
   nodes, selectedNode, onSelectNode, onReorderNodes, characterColors,
 }: FlowCanvasProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   const handleReorder = useCallback((from: number, to: number) => {
     onReorderNodes(from, to);
   }, [onReorderNodes]);
+
+  useEffect(() => {
+    if (!selectedNode || !scrollRef.current) return;
+    const card = cardRefs.current[selectedNode.id];
+    const container = scrollRef.current;
+    if (!card) return;
+
+    const cardTop = card.offsetTop;
+    const cardBottom = cardTop + card.offsetHeight;
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+
+    if (cardTop < viewTop || cardBottom > viewBottom) {
+      container.scrollTop = Math.max(0, cardTop - container.clientHeight / 2 + card.offsetHeight / 2);
+    }
+  }, [selectedNode?.id]);
 
   return (
     <div className="flex-1 relative overflow-hidden bg-background/50">
@@ -275,8 +294,8 @@ export function FlowCanvas({
       <div className="absolute top-0 left-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 right-0 w-96 h-96 bg-accent/5 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="relative size-full overflow-auto">
-        <div className="min-h-full flex flex-col items-center px-6 py-10">
+      <div ref={scrollRef} className="relative size-full overflow-auto scroll-pb-32">
+        <div className="min-h-full flex flex-col items-center px-6 pt-10 pb-32">
           {nodes.length === 0 ? (
             <div className="m-auto text-center">
               <div className="text-5xl mb-4 opacity-20">📖</div>
@@ -294,19 +313,20 @@ export function FlowCanvas({
               </div>
               <div className="flex flex-col items-center w-full max-w-md">
                 {nodes.map((node, index) => (
-                  <FlowNodeCard
-                    key={node.id}
-                    node={node}
-                    index={index}
-                    isLast={index === nodes.length - 1}
-                    isSelected={selectedNode?.id === node.id}
-                    characterColors={characterColors}
-                    onSelect={onSelectNode}
-                    onReorder={handleReorder}
-                  />
+                  <div key={node.id} ref={(el) => { cardRefs.current[node.id] = el; }} className="w-full">
+                    <FlowNodeCard
+                      node={node}
+                      index={index}
+                      isLast={index === nodes.length - 1}
+                      isSelected={selectedNode?.id === node.id}
+                      characterColors={characterColors}
+                      onSelect={onSelectNode}
+                      onReorder={handleReorder}
+                    />
+                  </div>
                 ))}
               </div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-mono-family mt-4">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-mono-family mt-4 mb-16">
                 ▲ 终点
               </div>
             </>
