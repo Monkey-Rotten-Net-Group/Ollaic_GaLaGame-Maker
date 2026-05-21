@@ -55,6 +55,46 @@ fn is_media_file(name: &str) -> bool {
     exts.iter().any(|e| lower.ends_with(e))
 }
 
+fn normalize_asset_filename(filename: &str) -> String {
+    let path = PathBuf::from(filename);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(filename);
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+
+    let chars: Vec<char> = stem.chars().collect();
+    let mut normalized = String::new();
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '-' {
+            while normalized.ends_with(char::is_whitespace) {
+                normalized.pop();
+            }
+            normalized.push('-');
+            i += 1;
+            while i < chars.len() && chars[i].is_whitespace() {
+                i += 1;
+            }
+            continue;
+        }
+        normalized.push(ch);
+        i += 1;
+    }
+
+    let normalized = normalized.trim().to_string();
+    if ext.is_empty() {
+        normalized
+    } else {
+        format!("{normalized}.{ext}")
+    }
+}
+
 fn list_dir_files(dir: &PathBuf) -> Result<Vec<AssetInfo>, String> {
     let mut result = Vec::new();
     let entries = fs::read_dir(dir).map_err(|e| format!("无法读取目录 {}: {e}", dir.display()))?;
@@ -154,7 +194,8 @@ pub fn import_asset(
         .ok_or_else(|| "无效的文件路径".to_string())?
         .to_string_lossy()
         .to_string();
-    let target = target_dir.join(&filename);
+    let normalized_filename = normalize_asset_filename(&filename);
+    let target = target_dir.join(&normalized_filename);
 
     // Avoid overwriting — append (1), (2), etc.
     let target = unique_path(target);
