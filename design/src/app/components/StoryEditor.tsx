@@ -87,6 +87,7 @@ export function StoryEditor() {
   // Editor state
   const [nodes, setNodes] = useState<WebGalNode[]>([]);
   const [selectedNode, setSelectedNode] = useState<WebGalNode | null>(null);
+  const [clipboardNode, setClipboardNode] = useState<WebGalNode | null>(null);
   const [scriptSource, setScriptSource] = useState(DEMO_SCRIPT);
   const [showScript, setShowScript] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -329,6 +330,33 @@ export function StoryEditor() {
     setSelectedNode(null);
     markDirty();
   }, [syncScript, markDirty, pushHistory]);
+
+  const copyNode = useCallback((node: WebGalNode) => {
+    setClipboardNode({ ...node });
+  }, []);
+
+  const cutNode = useCallback((node: WebGalNode) => {
+    setClipboardNode({ ...node });
+    deleteNode(node.id);
+  }, [deleteNode]);
+
+  const pasteNode = useCallback((atIndex: number) => {
+    if (!clipboardNode) return;
+    const newId = Date.now().toString();
+    const newNode: WebGalNode = {
+      ...clipboardNode,
+      id: newId,
+      position: { x: 100, y: 60 + (atIndex + 1) * 110 },
+    };
+    setNodes(prev => {
+      pushHistory(prev);
+      const idx = atIndex + 1;
+      const updated = rewireConnections([...prev.slice(0, idx), newNode, ...prev.slice(idx)]);
+      syncScript(updated);
+      return updated;
+    });
+    markDirty();
+  }, [clipboardNode, pushHistory, syncScript, markDirty]);
 
   const reorderNodes = useCallback((fromIndex: number, toIndex: number) => {
     setNodes(prev => {
@@ -989,6 +1017,11 @@ export function StoryEditor() {
                   console.warn('[runtime] jumpToSentence failed:', e),
                 )
               }
+              onDeleteNode={deleteNode}
+              onCopyNode={copyNode}
+              onCutNode={cutNode}
+              onPasteNode={pasteNode}
+              clipboardNode={clipboardNode}
             />
           </div>
 
@@ -1033,6 +1066,11 @@ export function StoryEditor() {
               onSelectNode={setSelectedNode}
               onReorderNodes={reorderNodes}
               characterColors={characterColors}
+              onDeleteNode={deleteNode}
+              onCopyNode={copyNode}
+              onCutNode={cutNode}
+              onPasteNode={pasteNode}
+              clipboardNode={clipboardNode}
             />
           )}
 

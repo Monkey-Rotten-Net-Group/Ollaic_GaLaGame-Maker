@@ -1,13 +1,21 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useDrag, useDrop } from 'react-dnd';
 import {
   MessageCircle, GitBranch, Image as ImageIcon, User, Music, Film, Tag,
   ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award,
-  Play, Plus, GripVertical,
+  Play, Plus, GripVertical, Copy, Scissors, Trash2, Clipboard,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandCategories, commandLabels, categoryLabels } from '../lib/webgal-types';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from './ui/context-menu';
 
 const DND_LIST_ITEM = 'flow-node';
 
@@ -22,6 +30,11 @@ interface NodePanelProps {
   characterColors?: Record<string, string>;
   /** Called when the user clicks "执行到此句" on the node at `index` (0-based). */
   onJumpToIndex?: (index: number) => void;
+  onDeleteNode?: (id: string) => void;
+  onCopyNode?: (node: WebGalNode) => void;
+  onCutNode?: (node: WebGalNode) => void;
+  onPasteNode?: (atIndex: number) => void;
+  clipboardNode?: WebGalNode | null;
 }
 
 const commandIcons: Partial<Record<WebGalCommandType, typeof MessageCircle>> = {
@@ -255,6 +268,8 @@ function InsertZone({
         <button
           type="button"
           aria-label={`在位置 ${atIndex + 1} 插入指令`}
+          data-insert-zone="true"
+          data-insert-index={atIndex}
           className={`group/zone relative w-full flex items-center justify-center cursor-pointer transition-all overflow-visible ${
             append
               ? 'h-20'
@@ -326,12 +341,20 @@ interface NodeListItemProps {
   onSelect: (node: WebGalNode) => void;
   onJump?: (index: number) => void;
   onReorder?: (fromIndex: number, toIndex: number) => void;
+  onDelete?: () => void;
+  onCopy?: () => void;
+  onCut?: () => void;
+  onPaste?: () => void;
+  canPaste?: boolean;
 }
 
 function NodeListItem({
   node, index, isSelected, characterColors, onSelect, onJump, onReorder,
+  onDelete, onCopy, onCut, onPaste, canPaste,
 }: NodeListItemProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const gripRef = useRef<HTMLSpanElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const Icon = commandIcons[node.type] || Type;
   const color = typeColorMap[node.type] || 'text-muted-foreground';
 
@@ -354,84 +377,150 @@ function NodeListItem({
     },
   });
 
-  const [{ isDragging }, drag] = useDrag({
+  const [{ isDragging }, drag, dragPreview] = useDrag({
     type: DND_LIST_ITEM,
     item: () => ({ index }),
     canDrag: () => Boolean(onReorder),
     collect: (m) => ({ isDragging: m.isDragging() }),
   });
 
-  drag(drop(ref));
+  drag(gripRef);
+  dragPreview(drop(ref));
+
+  const contextMenuItems = (
+    <>
+      <ContextMenuItem onClick={onCopy} className="gap-2 text-xs">
+        <Copy className="w-3.5 h-3.5" /> 复制
+      </ContextMenuItem>
+      <ContextMenuItem onClick={onCut} className="gap-2 text-xs">
+        <Scissors className="w-3.5 h-3.5" /> 剪切
+      </ContextMenuItem>
+      <ContextMenuItem onClick={onPaste} disabled={!canPaste} className="gap-2 text-xs">
+        <Clipboard className="w-3.5 h-3.5" /> 粘贴
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={onDelete} className="gap-2 text-xs text-destructive focus:text-destructive">
+        <Trash2 className="w-3.5 h-3.5" /> 删除
+      </ContextMenuItem>
+    </>
+  );
 
   return (
-    <div
-      ref={ref}
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(node)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect(node);
-        }
-      }}
-      style={onReorder ? { cursor: isDragging ? 'grabbing' : 'grab' } : undefined}
-      className={`
-        group relative w-full px-2 py-2 rounded border transition-all text-left
-        ${isDragging ? 'opacity-30' : 'opacity-100'}
-        ${isSelected
-          ? 'border-primary bg-primary/10 shadow-[0_0_12px_rgba(212,165,116,0.15)]'
-          : 'border-transparent hover:border-border hover:bg-secondary/30'
-        }
-      `}
-    >
-      <div className="flex items-start gap-1.5">
-        {onReorder && (
-          <span
-            className="opacity-0 group-hover:opacity-60 transition-opacity -ml-1 mt-0.5 text-muted-foreground"
-            aria-hidden="true"
-          >
-            <GripVertical className="w-3 h-3" />
-          </span>
-        )}
-        <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${color}`} />
-        {node.type === 'dialogue' && node.character && characterColors?.[node.character] && (
-          <span
-            className="w-2 h-2 rounded-full mt-1 shrink-0"
-            style={{ backgroundColor: characterColors[node.character] }}
-          />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family flex items-center gap-1.5">
-            <span className="opacity-50">{index + 1}</span>
-            <span>{commandLabels[node.type]}</span>
-          </div>
-          <div className="text-xs text-foreground/80 truncate">
-            {getNodeSummary(node) || '(空)'}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          ref={ref}
+          data-node-item="true"
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelect(node)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onSelect(node);
+            }
+          }}
+          className={`
+            group relative w-full px-2 py-2 rounded border transition-all text-left
+            ${isDragging ? 'opacity-30' : 'opacity-100'}
+            ${isSelected
+              ? 'border-primary bg-primary/10 shadow-[0_0_12px_rgba(212,165,116,0.15)]'
+              : 'border-transparent hover:border-border hover:bg-secondary/30'
+            }
+          `}
+        >
+          <div className="flex items-start gap-1.5">
+            {onReorder && (
+              <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+                <PopoverTrigger asChild>
+                  <span
+                    ref={gripRef}
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
+                    className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity -ml-1 mt-0.5 text-muted-foreground cursor-grab active:cursor-grabbing shrink-0"
+                    title="拖动调整顺序，单击打开菜单"
+                    aria-label="节点操作"
+                  >
+                    <GripVertical className="w-3 h-3" />
+                  </span>
+                </PopoverTrigger>
+                <PopoverContent align="start" side="right" sideOffset={4} className="w-32 p-1">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onCopy?.(); setMenuOpen(false); }}
+                    className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-secondary transition-colors flex items-center gap-2">
+                    <Copy className="w-3.5 h-3.5 shrink-0" /><span>复制</span>
+                  </button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onCut?.(); setMenuOpen(false); }}
+                    className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-secondary transition-colors flex items-center gap-2">
+                    <Scissors className="w-3.5 h-3.5 shrink-0" /><span>剪切</span>
+                  </button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onPaste?.(); setMenuOpen(false); }}
+                    disabled={!canPaste}
+                    className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-secondary transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                    <Clipboard className="w-3.5 h-3.5 shrink-0" /><span>粘贴</span>
+                  </button>
+                  <div className="my-1 border-t border-border" />
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onDelete?.(); setMenuOpen(false); }}
+                    className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-destructive/20 text-destructive transition-colors flex items-center gap-2">
+                    <Trash2 className="w-3.5 h-3.5 shrink-0" /><span>删除</span>
+                  </button>
+                </PopoverContent>
+              </Popover>
+            )}
+            <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${color}`} />
+            {node.type === 'dialogue' && node.character && characterColors?.[node.character] && (
+              <span
+                className="w-2 h-2 rounded-full mt-1 shrink-0"
+                style={{ backgroundColor: characterColors[node.character] }}
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family flex items-center gap-1.5">
+                <span className="opacity-50">{index + 1}</span>
+                <span>{commandLabels[node.type]}</span>
+              </div>
+              <div className="text-xs text-foreground/80 truncate">
+                {getNodeSummary(node) || '(空)'}
+              </div>
+            </div>
+            {onJump && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJump(index);
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary shrink-0"
+                title="执行到此句"
+                aria-label="执行到此句"
+              >
+                <Play className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
-        {onJump && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onJump(index);
-            }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-primary/20 text-muted-foreground hover:text-primary shrink-0"
-            title="执行到此句"
-            aria-label="执行到此句"
-          >
-            <Play className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-32">
+        {contextMenuItems}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
-export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex }: NodePanelProps) {
+export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex, onDeleteNode, onCopyNode, onCutNode, onPasteNode, clipboardNode }: NodePanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [areaMenu, setAreaMenu] = useState<{ x: number; y: number; atIndex: number } | null>(null);
+
+  useEffect(() => {
+    if (!areaMenu) return;
+    const close = () => setAreaMenu(null);
+    const keyClose = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', keyClose);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', keyClose);
+    };
+  }, [areaMenu]);
 
   useEffect(() => {
     if (!selectedNode || !listRef.current) return;
@@ -458,7 +547,23 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
       />
 
       {/* Node List */}
-      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto p-2 pb-24 scroll-pb-24">
+      <div
+        ref={listRef}
+        className="flex-1 min-h-0 overflow-y-auto p-2 pb-24 scroll-pb-24"
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest('[data-node-item]')) return;
+          e.preventDefault();
+          const insertEl = (e.target as HTMLElement).closest('[data-insert-zone]');
+          const atIndex = insertEl
+            ? Number((insertEl as HTMLElement).dataset.insertIndex ?? nodes.length) - 1
+            : nodes.length - 1;
+          setAreaMenu({
+            x: Math.min(e.clientX, window.innerWidth - 148),
+            y: Math.min(e.clientY, window.innerHeight - 72),
+            atIndex,
+          });
+        }}
+      >
         {nodes.map((node, index) => (
           <Fragment key={node.id}>
             {onInsertNode && (
@@ -473,6 +578,11 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
                 onSelect={onSelectNode}
                 onJump={onJumpToIndex}
                 onReorder={onReorderNodes}
+                onDelete={() => onDeleteNode?.(node.id)}
+                onCopy={() => onCopyNode?.(node)}
+                onCut={() => onCutNode?.(node)}
+                onPaste={() => onPasteNode?.(index)}
+                canPaste={Boolean(clipboardNode)}
               />
             </div>
           </Fragment>
@@ -482,11 +592,30 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
         )}
       </div>
 
-        <div className="p-3 border-t border-border">
+      <div className="p-3 border-t border-border">
         <div className="text-xs text-muted-foreground font-mono-family">
           共 {nodes.length} 条指令
         </div>
       </div>
+
+      {areaMenu && createPortal(
+        <div
+          style={{ left: areaMenu.x, top: areaMenu.y }}
+          className="fixed z-50 min-w-[8rem] bg-popover border border-border rounded-md shadow-md p-1"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            disabled={!clipboardNode}
+            onClick={() => { onPasteNode?.(areaMenu.atIndex); setAreaMenu(null); }}
+            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-secondary transition-colors flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Clipboard className="w-3.5 h-3.5 shrink-0" />
+            <span>粘贴到此处</span>
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
