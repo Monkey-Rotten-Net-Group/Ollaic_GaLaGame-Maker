@@ -522,6 +522,23 @@ export function ProjectHome() {
                       清除搜索内容
                     </button>
                   </>
+                ) : sidebarFilter === 'trash' ? (
+                  <>
+                    <p className="text-lg mb-2">回收站是空的</p>
+                    <p className="text-sm text-muted-foreground/60">移入回收站的项目将在这里显示</p>
+                  </>
+                ) : sidebarFilter === 'favorites' ? (
+                  <>
+                    <Star className="w-8 h-8 opacity-20 mb-2" />
+                    <p className="text-lg mb-2">还没有收藏的项目</p>
+                    <p className="text-sm text-muted-foreground/60">点击项目卡片上的星标即可收藏</p>
+                  </>
+                ) : sidebarFilter === 'recent' ? (
+                  <>
+                    <Clock className="w-8 h-8 opacity-20 mb-2" />
+                    <p className="text-lg mb-2">暂无最近编辑的项目</p>
+                    <p className="text-sm text-muted-foreground/60">打开项目后将在这里显示</p>
+                  </>
                 ) : (
                   <>
                     <p className="text-lg mb-2">还没有项目</p>
