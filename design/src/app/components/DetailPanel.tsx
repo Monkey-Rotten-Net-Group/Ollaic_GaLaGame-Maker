@@ -70,7 +70,7 @@ export function DetailPanel({
   const aliases = projectId ? getAliasMap(projectId) : {};
 
   return (
-    <div className="absolute left-[260px] top-0 z-20 h-full w-80 border-r border-border bg-card/90 backdrop-blur-sm shadow-xl flex flex-col overflow-hidden">
+    <div className="flex-1 border-r border-border bg-card/50 backdrop-blur-sm flex flex-col overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-border flex items-center justify-between">
         <div>

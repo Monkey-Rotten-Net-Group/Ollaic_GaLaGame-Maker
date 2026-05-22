@@ -992,21 +992,7 @@ export function StoryEditor() {
             />
           </div>
 
-          {selectedNode && (
-            <DetailPanel
-              node={selectedNode}
-              onUpdateNode={(updates) => updateNode(selectedNode.id, updates)}
-              onDeleteNode={() => deleteNode(selectedNode.id)}
-              onClose={() => setSelectedNode(null)}
-              characterNames={characterNames}
-              projectPath={projectPath || undefined}
-              characters={charactersForAi}
-              projectId={projectId}
-              suggestedFigureCharacter={suggestedFigureCharacter}
-            />
-          )}
-
-          {/* Center - Flow Canvas or Script Editor */}
+          {/* Center - Detail Panel / Flow Canvas / Script Editor */}
           {showScript ? (
             <div className="flex-1 flex flex-col bg-background/50">
               <div className="p-3 border-b border-border flex items-center justify-between">
@@ -1028,6 +1014,18 @@ export function StoryEditor() {
                 aria-label="WebGAL 脚本编辑器"
               />
             </div>
+          ) : selectedNode ? (
+            <DetailPanel
+              node={selectedNode}
+              onUpdateNode={(updates) => updateNode(selectedNode.id, updates)}
+              onDeleteNode={() => deleteNode(selectedNode.id)}
+              onClose={() => setSelectedNode(null)}
+              characterNames={characterNames}
+              projectPath={projectPath || undefined}
+              characters={charactersForAi}
+              projectId={projectId}
+              suggestedFigureCharacter={suggestedFigureCharacter}
+            />
           ) : (
             <FlowCanvas
               nodes={nodes}
