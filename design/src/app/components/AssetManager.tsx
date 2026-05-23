@@ -269,11 +269,6 @@ export function AssetManager() {
     : activeTab === 'music'
       ? `AI 生成${musicCategoryLabels[musicCategory]}`
       : '批量生成当前角色立绘';
-  const scopedActionHint = activeTab === 'scene'
-    ? '将文件导入背景素材库。'
-    : activeTab === 'music'
-      ? `将文件导入${musicCategoryLabels[musicCategory]}素材库。`
-      : '将图片导入立绘素材库；当前角色可在下方立绘素材库中管理并选作主体。';
 
   // --- Actions ---
   const handleImport = useCallback(async () => {
@@ -536,14 +531,6 @@ export function AssetManager() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden max-w-xs text-right md:block">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {activeTab === 'scene' ? '背景' : activeTab === 'music' ? musicCategoryLabels[musicCategory] : '人物'}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {scopedActionHint}
-              </div>
-            </div>
             <button
               onClick={() => {
                 if (activeTab === 'character') {
