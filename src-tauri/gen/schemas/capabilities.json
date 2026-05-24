@@ -1,1 +1,1 @@
-{"main-capability":{"identifier":"main-capability","description":"Capability for the main application window","local":true,"windows":["main"],"permissions":["core:default","dialog:default","dialog:allow-open","dialog:allow-save"]}}
+{"main-capability":{"identifier":"main-capability","description":"Capability for the main application window","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-destroy","dialog:default","dialog:allow-open","dialog:allow-save"]}}

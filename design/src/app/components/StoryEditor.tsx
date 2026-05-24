@@ -8,6 +8,7 @@ import {
   Undo2, Redo2, Package, MoreHorizontal, PanelRightClose, PanelRightOpen,
 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { NodePanel } from './NodePanel';
 import { FlowCanvas } from './FlowCanvas';
 import { DetailPanel } from './DetailPanel';
@@ -35,6 +36,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 
 interface AiMessage {
   id: string;
@@ -136,6 +147,15 @@ export function StoryEditor() {
   const aiStreamingIdRef = useRef<string | null>(null);
   const aiMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
+  const pendingActionRef = useRef<(() => void) | null>(null);
+
+  // In-memory draft cache: sceneName -> nodes snapshot for unsaved scenes
+  const sceneDraftCache = useRef<Map<string, WebGalNode[]>>(new Map());
+  // Keep a ref in sync so the close-requested handler always sees current dirty state
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -189,9 +209,27 @@ export function StoryEditor() {
           const scenePath = await getScenePath(storedPath, sceneName);
           try {
             const loaded = await loadScene(scenePath);
-            setNodes(loaded);
-            const text = await serializeScene(loaded);
-            setScriptSource(text);
+            // Restore sessionStorage draft left by assets-page navigation
+            const draftKey = `scene-draft-${projectId}-${sceneName}`;
+            const draftJson = sessionStorage.getItem(draftKey);
+            if (draftJson) {
+              try {
+                const draft = JSON.parse(draftJson) as WebGalNode[];
+                setNodes(draft);
+                const text = await serializeScene(draft);
+                setScriptSource(text);
+                setDirty(true);
+              } catch {
+                setNodes(loaded);
+                const text = await serializeScene(loaded);
+                setScriptSource(text);
+              }
+              sessionStorage.removeItem(draftKey);
+            } else {
+              setNodes(loaded);
+              const text = await serializeScene(loaded);
+              setScriptSource(text);
+            }
           } catch {
             // Scene doesn't exist yet, start with empty
             const parsed = await parseScene(DEMO_SCRIPT);
@@ -424,6 +462,7 @@ export function StoryEditor() {
         await saveScene(selected, nodes);
       }
       setDirty(false);
+      sceneDraftCache.current.delete(currentSceneName);
       setSaveStatus('saved');
       // Reset status after 2s
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -435,6 +474,60 @@ export function StoryEditor() {
       saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
     }
   }, [projectPath, currentSceneName, nodes]);
+
+  // Guard navigation that would discard unsaved changes (back to home, window close)
+  const guardedNavigate = useCallback((action: () => void) => {
+    if (dirty) {
+      pendingActionRef.current = action;
+      setUnsavedConfirmOpen(true);
+    } else {
+      action();
+    }
+  }, [dirty]);
+
+  const handleUnsavedSaveAndLeave = useCallback(async () => {
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    setUnsavedConfirmOpen(false);
+    await handleSave();
+    action?.();
+  }, [handleSave]);
+
+  const handleUnsavedDiscard = useCallback(() => {
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    setDirty(false);
+    setUnsavedConfirmOpen(false);
+    action?.();
+  }, []);
+
+  const handleUnsavedCancel = useCallback(() => {
+    setUnsavedConfirmOpen(false);
+    pendingActionRef.current = null;
+  }, []);
+
+  // Warn on window/tab close when dirty (web fallback)
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (dirty) e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  // Intercept Tauri native window close when dirty
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow().onCloseRequested((event) => {
+      if (dirtyRef.current) {
+        event.preventDefault();
+        pendingActionRef.current = () => void getCurrentWindow().destroy();
+        setUnsavedConfirmOpen(true);
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Ctrl+S / Cmd+S shortcut
   useEffect(() => {
@@ -539,21 +632,31 @@ export function StoryEditor() {
   // ---------------------------------------------------------------------------
   const handleSwitchScene = useCallback(async (sceneName: string) => {
     if (!projectPath) return;
-    // Auto-save current if dirty
+
+    // Stash current unsaved nodes in the in-memory draft cache
     if (dirty) {
-      const scenePath = await getScenePath(projectPath, currentSceneName);
-      await saveScene(scenePath, nodes);
+      sceneDraftCache.current.set(currentSceneName, nodes);
     }
 
     setCurrentSceneName(sceneName);
     const scenePath = await getScenePath(projectPath, sceneName);
     try {
-      const loaded = await loadScene(scenePath);
-      setNodes(loaded);
-      const text = await serializeScene(loaded);
-      setScriptSource(text);
-      setSelectedNode(null);
-      setDirty(false);
+      // Prefer a cached draft over the saved file
+      const draft = sceneDraftCache.current.get(sceneName);
+      if (draft) {
+        setNodes(draft);
+        const text = await serializeScene(draft);
+        setScriptSource(text);
+        setSelectedNode(null);
+        setDirty(true);
+      } else {
+        const loaded = await loadScene(scenePath);
+        setNodes(loaded);
+        const text = await serializeScene(loaded);
+        setScriptSource(text);
+        setSelectedNode(null);
+        setDirty(false);
+      }
     } catch {
       setNodes([]);
       setScriptSource('');
@@ -803,7 +906,7 @@ export function StoryEditor() {
           <div className="px-3 sm:px-6 py-3 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2 xl:gap-4">
               <button
-                onClick={() => navigate('/')}
+                onClick={() => guardedNavigate(() => navigate('/'))}
                 className="p-2 rounded-md hover:bg-secondary/50 transition-colors"
                 aria-label="返回主页"
               >
@@ -886,7 +989,15 @@ export function StoryEditor() {
               </button>
               <div className="hidden sm:block h-6 w-px bg-border mx-1" />
               <button
-                onClick={() => navigate(`/editor/${projectId}/assets`)}
+                onClick={() => {
+                  if (dirty) {
+                    sessionStorage.setItem(
+                      `scene-draft-${projectId}-${currentSceneName}`,
+                      JSON.stringify(nodes),
+                    );
+                  }
+                  navigate(`/editor/${projectId}/assets`);
+                }}
                 className="px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors flex items-center gap-2 text-sm"
                 aria-label="打开素材库"
               >
@@ -1213,6 +1324,32 @@ export function StoryEditor() {
           onOpenAiSettings={() => setAiSettingsOpen(true)}
           onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />
+
+        <AlertDialog open={unsavedConfirmOpen} onOpenChange={(open) => { if (!open) handleUnsavedCancel(); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>有未保存的更改</AlertDialogTitle>
+              <AlertDialogDescription>
+                当前场景有未保存的内容，离开后将会丢失。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={handleUnsavedCancel}>取消</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => { void handleUnsavedSaveAndLeave(); }}
+                className="bg-primary text-primary-foreground"
+              >
+                保存并离开
+              </AlertDialogAction>
+              <AlertDialogAction
+                onClick={handleUnsavedDiscard}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                直接离开
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
       </div>
     </DndProvider>
