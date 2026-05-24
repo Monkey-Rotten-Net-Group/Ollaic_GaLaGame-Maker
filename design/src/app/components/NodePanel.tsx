@@ -188,7 +188,7 @@ function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
       </h3>
       <div
         ref={containerRef}
-        className="max-h-56 overflow-y-auto overflow-x-hidden"
+        className="relative max-h-56 overflow-y-auto overflow-x-hidden"
       >
         {nodes.length === 0 ? (
           <div className="text-[10px] text-muted-foreground/60 py-3 text-center font-mono-family">
@@ -546,7 +546,7 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
       {/* Node List */}
       <div
         ref={listRef}
-        className="flex-1 min-h-0 overflow-y-auto p-2 pb-24 scroll-pb-24"
+        className="relative flex-1 min-h-0 overflow-y-auto p-2 pb-24 scroll-pb-24"
         onContextMenu={(e) => {
           if ((e.target as HTMLElement).closest('[data-node-item]')) return;
           e.preventDefault();

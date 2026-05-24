@@ -1080,31 +1080,37 @@ export function StoryEditor() {
                 aria-label="WebGAL 脚本编辑器"
               />
             </div>
-          ) : selectedNode ? (
-            <DetailPanel
-              node={selectedNode}
-              onUpdateNode={(updates) => updateNode(selectedNode.id, updates)}
-              onDeleteNode={() => deleteNode(selectedNode.id)}
-              onClose={() => setSelectedNode(null)}
-              characterNames={characterNames}
-              projectPath={projectPath || undefined}
-              characters={charactersForAi}
-              projectId={projectId}
-              suggestedFigureCharacter={suggestedFigureCharacter}
-            />
           ) : (
-            <FlowCanvas
-              nodes={nodes}
-              selectedNode={selectedNode}
-              onSelectNode={setSelectedNode}
-              onReorderNodes={reorderNodes}
-              characterColors={characterColors}
-              onDeleteNode={deleteNode}
-              onCopyNode={copyNode}
-              onCutNode={cutNode}
-              onPasteNode={pasteNode}
-              clipboardNode={clipboardNode}
-            />
+            <>
+              {selectedNode && (
+                <DetailPanel
+                  node={selectedNode}
+                  onUpdateNode={(updates) => updateNode(selectedNode.id, updates)}
+                  onDeleteNode={() => deleteNode(selectedNode.id)}
+                  onClose={() => setSelectedNode(null)}
+                  characterNames={characterNames}
+                  projectPath={projectPath || undefined}
+                  characters={charactersForAi}
+                  projectId={projectId}
+                  suggestedFigureCharacter={suggestedFigureCharacter}
+                />
+              )}
+              {/* Keep FlowCanvas always mounted to preserve scroll position */}
+              <div className={selectedNode ? 'hidden' : 'flex-1 flex overflow-hidden'}>
+                <FlowCanvas
+                  nodes={nodes}
+                  selectedNode={selectedNode}
+                  onSelectNode={setSelectedNode}
+                  onReorderNodes={reorderNodes}
+                  characterColors={characterColors}
+                  onDeleteNode={deleteNode}
+                  onCopyNode={copyNode}
+                  onCutNode={cutNode}
+                  onPasteNode={pasteNode}
+                  clipboardNode={clipboardNode}
+                />
+              </div>
+            </>
           )}
 
           {/* Right Panel: Scene Manager or AI Chat */}
