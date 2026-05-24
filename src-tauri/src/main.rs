@@ -152,6 +152,8 @@ fn main() {
             webgal::commands::load_scene,
             webgal::commands::save_scene,
             webgal::commands::list_scenes,
+            webgal::commands::read_file_text,
+            webgal::commands::write_file_text,
             // Project management
             webgal::project::init_project,
             webgal::project::open_project,

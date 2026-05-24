@@ -66,6 +66,28 @@ export function ProjectHome() {
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
+  // Edit metadata modal state
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+
+  const openEditDialog = (project: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingProject(project);
+    setEditName(project.name);
+    setEditDesc(project.description);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingProject) return;
+    setProjects(prev => prev.map(p =>
+      p.id === editingProject.id
+        ? { ...p, name: editName.trim() || p.name, description: editDesc.trim() }
+        : p
+    ));
+    setEditingProject(null);
+  };
+
   // Persist whenever projects change
   useEffect(() => {
     persistProjects(projects);
@@ -358,25 +380,6 @@ export function ProjectHome() {
                   )}
                 </div>
 
-                {/* Directory structure preview */}
-                <div className="p-4 rounded-xl bg-secondary/20 border border-border/50">
-                  <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-bold">
-                    目录结构预览
-                  </div>
-                  <pre className="text-xs text-muted-foreground leading-relaxed font-mono-family">
-{`game/
-├── scene/        场景脚本 (.txt)
-├── background/   背景图片
-├── figure/       角色立绘
-├── bgm/          背景音乐
-├── vocal/        语音文件
-├── video/        视频文件
-├── animation/    动画描述
-├── tex/          特效纹理
-└── config.txt    游戏配置`}
-                  </pre>
-                </div>
-
                 {createError && (
                   <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
                     {createError}
@@ -625,6 +628,13 @@ export function ProjectHome() {
                               <Star className={`w-4 h-4 ${project.isFavorite ? 'fill-current' : ''}`} />
                             </button>
                             <button
+                              onClick={(e) => openEditDialog(project, e)}
+                              className="p-2 rounded-full bg-black/40 text-white hover:bg-black/60 transition-colors backdrop-blur-md"
+                              aria-label="编辑项目信息"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={(e) => deleteProject(project.id, e)}
                               className="p-2 rounded-full bg-black/40 text-white hover:bg-destructive transition-colors backdrop-blur-md"
                               aria-label="删除此项目"
@@ -658,14 +668,11 @@ export function ProjectHome() {
                       <div className="text-[10px] text-muted-foreground truncate mb-3 font-mono-family">
                         {project.path}
                       </div>
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/50 pt-4">
+                      <div className="flex items-center text-[11px] text-muted-foreground border-t border-border/50 pt-4">
                         <div className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {project.lastModified}
                         </div>
-                        <span className="uppercase tracking-wider font-bold text-primary/60">
-                          编辑
-                        </span>
                       </div>
                     </div>
                   </div>
@@ -745,6 +752,13 @@ export function ProjectHome() {
                             <Star className={`w-4 h-4 ${project.isFavorite ? 'fill-current' : ''}`} />
                           </button>
                           <button
+                            onClick={(e) => openEditDialog(project, e)}
+                            className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                            aria-label="编辑项目信息"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={(e) => deleteProject(project.id, e)}
                             className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-destructive transition-colors"
                             aria-label="删除此项目"
@@ -761,6 +775,86 @@ export function ProjectHome() {
           </main>
         </div>
       </div>
+
+      {/* Edit project metadata dialog */}
+      {editingProject && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md"
+          onClick={() => setEditingProject(null)}
+        >
+          <div
+            className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <h2 className="text-base font-medium font-display-family">编辑项目信息</h2>
+              <button
+                onClick={() => setEditingProject(null)}
+                className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors text-muted-foreground"
+                aria-label="关闭"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-1.5 font-bold">
+                  项目名称
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                  className="w-full px-3 py-2 bg-secondary/30 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-1.5 font-bold">
+                  简介
+                </label>
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 bg-secondary/30 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none transition-all text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-1.5 font-bold">
+                  存放位置
+                </label>
+                <div className="flex items-center gap-2 px-3 py-2 bg-secondary/20 border border-border/50 rounded-lg">
+                  <MapPin className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <span className="text-xs text-muted-foreground font-mono-family truncate">
+                    {editingProject.path}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+              <button
+                onClick={() => setEditingProject(null)}
+                className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/70 transition-colors text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={!editName.trim()}
+                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-all text-sm disabled:opacity-50"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

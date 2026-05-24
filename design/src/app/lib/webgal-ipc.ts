@@ -35,6 +35,72 @@ export async function listScenes(dir: string): Promise<string[]> {
   return invoke<string[]>('list_scenes', { dir });
 }
 
+/** Read the raw text content of a file. */
+export async function readFileText(path: string): Promise<string> {
+  return invoke<string>('read_file_text', { path });
+}
+
+/** Write raw text content to a file. */
+export async function writeFileText(path: string, content: string): Promise<void> {
+  return invoke<void>('write_file_text', { path, content });
+}
+
+export interface SceneHeader {
+  chapter?: string;
+  outline?: string;
+}
+
+/** Serialize a SceneHeader back into leading comment lines. */
+export function serializeSceneHeader(header: SceneHeader): string {
+  const lines: string[] = [];
+  if (header.chapter?.trim()) lines.push(`; 章节: ${header.chapter.trim()}`);
+  if (header.outline?.trim()) lines.push(`; 大纲: ${header.outline.trim()}`);
+  return lines.length > 0 ? lines.join('\n') + '\n' : '';
+}
+
+/**
+ * Read a scene file, replace its leading comment header with the given metadata,
+ * and write it back to disk.
+ */
+export async function updateSceneHeader(path: string, header: SceneHeader): Promise<void> {
+  const text = await readFileText(path);
+  const lines = text.split('\n');
+  let headerEnd = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith(';')) headerEnd = i + 1;
+    else break;
+  }
+  const body = lines.slice(headerEnd).join('\n');
+  await writeFileText(path, serializeSceneHeader(header) + body);
+}
+
+/**
+ * Parse metadata from leading comment lines of a WebGAL scene file.
+ * Reads until the first non-comment line. Recognised keys (case-insensitive):
+ *   章节 / chapter  →  header.chapter
+ *   大纲 / outline / 描述 / desc  →  header.outline
+ *
+ * Example:
+ *   ; 章节: 第一章
+ *   ; 大纲: 主角初次踏入小镇
+ */
+export function parseSceneHeader(text: string): SceneHeader {
+  const header: SceneHeader = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line.startsWith(';')) break;
+    const content = line.slice(1).trim();
+    const colon = content.indexOf(':');
+    if (colon === -1) continue;
+    const key = content.slice(0, colon).trim().toLowerCase();
+    const value = content.slice(colon + 1).trim();
+    if (!value) continue;
+    if (key === '章节' || key === 'chapter') header.chapter = value;
+    else if (key === '大纲' || key === 'outline' || key === '描述' || key === 'desc') header.outline = value;
+  }
+  return header;
+}
+
 // ---------------------------------------------------------------------------
 // Project management
 // ---------------------------------------------------------------------------

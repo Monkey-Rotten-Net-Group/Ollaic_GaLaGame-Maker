@@ -40,6 +40,26 @@ pub fn save_scene(path: String, nodes: Vec<WebGalNode>) -> Result<(), String> {
     Ok(())
 }
 
+/// Read the raw text content of any file (used to extract scene header comments).
+#[tauri::command]
+pub fn read_file_text(path: String) -> Result<String, String> {
+    let path = PathBuf::from(&path);
+    fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))
+}
+
+/// Write raw text content to a file (used to persist scene header comment edits).
+#[tauri::command]
+pub fn write_file_text(path: String, content: String) -> Result<(), String> {
+    let path = PathBuf::from(&path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
 /// List all .txt scene files in a directory.
 #[tauri::command]
 pub fn list_scenes(dir: String) -> Result<Vec<String>, String> {

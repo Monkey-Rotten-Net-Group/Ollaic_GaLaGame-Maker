@@ -4,7 +4,7 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import {
   Sparkles, Save, Play, Image, ArrowLeft, Send,
-  Upload, Download, FileText, FolderOpen, FilePlus, Check, Loader2, SlidersHorizontal,
+  Upload, Download, FileText, FolderOpen, Layers, Check, Loader2, SlidersHorizontal,
   Undo2, Redo2, Package, MoreHorizontal, PanelRightClose, PanelRightOpen,
   X, AlertTriangle,
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import { FlowCanvas } from './FlowCanvas';
 import { DetailPanel } from './DetailPanel';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
+import { SceneManagerPanel } from './SceneManager';
 import { AiMemoryPanel } from './AiMemoryPanel';
 import { AiMessageBubble } from './AiMessageBubble';
 import { AiPendingCard } from './AiPendingCard';
@@ -25,7 +26,8 @@ import {
   openProject, getScenePath, createScene,
   exportProject,
   setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
-  type ProjectInfo,
+  readFileText, parseSceneHeader,
+  type ProjectInfo, type SceneHeader,
 } from '../lib/webgal-ipc';
 import { listCharacterNames, listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
@@ -88,6 +90,8 @@ export function StoryEditor() {
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [currentSceneName, setCurrentSceneName] = useState('start.txt');
   const [dirty, setDirty] = useState(false);
+  const [sceneHeaders, setSceneHeaders] = useState<Record<string, SceneHeader>>({});
+  const [sceneManagerOpen, setSceneManagerOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
 
   // Editor state
@@ -131,6 +135,34 @@ export function StoryEditor() {
   }, []);
 
   const aiMessagesListRef = useRef<HTMLDivElement | null>(null);
+
+  const loadSceneHeaders = useCallback(async (projectPath: string, scenes: string[]) => {
+    const entries = await Promise.all(
+      scenes.map(async (name) => {
+        try {
+          const path = await getScenePath(projectPath, name);
+          const text = await readFileText(path);
+          return [name, parseSceneHeader(text)] as const;
+        } catch {
+          return [name, {}] as const;
+        }
+      }),
+    );
+    setSceneHeaders(Object.fromEntries(entries));
+  }, []);
+
+  const handleHeaderUpdated = useCallback((name: string, header: SceneHeader) => {
+    setSceneHeaders((prev) => ({ ...prev, [name]: header }));
+  }, []);
+
+  const refreshProjectInfo = useCallback(async () => {
+    if (!projectPath) return;
+    try {
+      const info = await openProject(projectPath);
+      setProjectInfo(info);
+      void loadSceneHeaders(projectPath, info.scenes);
+    } catch {}
+  }, [projectPath, loadSceneHeaders]);
 
   const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
   const pendingActionRef = useRef<(() => void) | null>(null);
@@ -248,6 +280,10 @@ export function StoryEditor() {
           setCharacterColors({});
           setCharactersForAi([]);
         }
+
+        // Load scene header comments for display
+        const info = await openProject(storedPath).catch(() => null);
+        if (info) void loadSceneHeaders(storedPath, info.scenes);
       } else {
         // No project path, just load demo script.
         const parsed = await parseScene(DEMO_SCRIPT);
@@ -425,6 +461,8 @@ export function StoryEditor() {
       }
       setDirty(false);
       sceneDraftCache.current.delete(currentSceneName);
+      // Refresh header for the saved scene
+      if (projectPath) void loadSceneHeaders(projectPath, projectInfo?.scenes ?? [currentSceneName]);
       setSaveStatus('saved');
       // Reset status after 2s
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -587,10 +625,12 @@ export function StoryEditor() {
         setCharacterColors({});
         setCharactersForAi([]);
       }
+
+      void loadSceneHeaders(selected, info.scenes);
     } catch (e) {
       console.error('Open project failed:', e);
     }
-  }, [projectId]);
+  }, [projectId, loadSceneHeaders]);
 
   // ---------------------------------------------------------------------------
   // Switch scene within project
@@ -809,17 +849,21 @@ export function StoryEditor() {
                     className="max-w-[9rem] sm:max-w-[12rem] px-2 py-1 text-sm bg-secondary border border-border rounded-md font-mono-family"
                     aria-label="选择场景"
                   >
-                    {projectInfo.scenes.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
+                    {projectInfo.scenes.map((s) => {
+                      const h = sceneHeaders[s];
+                      const label = h?.chapter
+                        ? (h.outline ? `${h.chapter} — ${h.outline}` : h.chapter)
+                        : (h?.outline ?? s);
+                      return <option key={s} value={s} title={s}>{label}</option>;
+                    })}
                   </select>
                   <button
-                    onClick={handleNewScene}
-                    className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
-                    title="新建场景"
-                    aria-label="新建场景"
+                    onClick={() => setSceneManagerOpen((v) => !v)}
+                    className={`p-1.5 rounded-md transition-colors ${sceneManagerOpen ? 'bg-primary/10 text-primary' : 'hover:bg-secondary/50 text-muted-foreground'}`}
+                    title="场景管理"
+                    aria-label="场景管理"
                   >
-                    <FilePlus className="w-4 h-4 text-muted-foreground" />
+                    <Layers className="w-4 h-4" />
                   </button>
                 </>
               )}
@@ -1063,7 +1107,21 @@ export function StoryEditor() {
             />
           )}
 
-          {/* Right Panel - AI Chat */}
+          {/* Right Panel: Scene Manager or AI Chat */}
+          {sceneManagerOpen && projectPath && projectInfo ? (
+            <div className={`${aiCollapsed ? 'w-10' : 'w-80'} border-l border-border flex flex-col transition-[width] duration-200`}>
+              <SceneManagerPanel
+                projectPath={projectPath}
+                projectInfo={projectInfo}
+                currentSceneName={currentSceneName}
+                sceneHeaders={sceneHeaders}
+                onSwitchScene={(name) => { void handleSwitchScene(name); }}
+                onHeaderUpdated={handleHeaderUpdated}
+                onSceneCreated={refreshProjectInfo}
+                onClose={() => setSceneManagerOpen(false)}
+              />
+            </div>
+          ) : (
           <div className={`${aiCollapsed ? 'w-10' : 'w-80'} border-l border-border bg-card/30 backdrop-blur-sm flex flex-col transition-[width] duration-200`}>
             <div className={`${aiCollapsed ? 'p-2 justify-center' : 'p-4'} border-b border-border flex items-center gap-3`}>
               <button
@@ -1220,6 +1278,7 @@ export function StoryEditor() {
               )}
             </div>}
           </div>
+          )}
         </div>
 
         <AiSettingsDialog
