@@ -150,3 +150,13 @@ export const categoryLabels: Record<string, string> = {
   control: '流程控制',
   effects: '效果',
 };
+
+const METADATA_KEYS = new Set(['章节', 'chapter', '大纲', 'outline', '描述', 'desc']);
+
+/** Returns true if a comment node is a scene-header metadata line (章节/大纲). */
+export function isMetadataComment(node: WebGalNode): boolean {
+  if (node.type !== 'comment') return false;
+  const colon = node.content.indexOf(':');
+  if (colon === -1) return false;
+  return METADATA_KEYS.has(node.content.slice(0, colon).trim().toLowerCase());
+}

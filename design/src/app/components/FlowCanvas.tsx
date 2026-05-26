@@ -7,7 +7,7 @@ import {
   GripVertical, ArrowDown, Copy, Scissors, Trash2, Clipboard,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
-import { commandLabels } from '../lib/webgal-types';
+import { commandLabels, isMetadataComment } from '../lib/webgal-types';
 import { isTerminalNode } from '../lib/scene-editing';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
@@ -130,6 +130,7 @@ interface DragItem {
 interface FlowNodeCardProps {
   node: WebGalNode;
   index: number;
+  displayIndex: number;
   isLast: boolean;
   isSelected: boolean;
   characterColors?: Record<string, string>;
@@ -143,7 +144,7 @@ interface FlowNodeCardProps {
 }
 
 function FlowNodeCard({
-  node, index, isLast, isSelected, characterColors, onSelect, onReorder,
+  node, index, displayIndex, isLast, isSelected, characterColors, onSelect, onReorder,
   onDelete, onCopy, onCut, onPaste, canPaste,
 }: FlowNodeCardProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -272,7 +273,7 @@ function FlowNodeCard({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono-family flex items-center gap-1.5">
-                    <span className="opacity-50">#{index + 1}</span>
+                    <span className="opacity-50">#{displayIndex + 1}</span>
                     <span>{commandLabels[node.type]}</span>
                   </div>
                 </div>
@@ -442,24 +443,33 @@ export function FlowCanvas({
                 ▼ 起点
               </div>
               <div className="flex flex-col items-center w-full max-w-md">
-                {nodes.map((node, index) => (
-                  <div key={node.id} ref={(el) => { cardRefs.current[node.id] = el; }} className="w-full">
-                    <FlowNodeCard
-                      node={node}
-                      index={index}
-                      isLast={index === nodes.length - 1}
-                      isSelected={selectedNode?.id === node.id}
-                      characterColors={characterColors}
-                      onSelect={onSelectNode}
-                      onReorder={handleReorder}
-                      onDelete={() => onDeleteNode?.(node.id)}
-                      onCopy={() => onCopyNode?.(node)}
-                      onCut={() => onCutNode?.(node)}
-                      onPaste={() => onPasteNode?.(index)}
-                      canPaste={Boolean(clipboardNode)}
-                    />
-                  </div>
-                ))}
+                {(() => {
+                  const visible = nodes.filter(n => !isMetadataComment(n));
+                  return nodes.map((node, realIndex) => {
+                    if (isMetadataComment(node)) return null;
+                    const displayIndex = visible.indexOf(node);
+                    const isLast = displayIndex === visible.length - 1;
+                    return (
+                      <div key={node.id} ref={(el) => { cardRefs.current[node.id] = el; }} className="w-full">
+                        <FlowNodeCard
+                          node={node}
+                          index={realIndex}
+                          displayIndex={displayIndex}
+                          isLast={isLast}
+                          isSelected={selectedNode?.id === node.id}
+                          characterColors={characterColors}
+                          onSelect={onSelectNode}
+                          onReorder={handleReorder}
+                          onDelete={() => onDeleteNode?.(node.id)}
+                          onCopy={() => onCopyNode?.(node)}
+                          onCut={() => onCutNode?.(node)}
+                          onPaste={() => onPasteNode?.(realIndex)}
+                          canPaste={Boolean(clipboardNode)}
+                        />
+                      </div>
+                    );
+                  });
+                })()}
               </div>
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-mono-family mt-4 mb-16">
                 ▲ 终点

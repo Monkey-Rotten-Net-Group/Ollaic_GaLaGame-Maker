@@ -7,7 +7,7 @@ import {
   Play, Plus, GripVertical, Copy, Scissors, Trash2, Clipboard,
 } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
-import { commandCategories, commandLabels, categoryLabels } from '../lib/webgal-types';
+import { commandCategories, commandLabels, categoryLabels, isMetadataComment } from '../lib/webgal-types';
 import { isTerminalNode } from '../lib/scene-editing';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
@@ -196,9 +196,9 @@ function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
           </div>
         ) : (
           <div className="flex flex-col items-center py-1">
-            {nodes.map((node, i) => {
-              const prev = i > 0 ? nodes[i - 1] : null;
-              const prevTerminal = prev ? isTerminalNode(prev.type) : false;
+            {nodes.filter(n => !isMetadataComment(n)).map((node, i, visible) => {
+              const prevVisible = i > 0 ? visible[i - 1] : null;
+              const prevTerminal = prevVisible ? isTerminalNode(prevVisible.type) : false;
               const isSelected = selectedNode?.id === node.id;
               const bg = miniBgClass[node.type] ?? 'bg-muted-foreground/40';
               const isChoose = node.type === 'choose';
@@ -206,7 +206,7 @@ function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
 
               return (
                 <Fragment key={node.id}>
-                  {prev && (
+                  {prevVisible && (
                     prevTerminal ? (
                       <span className="block h-2 w-px" aria-hidden="true" />
                     ) : (
@@ -333,6 +333,7 @@ function InsertZone({
 interface NodeListItemProps {
   node: WebGalNode;
   index: number;
+  displayIndex: number;
   isSelected: boolean;
   characterColors?: Record<string, string>;
   onSelect: (node: WebGalNode) => void;
@@ -346,7 +347,7 @@ interface NodeListItemProps {
 }
 
 function NodeListItem({
-  node, index, isSelected, characterColors, onSelect, onJump, onReorder,
+  node, index, displayIndex, isSelected, characterColors, onSelect, onJump, onReorder,
   onDelete, onCopy, onCut, onPaste, canPaste,
 }: NodeListItemProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -471,7 +472,7 @@ function NodeListItem({
             )}
             <div className="flex-1 min-w-0">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5 font-mono-family flex items-center gap-1.5">
-                <span className="opacity-50">{index + 1}</span>
+                <span className="opacity-50">{displayIndex + 1}</span>
                 <span>{commandLabels[node.type]}</span>
               </div>
               <div className="text-xs text-foreground/80 truncate">
@@ -561,29 +562,37 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
           });
         }}
       >
-        {nodes.map((node, index) => (
-          <Fragment key={node.id}>
-            {onInsertNode && (
-              <InsertZone atIndex={index} onInsert={onInsertNode} />
-            )}
-            <div ref={(el) => { itemRefs.current[node.id] = el; }}>
-              <NodeListItem
-                node={node}
-                index={index}
-                isSelected={selectedNode?.id === node.id}
-                characterColors={characterColors}
-                onSelect={onSelectNode}
-                onJump={onJumpToIndex}
-                onReorder={onReorderNodes}
-                onDelete={() => onDeleteNode?.(node.id)}
-                onCopy={() => onCopyNode?.(node)}
-                onCut={() => onCutNode?.(node)}
-                onPaste={() => onPasteNode?.(index)}
-                canPaste={Boolean(clipboardNode)}
-              />
-            </div>
-          </Fragment>
-        ))}
+        {(() => {
+          let displayIdx = 0;
+          return nodes.map((node, realIndex) => {
+            if (isMetadataComment(node)) return null;
+            const di = displayIdx++;
+            return (
+              <Fragment key={node.id}>
+                {onInsertNode && (
+                  <InsertZone atIndex={realIndex} onInsert={onInsertNode} />
+                )}
+                <div ref={(el) => { itemRefs.current[node.id] = el; }}>
+                  <NodeListItem
+                    node={node}
+                    index={realIndex}
+                    displayIndex={di}
+                    isSelected={selectedNode?.id === node.id}
+                    characterColors={characterColors}
+                    onSelect={onSelectNode}
+                    onJump={onJumpToIndex}
+                    onReorder={onReorderNodes}
+                    onDelete={() => onDeleteNode?.(node.id)}
+                    onCopy={() => onCopyNode?.(node)}
+                    onCut={() => onCutNode?.(node)}
+                    onPaste={() => onPasteNode?.(realIndex)}
+                    canPaste={Boolean(clipboardNode)}
+                  />
+                </div>
+              </Fragment>
+            );
+          });
+        })()}
         {onInsertNode && (
           <InsertZone atIndex={nodes.length} onInsert={onInsertNode} append />
         )}
@@ -591,7 +600,7 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
 
       <div className="p-3 border-t border-border">
         <div className="text-xs text-muted-foreground font-mono-family">
-          共 {nodes.length} 条指令
+          共 {nodes.filter(n => !isMetadataComment(n)).length} 条指令
         </div>
       </div>
 
