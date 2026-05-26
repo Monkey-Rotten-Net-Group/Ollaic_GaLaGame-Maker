@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useDrag, useDrop } from 'react-dnd';
 import {
@@ -6,9 +6,9 @@ import {
   ArrowRight, Type, Monitor, Variable, Keyboard, Wand2, Move, Award,
   Play, Plus, GripVertical, Copy, Scissors, Trash2, Clipboard,
 } from 'lucide-react';
-import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
+import type { WebGalNode, WebGalCommandType, SceneLink } from '../lib/webgal-types';
 import { commandCategories, commandLabels, categoryLabels, isMetadataComment } from '../lib/webgal-types';
-import { isTerminalNode } from '../lib/scene-editing';
+import type { SceneHeader } from '../lib/webgal-ipc';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
   ContextMenu,
@@ -36,6 +36,16 @@ interface NodePanelProps {
   onCutNode?: (node: WebGalNode) => void;
   onPasteNode?: (atIndex: number) => void;
   clipboardNode?: WebGalNode | null;
+  /** Name of the currently-open scene file, highlighted as the active node. */
+  currentSceneName?: string;
+  /** All scene files in the project — used as graph nodes. */
+  availableScenes?: string[];
+  /** Outgoing scene jumps for each scene file in the project. */
+  sceneLinkMap?: Record<string, SceneLink[]>;
+  /** Per-scene parsed metadata (used to show chapter names inside graph nodes). */
+  sceneHeaders?: Record<string, SceneHeader>;
+  /** Click a scene in the graph to switch to it. */
+  onSwitchScene?: (name: string) => void;
 }
 
 const commandIcons: Partial<Record<WebGalCommandType, typeof MessageCircle>> = {
@@ -92,33 +102,6 @@ const categoryColors: Record<string, string> = {
   effects: 'hover:border-primary hover:bg-primary/10',
 };
 
-/** Saturated background color for the minimap blocks (one swatch per type). */
-const miniBgClass: Partial<Record<WebGalCommandType, string>> = {
-  dialogue: 'bg-accent',
-  narrator: 'bg-accent/70',
-  intro: 'bg-accent/55',
-  choose: 'bg-primary',
-  changeBg: 'bg-chart-5',
-  changeFigure: 'bg-chart-5/80',
-  miniAvatar: 'bg-chart-5/60',
-  changeScene: 'bg-blue-400',
-  callScene: 'bg-blue-400/75',
-  end: 'bg-blue-400/55',
-  bgm: 'bg-purple-400',
-  playEffect: 'bg-purple-400/75',
-  playVideo: 'bg-purple-400/55',
-  label: 'bg-yellow-400',
-  jumpLabel: 'bg-yellow-400/75',
-  setVar: 'bg-yellow-400/55',
-  setTextbox: 'bg-yellow-400/40',
-  getUserInput: 'bg-yellow-400/40',
-  setAnimation: 'bg-primary/75',
-  setTransform: 'bg-primary/60',
-  unlockCg: 'bg-primary/45',
-  unlockBgm: 'bg-primary/45',
-  comment: 'bg-muted-foreground/30',
-};
-
 function getNodeSummary(node: WebGalNode): string {
   switch (node.type) {
     case 'dialogue':
@@ -154,99 +137,256 @@ function getNodeSummary(node: WebGalNode): string {
   }
 }
 
-interface FlowMinimapProps {
-  nodes: WebGalNode[];
-  selectedNode: WebGalNode | null;
-  onSelect: (node: WebGalNode) => void;
+// Scene graph layout constants (SVG coordinate space)
+const GRAPH_W = 224;
+const NODE_H = 14;
+const MAX_NODE_W = 58;
+const MIN_NODE_W = 26;
+const NODE_RX = 3;
+const NODE_GAP_X = 4;
+const ROW_H = 30;
+const TOP_PAD = 12;
+const BOTTOM_PAD = 12;
+const SIDE_PAD = 8;
+
+interface NodePos {
+  x: number;
+  y: number;
+  w: number;
 }
 
-function FlowMinimap({ nodes, selectedNode, onSelect }: FlowMinimapProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const selectedRef = useRef<HTMLButtonElement>(null);
+interface SceneGraphLayout {
+  positions: Map<string, NodePos>;
+  edges: { from: string; to: string }[];
+  height: number;
+}
 
-  useEffect(() => {
-    if (selectedRef.current && containerRef.current) {
-      const block = selectedRef.current;
-      const container = containerRef.current;
-      const blockTop = block.offsetTop;
-      const blockBot = blockTop + block.offsetHeight;
-      const viewTop = container.scrollTop;
-      const viewBot = viewTop + container.clientHeight;
-      if (blockTop < viewTop || blockBot > viewBot) {
-        container.scrollTop = blockTop - container.clientHeight / 2 + block.offsetHeight / 2;
+/**
+ * Lay out scenes by BFS depth from the project's start scene.
+ * The root is intentionally NOT the current scene — using the current scene
+ * would shift the whole graph whenever the user switches scenes.
+ */
+function computeSceneGraphLayout(
+  scenes: string[],
+  linksByScene: Record<string, SceneLink[]>,
+): SceneGraphLayout {
+  const positions = new Map<string, { x: number; y: number }>();
+  const edges: { from: string; to: string }[] = [];
+
+  if (scenes.length === 0) {
+    return { positions, edges, height: TOP_PAD + BOTTOM_PAD };
+  }
+
+  // Fixed start so positions are stable regardless of which scene is open.
+  const startScene = scenes.includes('start.txt') ? 'start.txt' : scenes[0];
+
+  const depths = new Map<string, number>();
+  const byDepth: string[][] = [];
+  const queue: { name: string; depth: number }[] = [{ name: startScene, depth: 0 }];
+  while (queue.length > 0) {
+    const { name, depth } = queue.shift()!;
+    if (depths.has(name)) continue;
+    depths.set(name, depth);
+    while (byDepth.length <= depth) byDepth.push([]);
+    byDepth[depth].push(name);
+    for (const link of linksByScene[name] ?? []) {
+      if (scenes.includes(link.target) && !depths.has(link.target)) {
+        queue.push({ name: link.target, depth: depth + 1 });
       }
     }
-  }, [selectedNode?.id]);
+  }
+
+  const orphans = scenes.filter((s) => !depths.has(s));
+  if (orphans.length > 0) {
+    byDepth.push(orphans);
+    for (const s of orphans) depths.set(s, byDepth.length - 1);
+  }
+
+  const innerW = GRAPH_W - 2 * SIDE_PAD;
+  byDepth.forEach((row, depth) => {
+    const y = TOP_PAD + NODE_H / 2 + depth * ROW_H;
+    const count = row.length;
+    const ideal = (innerW - (count - 1) * NODE_GAP_X) / count;
+    const blockW = Math.max(MIN_NODE_W, Math.min(MAX_NODE_W, ideal));
+    const slotW = blockW + NODE_GAP_X;
+    const totalW = slotW * count - NODE_GAP_X;
+    const startX = SIDE_PAD + (innerW - totalW) / 2;
+    row.forEach((name, i) => {
+      const x = startX + i * slotW + blockW / 2;
+      positions.set(name, { x, y, w: blockW });
+    });
+  });
+
+  const seen = new Set<string>();
+  for (const [from, ls] of Object.entries(linksByScene)) {
+    if (!positions.has(from)) continue;
+    for (const link of ls) {
+      if (!positions.has(link.target)) continue;
+      const key = `${from}→${link.target}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({ from, to: link.target });
+    }
+  }
+
+  const height = byDepth.length > 0
+    ? TOP_PAD + NODE_H + (byDepth.length - 1) * ROW_H + BOTTOM_PAD
+    : TOP_PAD + BOTTOM_PAD;
+  return { positions, edges, height };
+}
+
+/**
+ * Build a right-angle (orthogonal) SVG path between two graph nodes.
+ * - Direct vertical when source and target share a column
+ * - "Elbow" via a mid-row horizontal bus when going down
+ * - Routes around the side when going up / sideways (back-edges, cycles)
+ */
+function buildOrthogonalPath(from: NodePos, to: NodePos): string {
+  const halfH = NODE_H / 2;
+  const startY = from.y + halfH + 1;
+  const endY = to.y - halfH - 2;
+
+  if (endY > startY + 4) {
+    if (Math.abs(from.x - to.x) < 0.5) {
+      return `M ${from.x},${startY} V ${endY}`;
+    }
+    const midY = (startY + endY) / 2;
+    return `M ${from.x},${startY} V ${midY} H ${to.x} V ${endY}`;
+  }
+
+  // Same row or back-edge: detour through the side margin
+  const exitY = from.y + halfH + 6;
+  const enterY = to.y - halfH - 6;
+  const sideX = from.x <= to.x ? GRAPH_W - 4 : 4;
+  return `M ${from.x},${startY} V ${exitY} H ${sideX} V ${enterY} H ${to.x} V ${endY}`;
+}
+
+interface SceneGraphProps {
+  currentSceneName?: string;
+  availableScenes?: string[];
+  /** Saved-on-disk outgoing links per scene. Stable across scene switches & edits;
+   *  updated only when a scene is saved (see StoryEditor.handleSave). */
+  sceneLinkMap?: Record<string, SceneLink[]>;
+  sceneHeaders?: Record<string, SceneHeader>;
+  onSwitchScene?: (name: string) => void;
+}
+
+const SceneGraph = memo(function SceneGraph({
+  currentSceneName, availableScenes, sceneLinkMap, sceneHeaders, onSwitchScene,
+}: SceneGraphProps) {
+  const scenes = useMemo(() => {
+    if (availableScenes && availableScenes.length > 0) return availableScenes;
+    return currentSceneName ? [currentSceneName] : [];
+  }, [availableScenes, currentSceneName]);
+
+  // Layout depends only on saved data — switching scenes / editing nodes does NOT
+  // invalidate this memo, so we don't rebuild the graph on every keystroke.
+  const layout = useMemo(
+    () => computeSceneGraphLayout(scenes, sceneLinkMap ?? {}),
+    [scenes, sceneLinkMap],
+  );
 
   return (
     <div className="p-3 border-b border-border">
       <h3 className="text-xs uppercase tracking-widest text-muted-foreground mb-2 font-mono-family flex items-center justify-between">
-        <span>场景缩略</span>
+        <span>场景关系图</span>
         <span className="text-[10px] normal-case tracking-normal opacity-60">
-          {nodes.length}
+          {layout.positions.size}
         </span>
       </h3>
-      <div
-        ref={containerRef}
-        className="relative max-h-56 overflow-y-auto overflow-x-hidden"
-      >
-        {nodes.length === 0 ? (
+      <div className="relative max-h-56 overflow-auto overflow-x-hidden">
+        {layout.positions.size === 0 ? (
           <div className="text-[10px] text-muted-foreground/60 py-3 text-center font-mono-family">
-            (空场景)
+            (无场景)
           </div>
         ) : (
-          <div className="flex flex-col items-center py-1">
-            {nodes.filter(n => !isMetadataComment(n)).map((node, i, visible) => {
-              const prevVisible = i > 0 ? visible[i - 1] : null;
-              const prevTerminal = prevVisible ? isTerminalNode(prevVisible.type) : false;
-              const isSelected = selectedNode?.id === node.id;
-              const bg = miniBgClass[node.type] ?? 'bg-muted-foreground/40';
-              const isChoose = node.type === 'choose';
-              const choiceCount = isChoose ? Math.min(node.choices?.length ?? 0, 6) : 0;
-
+          <svg
+            viewBox={`0 0 ${GRAPH_W} ${layout.height}`}
+            width="100%"
+            height={layout.height}
+            className="block"
+          >
+            <defs>
+              <marker
+                id="scene-arrow"
+                markerWidth="6" markerHeight="6"
+                refX="5.5" refY="3"
+                orient="auto"
+              >
+                <path d="M0,0 L6,3 L0,6 z" className="fill-primary/70" />
+              </marker>
+            </defs>
+            {layout.edges.map((e, i) => {
+              const from = layout.positions.get(e.from)!;
+              const to = layout.positions.get(e.to)!;
               return (
-                <Fragment key={node.id}>
-                  {prevVisible && (
-                    prevTerminal ? (
-                      <span className="block h-2 w-px" aria-hidden="true" />
-                    ) : (
-                      <span className="block h-2 w-px bg-border" aria-hidden="true" />
-                    )
-                  )}
-                  <button
-                    ref={isSelected ? selectedRef : undefined}
-                    type="button"
-                    onClick={() => onSelect(node)}
-                    title={commandLabels[node.type]}
-                    className={`
-                      block rounded-sm transition-all
-                      ${bg}
-                      ${isChoose ? 'w-8 h-2' : 'w-6 h-1.5'}
-                      ${isSelected
-                        ? 'ring-1 ring-primary ring-offset-1 ring-offset-card scale-110'
-                        : 'opacity-80 hover:opacity-100 hover:scale-110'
-                      }
-                    `}
-                  />
-                  {isChoose && choiceCount > 0 && (
-                    <span className="flex items-center gap-0.5 mt-0.5" aria-hidden="true">
-                      {Array.from({ length: choiceCount }).map((_, idx) => (
-                        <span
-                          key={idx}
-                          className="block w-1 h-1 rounded-full bg-primary/80"
-                        />
-                      ))}
-                    </span>
-                  )}
-                </Fragment>
+                <path
+                  key={`${e.from}->${e.to}-${i}`}
+                  d={buildOrthogonalPath(from, to)}
+                  fill="none"
+                  strokeWidth={0.8}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  className="stroke-primary/40"
+                  markerEnd="url(#scene-arrow)"
+                />
               );
             })}
-          </div>
+            {[...layout.positions.entries()].map(([name, pos]) => {
+              const isCurrent = name === currentSceneName;
+              const header = sceneHeaders?.[name];
+              const display = header?.chapter?.trim() || name.replace(/\.txt$/i, '');
+              const maxChars = Math.max(3, Math.floor(pos.w / 4.2) - 1);
+              const label = display.length > maxChars
+                ? display.slice(0, Math.max(1, maxChars - 1)) + '…'
+                : display;
+              const titleParts = [name];
+              if (header?.chapter) titleParts.push(`章节：${header.chapter}`);
+              if (header?.outline) titleParts.push(`大纲：${header.outline}`);
+              return (
+                <g
+                  key={name}
+                  onClick={() => onSwitchScene?.(name)}
+                  className="cursor-pointer"
+                >
+                  <title>{titleParts.join('\n')}</title>
+                  <rect
+                    x={pos.x - pos.w / 2}
+                    y={pos.y - NODE_H / 2}
+                    width={pos.w}
+                    height={NODE_H}
+                    rx={NODE_RX}
+                    ry={NODE_RX}
+                    className={
+                      isCurrent
+                        ? 'fill-primary stroke-primary'
+                        : 'fill-primary/15 stroke-primary/40 hover:fill-primary/30 transition-colors'
+                    }
+                    strokeWidth={0.7}
+                  />
+                  <text
+                    x={pos.x}
+                    y={pos.y}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize="7"
+                    className={
+                      isCurrent
+                        ? 'fill-primary-foreground font-mono-family pointer-events-none'
+                        : 'fill-foreground/85 font-mono-family pointer-events-none'
+                    }
+                  >
+                    {label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
         )}
       </div>
     </div>
   );
-}
+});
 
 function InsertZone({
   atIndex,
@@ -503,7 +643,7 @@ function NodeListItem({
   );
 }
 
-export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex, onDeleteNode, onCopyNode, onCutNode, onPasteNode, clipboardNode }: NodePanelProps) {
+export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onReorderNodes, characterColors, onJumpToIndex, onDeleteNode, onCopyNode, onCutNode, onPasteNode, clipboardNode, currentSceneName, availableScenes, sceneLinkMap, sceneHeaders, onSwitchScene }: NodePanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [areaMenu, setAreaMenu] = useState<{ x: number; y: number; atIndex: number } | null>(null);
@@ -538,10 +678,12 @@ export function NodePanel({ nodes, selectedNode, onSelectNode, onInsertNode, onR
 
   return (
     <div className="w-64 h-full border-r border-border bg-card/30 backdrop-blur-sm flex flex-col overflow-hidden">
-      <FlowMinimap
-        nodes={nodes}
-        selectedNode={selectedNode}
-        onSelect={onSelectNode}
+      <SceneGraph
+        currentSceneName={currentSceneName}
+        availableScenes={availableScenes}
+        sceneLinkMap={sceneLinkMap}
+        sceneHeaders={sceneHeaders}
+        onSwitchScene={onSwitchScene}
       />
 
       {/* Node List */}

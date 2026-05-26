@@ -20,7 +20,8 @@ import { AiMemoryPanel } from './AiMemoryPanel';
 import { AiMessageBubble } from './AiMessageBubble';
 import { AiPendingCard } from './AiPendingCard';
 import { ConflictCard, ErrorCard, MissingAssetCard } from './AiStatusCard';
-import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
+import type { WebGalNode, WebGalCommandType, SceneLink } from '../lib/webgal-types';
+import { extractSceneLinks } from '../lib/webgal-types';
 import {
   parseScene, serializeScene, saveScene, loadScene,
   openProject, getScenePath, createScene,
@@ -91,6 +92,7 @@ export function StoryEditor() {
   const [currentSceneName, setCurrentSceneName] = useState('start.txt');
   const [dirty, setDirty] = useState(false);
   const [sceneHeaders, setSceneHeaders] = useState<Record<string, SceneHeader>>({});
+  const [sceneLinkMap, setSceneLinkMap] = useState<Record<string, SceneLink[]>>({});
   const [sceneManagerOpen, setSceneManagerOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
 
@@ -151,6 +153,21 @@ export function StoryEditor() {
     setSceneHeaders(Object.fromEntries(entries));
   }, []);
 
+  const loadSceneLinkMap = useCallback(async (projectPath: string, scenes: string[]) => {
+    const entries = await Promise.all(
+      scenes.map(async (name) => {
+        try {
+          const path = await getScenePath(projectPath, name);
+          const nodes = await loadScene(path);
+          return [name, extractSceneLinks(nodes)] as const;
+        } catch {
+          return [name, [] as SceneLink[]] as const;
+        }
+      }),
+    );
+    setSceneLinkMap(Object.fromEntries(entries));
+  }, []);
+
   const handleHeaderUpdated = useCallback((name: string, header: SceneHeader) => {
     setSceneHeaders((prev) => ({ ...prev, [name]: header }));
   }, []);
@@ -161,8 +178,9 @@ export function StoryEditor() {
       const info = await openProject(projectPath);
       setProjectInfo(info);
       void loadSceneHeaders(projectPath, info.scenes);
+      void loadSceneLinkMap(projectPath, info.scenes);
     } catch {}
-  }, [projectPath, loadSceneHeaders]);
+  }, [projectPath, loadSceneHeaders, loadSceneLinkMap]);
 
   const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
   const pendingActionRef = useRef<(() => void) | null>(null);
@@ -281,9 +299,12 @@ export function StoryEditor() {
           setCharactersForAi([]);
         }
 
-        // Load scene header comments for display
+        // Load scene header comments + outgoing scene-jump map for the graph view
         const info = await openProject(storedPath).catch(() => null);
-        if (info) void loadSceneHeaders(storedPath, info.scenes);
+        if (info) {
+          void loadSceneHeaders(storedPath, info.scenes);
+          void loadSceneLinkMap(storedPath, info.scenes);
+        }
       } else {
         // No project path, just load demo script.
         const parsed = await parseScene(DEMO_SCRIPT);
@@ -461,8 +482,9 @@ export function StoryEditor() {
       }
       setDirty(false);
       sceneDraftCache.current.delete(currentSceneName);
-      // Refresh header for the saved scene
+      // Refresh header + scene-graph link entry for the saved scene
       if (projectPath) void loadSceneHeaders(projectPath, projectInfo?.scenes ?? [currentSceneName]);
+      setSceneLinkMap((prev) => ({ ...prev, [currentSceneName]: extractSceneLinks(nodes) }));
       setSaveStatus('saved');
       // Reset status after 2s
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -627,10 +649,11 @@ export function StoryEditor() {
       }
 
       void loadSceneHeaders(selected, info.scenes);
+      void loadSceneLinkMap(selected, info.scenes);
     } catch (e) {
       console.error('Open project failed:', e);
     }
-  }, [projectId, loadSceneHeaders]);
+  }, [projectId, loadSceneHeaders, loadSceneLinkMap]);
 
   // ---------------------------------------------------------------------------
   // Switch scene within project
@@ -669,6 +692,15 @@ export function StoryEditor() {
       setScriptSource('');
     }
   }, [projectPath, currentSceneName, dirty, nodes]);
+
+  // Stable wrapper for child components (SceneGraph) so they can be memoized —
+  // the underlying handleSwitchScene closes over `nodes`/`dirty` and changes
+  // on every edit, but the click target only needs the latest implementation.
+  const handleSwitchSceneRef = useRef(handleSwitchScene);
+  handleSwitchSceneRef.current = handleSwitchScene;
+  const stableSwitchScene = useCallback((name: string) => {
+    void handleSwitchSceneRef.current(name);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Create new scene
@@ -1055,6 +1087,11 @@ export function StoryEditor() {
               onCutNode={cutNode}
               onPasteNode={pasteNode}
               clipboardNode={clipboardNode}
+              currentSceneName={currentSceneName}
+              availableScenes={projectInfo?.scenes}
+              sceneLinkMap={sceneLinkMap}
+              sceneHeaders={sceneHeaders}
+              onSwitchScene={stableSwitchScene}
             />
           </div>
 
@@ -1115,7 +1152,7 @@ export function StoryEditor() {
 
           {/* Right Panel: Scene Manager or AI Chat */}
           {sceneManagerOpen && projectPath && projectInfo ? (
-            <div className={`${aiCollapsed ? 'w-10' : 'w-80'} border-l border-border flex flex-col transition-[width] duration-200`}>
+            <div className="w-80 border-l border-border flex flex-col">
               <SceneManagerPanel
                 projectPath={projectPath}
                 projectInfo={projectInfo}

@@ -160,3 +160,34 @@ export function isMetadataComment(node: WebGalNode): boolean {
   if (colon === -1) return false;
   return METADATA_KEYS.has(node.content.slice(0, colon).trim().toLowerCase());
 }
+
+/** A scene-to-scene jump derived from a node in the source scene. */
+export interface SceneLink {
+  target: string;
+  kind: 'change' | 'call' | 'choose';
+  /** For choose-branches, the visible option text. */
+  label?: string;
+}
+
+function looksLikeSceneFile(target: string): boolean {
+  return /\.txt$/i.test(target.trim());
+}
+
+/** Collect outgoing scene-level jumps (changeScene / callScene / choose targets). */
+export function extractSceneLinks(nodes: WebGalNode[]): SceneLink[] {
+  const links: SceneLink[] = [];
+  for (const node of nodes) {
+    if (node.type === 'changeScene' && node.targetScene) {
+      links.push({ target: node.targetScene, kind: 'change' });
+    } else if (node.type === 'callScene' && node.targetScene) {
+      links.push({ target: node.targetScene, kind: 'call' });
+    } else if (node.type === 'choose' && node.choices) {
+      for (const c of node.choices) {
+        if (c.target && looksLikeSceneFile(c.target)) {
+          links.push({ target: c.target, kind: 'choose', label: c.text });
+        }
+      }
+    }
+  }
+  return links;
+}
