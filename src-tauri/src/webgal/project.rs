@@ -37,6 +37,15 @@ pub struct SceneInfo {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMemory {
+    pub world_setting: String,
+    pub writing_style: String,
+    pub user_preferences: String,
+    pub updated_at: String,
+}
+
 // ---------------------------------------------------------------------------
 // config.txt helpers
 // ---------------------------------------------------------------------------
@@ -196,6 +205,33 @@ pub fn create_scene(project_path: String, scene_name: String) -> Result<String, 
         .map_err(|e| format!("Failed to create scene: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn read_project_memory(project_path: String) -> Result<Option<ProjectMemory>, String> {
+    let path = PathBuf::from(&project_path)
+        .join("game")
+        .join("ai-memory.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read ai-memory.json: {}", e))?;
+    let memory = serde_json::from_str::<ProjectMemory>(&text)
+        .map_err(|e| format!("Failed to parse ai-memory.json: {}", e))?;
+    Ok(Some(memory))
+}
+
+#[tauri::command]
+pub fn save_project_memory(project_path: String, memory: ProjectMemory) -> Result<(), String> {
+    let game_dir = PathBuf::from(&project_path).join("game");
+    if !game_dir.is_dir() {
+        return Err(format!("Invalid project: {}/game/ not found", project_path));
+    }
+    let path = game_dir.join("ai-memory.json");
+    let text = serde_json::to_string_pretty(&memory)
+        .map_err(|e| format!("Failed to serialize ai-memory.json: {}", e))?;
+    fs::write(&path, text).map_err(|e| format!("Failed to write ai-memory.json: {}", e))
 }
 
 // ---------------------------------------------------------------------------

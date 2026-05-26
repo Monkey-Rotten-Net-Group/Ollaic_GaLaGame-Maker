@@ -159,6 +159,8 @@ fn main() {
             webgal::project::get_scene_path,
             webgal::project::create_scene,
             webgal::project::export_project,
+            webgal::project::read_project_memory,
+            webgal::project::save_project_memory,
             // Runtime preview server
             get_runtime_url,
             set_runtime_project,
@@ -170,6 +172,7 @@ fn main() {
             // AI
             ai::commands::get_ai_config,
             ai::commands::set_ai_config,
+            ai::commands::validate_ai_config,
             ai::commands::default_ai_system_prompt,
             ai::commands::ai_chat_stream,
             // Assets

@@ -6,6 +6,7 @@ import {
   Sparkles, Save, Play, Image, ArrowLeft, Send,
   Upload, Download, FileText, FolderOpen, FilePlus, Check, Loader2, SlidersHorizontal,
   Undo2, Redo2, Package, MoreHorizontal, PanelRightClose, PanelRightOpen,
+  X, AlertTriangle,
 } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -14,6 +15,10 @@ import { FlowCanvas } from './FlowCanvas';
 import { DetailPanel } from './DetailPanel';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
+import { AiMemoryPanel } from './AiMemoryPanel';
+import { AiMessageBubble } from './AiMessageBubble';
+import { AiPendingCard } from './AiPendingCard';
+import { ConflictCard, ErrorCard, MissingAssetCard } from './AiStatusCard';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import {
   parseScene, serializeScene, saveScene, loadScene,
@@ -22,14 +27,9 @@ import {
   setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
-import {
-  aiChatStream,
-  extractWebGalJson,
-  webGalJsonToScript,
-  type AiChatMessage,
-} from '../lib/ai-ipc';
 import { listCharacterNames, listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
+import { useAiAgent, type AiPanelStatus } from '../hooks/useAiAgent';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,13 +47,19 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 
-interface AiMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+const aiStatusLabels: Record<AiPanelStatus, string> = {
+  idle: '等待输入',
+  generating: '生成中',
+  validating: '校验中',
+  pending: '待确认',
+  accepted: '已接受',
+  reverted: '已撤销',
+  conflict: '有冲突',
+  missing_assets: '缺少素材',
+  error: '出错',
+};
 
 const TERMINAL_TYPES = new Set<WebGalCommandType>(['choose', 'changeScene', 'end', 'jumpLabel']);
 
@@ -98,22 +104,13 @@ export function StoryEditor() {
   // Editor state
   const [nodes, setNodes] = useState<WebGalNode[]>([]);
   const [selectedNode, setSelectedNode] = useState<WebGalNode | null>(null);
+  const [assetContextNoticeDismissed, setAssetContextNoticeDismissed] = useState(false);
   const [clipboardNode, setClipboardNode] = useState<WebGalNode | null>(null);
   const [scriptSource, setScriptSource] = useState(DEMO_SCRIPT);
   const [showScript, setShowScript] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // AI state
-  const [aiInput, setAiInput] = useState('');
-  const [aiMessages, setAiMessages] = useState<AiMessage[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: '你好，我是 AI 创作助手。可以帮你生成 WebGAL 对话、场景切换、分支选项，并输出可插入脚本的 webgal-json 结构。',
-    },
-  ]);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [characterNames, setCharacterNames] = useState<string[]>([]);
@@ -143,15 +140,14 @@ export function StoryEditor() {
     }).join('\n\n');
   }, []);
 
-  const aiCancelRef = useRef<(() => void) | null>(null);
-  const aiStreamingIdRef = useRef<string | null>(null);
-  const aiMessagesEndRef = useRef<HTMLDivElement | null>(null);
+  const aiMessagesListRef = useRef<HTMLDivElement | null>(null);
 
   const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
   const pendingActionRef = useRef<(() => void) | null>(null);
 
   // In-memory draft cache: sceneName -> nodes snapshot for unsaved scenes
   const sceneDraftCache = useRef<Map<string, WebGalNode[]>>(new Map());
+  const aiPendingPreviewRef = useRef(false);
   // Keep a ref in sync so the close-requested handler always sees current dirty state
   const dirtyRef = useRef(dirty);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
@@ -634,8 +630,10 @@ export function StoryEditor() {
     if (!projectPath) return;
 
     // Stash current unsaved nodes in the in-memory draft cache
-    if (dirty) {
+    if (dirty && !aiPendingPreviewRef.current) {
       sceneDraftCache.current.set(currentSceneName, nodes);
+    } else if (aiPendingPreviewRef.current) {
+      sceneDraftCache.current.delete(currentSceneName);
     }
 
     setCurrentSceneName(sceneName);
@@ -758,126 +756,37 @@ export function StoryEditor() {
     }
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // AI chat
-  // ---------------------------------------------------------------------------
+  const aiAgent = useAiAgent({
+    projectId,
+    projectPath,
+    currentSceneName,
+    nodes,
+    selectedNode,
+    scriptSource,
+    dirty,
+    characters: charactersForAi,
+    setNodes,
+    setScriptSource,
+    setDirty,
+    setSaveStatus,
+    setSelectedNode,
+    setShowScript,
+    pushHistory,
+  });
+
   useEffect(() => {
-    aiMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [aiMessages]);
+    const list = aiMessagesListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [aiAgent.messages]);
 
-  // Cancel in-flight stream on unmount
-  useEffect(() => () => { aiCancelRef.current?.(); }, []);
-
-  const buildAiPayload = useCallback(
-    (history: AiMessage[], next: string): AiChatMessage[] => {
-      const recent = history.slice(-12); // cap context
-      const payload: AiChatMessage[] = recent.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-      payload.push({ role: 'user', content: next });
-      return payload;
-    },
-    [],
-  );
-
-  const sendAiPrompt = useCallback(async (prompt: string) => {
-    const text = prompt.trim();
-    if (!text || aiBusy) return;
-    setAiError(null);
-
-    const userId = `u-${Date.now()}`;
-    const assistantId = `a-${Date.now() + 1}`;
-    aiStreamingIdRef.current = assistantId;
-
-    const newHistory: AiMessage[] = [
-      ...aiMessages,
-      { id: userId, role: 'user', content: text },
-      { id: assistantId, role: 'assistant', content: '' },
-    ];
-    setAiMessages(newHistory);
-    setAiInput('');
-    setAiBusy(true);
-
-    const appendChunk = (chunk: string) => {
-      setAiMessages(prev =>
-        prev.map(m => (m.id === assistantId ? { ...m, content: m.content + chunk } : m)),
-      );
-    };
-
-    try {
-      const charCtx = buildCharacterContext(charactersForAi);
-      const { cancel } = await aiChatStream(buildAiPayload(aiMessages, text), {
-        onChunk: appendChunk,
-        onDone: () => {
-          aiCancelRef.current = null;
-          aiStreamingIdRef.current = null;
-          setAiBusy(false);
-        },
-        onError: (msg) => {
-          aiCancelRef.current = null;
-          aiStreamingIdRef.current = null;
-          setAiBusy(false);
-          setAiError(msg);
-          setAiMessages(prev =>
-            prev.map(m =>
-              m.id === assistantId && !m.content
-                ? { ...m, content: `（错误：${msg}）` }
-                : m,
-            ),
-          );
-        },
-      }, charCtx || undefined);
-      aiCancelRef.current = cancel;
-    } catch (e) {
-      setAiBusy(false);
-      setAiError(String(e));
+  useEffect(() => {
+    aiPendingPreviewRef.current = aiAgent.pendingChange?.status === 'pending';
+    if (aiAgent.status === 'reverted' || aiAgent.status === 'accepted') {
+      sceneDraftCache.current.delete(currentSceneName);
     }
-  }, [aiBusy, aiMessages, buildAiPayload, buildCharacterContext, charactersForAi]);
+  }, [aiAgent.pendingChange?.status, aiAgent.status, currentSceneName]);
 
-  const handleAiSend = () => { void sendAiPrompt(aiInput); };
-
-  const handleInsertAiScene = useCallback(async (content: string) => {
-    const scene = extractWebGalJson(content);
-    if (!scene) return;
-    try {
-      const script = webGalJsonToScript(scene);
-      const parsed = await parseScene(script);
-      setNodes((prev) => {
-        pushHistory(prev);
-        const lastNode = prev[prev.length - 1];
-        const startX = lastNode ? lastNode.position.x : 100;
-        const startY = lastNode ? lastNode.position.y + 130 : 60;
-        const imported = parsed.map((node, index) => ({
-          ...node,
-          id: `ai-${Date.now()}-${index}`,
-          position: { x: startX, y: startY + index * 110 },
-        }));
-        const next = [...prev, ...imported];
-        if (lastNode && imported.length > 0) {
-          const lastIndex = next.findIndex((node) => node.id === lastNode.id);
-          if (lastIndex >= 0) {
-            next[lastIndex] = {
-              ...next[lastIndex],
-              connections: [...next[lastIndex].connections, imported[0].id],
-            };
-          }
-        }
-        syncScript(next);
-        return next;
-      });
-      setShowScript(false);
-      markDirty();
-    } catch (e) {
-      setAiError(String(e));
-    }
-  }, [markDirty, pushHistory, syncScript]);
-
-  const handleQuickAction = (text: string) => {
-    if (aiBusy) return;
-    setAiInput(text);
-  };
-
+  const handleAiSend = () => { void aiAgent.sendPrompt(aiAgent.input); };
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -1199,101 +1108,132 @@ export function StoryEditor() {
               </button>
               {!aiCollapsed && (
                 <>
-              <div className="p-2 rounded-full bg-primary/20">
-                <Sparkles className="w-4 h-4 text-primary" />
-              </div>
-              <h3 className="text-sm uppercase tracking-widest text-muted-foreground font-mono-family">
-                AI 创作助手
-              </h3>
+                  <div className="p-2 rounded-full bg-primary/20">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm uppercase tracking-widest text-muted-foreground font-mono-family">
+                      AI 创作助手
+                    </h3>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${
+                        aiAgent.status === 'error' || aiAgent.status === 'conflict'
+                          ? 'bg-destructive'
+                          : aiAgent.status === 'pending'
+                          ? 'bg-primary'
+                          : aiAgent.status === 'accepted'
+                          ? 'bg-chart-5'
+                          : 'bg-muted-foreground/50'
+                      }`} />
+                      <span className="text-[10px] text-muted-foreground">
+                        {aiStatusLabels[aiAgent.status]}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={aiAgent.clearConversation}
+                    disabled={aiAgent.busy}
+                    className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors disabled:opacity-40"
+                    title="清空对话"
+                    aria-label="清空 AI 对话"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </>
               )}
             </div>
 
-            {/* Quick Actions */}
-            {!aiCollapsed && <div className="p-3 border-b border-border">
-              <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { label: '生成对话', text: '请生成一段两位角色的日常对话，至少 6 行，并附带 webgal-json 结构块。' },
-                    { label: '生成场景', text: '请生成一个开场场景，包含背景、BGM、立绘入场、旁白，并附带 webgal-json 结构块。' },
-                    { label: '生成分支', text: '请生成一个 choose 分支，包含 2-3 个选项，并附带 webgal-json 结构块。' },
-                    { label: '续写剧情', text: '请基于当前上下文续写约 8 行对话，并附带 webgal-json 结构块。' },
-                  ].map((a) => (
-                  <button
-                    key={a.label}
-                    onClick={() => handleQuickAction(a.text)}
-                    disabled={aiBusy}
-                    className="px-2 py-1.5 rounded text-xs bg-secondary hover:bg-secondary/70 transition-all border border-border disabled:opacity-50"
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </div>
-            </div>}
-
             {/* Messages */}
-            {!aiCollapsed && <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {aiMessages.map((msg) => {
-                const isStreaming = aiBusy && aiStreamingIdRef.current === msg.id;
-                const webGalScene = msg.role === 'assistant' ? extractWebGalJson(msg.content) : null;
+            {!aiCollapsed && <div ref={aiMessagesListRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+              {aiAgent.hasAssetTruncation && !assetContextNoticeDismissed && (
+                <div className="flex items-start gap-2 rounded-md border border-border bg-secondary/35 px-3 py-2 text-xs text-muted-foreground">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <div className="min-w-0 flex-1">素材库素材过多，AI 上下文中每类仅包含前 24 个，其余素材 AI 暂不可见。</div>
+                  <button
+                    type="button"
+                    onClick={() => setAssetContextNoticeDismissed(true)}
+                    className="rounded p-0.5 hover:bg-secondary"
+                    aria-label="关闭素材提示"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              {aiAgent.messages.map((msg) => {
+                const isStreaming = aiAgent.busy && aiAgent.streamingIdRef.current === msg.id;
                 return (
                   <div
                     key={msg.id}
                     className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                   >
-                    <div
-                      className={`max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap break-words ${
-                        msg.role === 'user'
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-secondary border border-border'
-                      } ${msg.role === 'assistant' ? 'font-mono-family' : 'font-body-family'}`}
-                    >
-                      {msg.content || (isStreaming ? '思考中...' : '')}
-                      {isStreaming && msg.content && <span className="inline-block w-2 h-3 ml-1 bg-current align-middle animate-pulse" />}
-                    </div>
-                    {webGalScene && (
-                      <button
-                        onClick={() => handleInsertAiScene(msg.content)}
-                        className="mt-2 px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs border border-primary/30"
-                      >
-                        插入到脚本
-                      </button>
-                    )}
+                    <AiMessageBubble role={msg.role} content={msg.content} isStreaming={isStreaming} stopped={msg.stopped} />
                   </div>
                 );
               })}
-              {aiError && (
-                <div className="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-3 py-2">
-                  {aiError}
-                  <button
-                    onClick={() => setAiSettingsOpen(true)}
-                    className="ml-2 underline hover:no-underline"
-                  >
-                    打开设置
-                  </button>
-                </div>
+              {aiAgent.pendingChange && aiAgent.status !== 'conflict' && (
+                <AiPendingCard
+                  summary={aiAgent.pendingChange.summary}
+                  status={aiAgent.pendingChange.status}
+                  diff={aiAgent.pendingChange.diff}
+                  warnings={aiAgent.pendingChange.warnings}
+                  onAccept={() => { void aiAgent.acceptChange(); }}
+                  onRevert={aiAgent.revertChange}
+                />
               )}
-              <div ref={aiMessagesEndRef} />
+              {aiAgent.status === 'missing_assets' && (
+                <MissingAssetCard
+                  issues={aiAgent.missingIssues}
+                  onUseFallback={aiAgent.useFallbackAssets}
+                  onOpenAssets={aiAgent.openAssets}
+                  onRetryPrompt={aiAgent.retryWithExistingAssets}
+                />
+              )}
+              {aiAgent.status === 'conflict' && (
+                <ConflictCard
+                  onKeepManual={aiAgent.revertChange}
+                  onApplyAi={() => { void aiAgent.forceApplyChange(); }}
+                  onRegenerate={aiAgent.regenerateAfterConflict}
+                />
+              )}
+              {aiAgent.error && aiAgent.status === 'error' && (
+                <ErrorCard
+                  message={aiAgent.error.message}
+                  canRetry={aiAgent.error.retryable}
+                  cooldown={aiAgent.cooldown}
+                  showSettings={aiAgent.error.kind === 'auth'}
+                  onRetry={aiAgent.retry}
+                  onOpenSettings={() => setAiSettingsOpen(true)}
+                />
+              )}
             </div>}
 
             {/* Input */}
+            {!aiCollapsed && (
+              <AiMemoryPanel
+                memory={aiAgent.memory}
+                disabled={!projectPath}
+                onSave={aiAgent.saveMemory}
+              />
+            )}
             {!aiCollapsed && <div className="p-3 border-t border-border">
               <textarea
-                value={aiInput}
-                onChange={(e) => setAiInput(e.target.value)}
+                value={aiAgent.input}
+                onChange={(e) => aiAgent.setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleAiSend();
                   }
                 }}
-                disabled={aiBusy}
+                disabled={aiAgent.busy || aiAgent.pendingChange?.status === 'pending'}
                 className="w-full h-20 bg-input-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none disabled:opacity-60"
-                placeholder={aiBusy ? '生成中...' : '输入你的创作想法...'}
+                placeholder={aiAgent.busy ? '生成中...' : aiAgent.pendingChange?.status === 'pending' ? '请先接受或撤销当前 AI 修改...' : '输入你的创作想法...'}
                 aria-label="AI 创作输入"
               />
-              {aiBusy ? (
+              {aiAgent.busy ? (
                 <button
-                  onClick={() => { aiCancelRef.current?.(); aiCancelRef.current = null; aiStreamingIdRef.current = null; setAiBusy(false); }}
+                  onClick={aiAgent.stop}
                   className="mt-2 w-full px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-all flex items-center justify-center gap-2 text-sm"
                 >
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1302,7 +1242,7 @@ export function StoryEditor() {
               ) : (
                 <button
                   onClick={handleAiSend}
-                  disabled={!aiInput.trim()}
+                  disabled={!aiAgent.input.trim() || aiAgent.pendingChange?.status === 'pending'}
                   className="mt-2 w-full px-3 py-2 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
                 >
                   <Send className="w-3.5 h-3.5" />
