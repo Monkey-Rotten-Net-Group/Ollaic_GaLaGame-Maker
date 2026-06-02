@@ -55,11 +55,6 @@ pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn default_ai_system_prompt() -> String {
-    config::default_system_prompt()
-}
-
-#[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {
     validate_config_basics(&config)?;
 
@@ -101,12 +96,7 @@ pub async fn ai_chat_stream(
     validate_config_basics(&cfg)?;
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
-    let sys = cfg.system_prompt.trim();
-    let mut sys_text = if !sys.is_empty() {
-        sys.to_string()
-    } else {
-        String::new()
-    };
+    let mut sys_text = config::default_system_prompt();
 
     if let Some(ref ctx) = character_context {
         if !ctx.is_empty() {

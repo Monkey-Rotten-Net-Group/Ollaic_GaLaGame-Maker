@@ -17,7 +17,6 @@ export interface AiConfig {
   model: string;
   api_key: string;
   base_url: string;
-  system_prompt: string;
 }
 
 export interface AiValidationResult {
@@ -45,10 +44,6 @@ export async function getAiConfig(): Promise<AiConfig> {
 
 export async function setAiConfig(config: AiConfig): Promise<void> {
   return invoke<void>('set_ai_config', { config });
-}
-
-export async function getDefaultSystemPrompt(): Promise<string> {
-  return invoke<string>('default_ai_system_prompt');
 }
 
 export async function validateAiConfig(config: AiConfig): Promise<AiValidationResult> {

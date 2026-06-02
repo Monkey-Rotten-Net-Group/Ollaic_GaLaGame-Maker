@@ -175,7 +175,6 @@ fn main() {
             ai::commands::get_ai_config,
             ai::commands::set_ai_config,
             ai::commands::validate_ai_config,
-            ai::commands::default_ai_system_prompt,
             ai::commands::ai_chat_stream,
             // Assets
             assets::commands::list_assets,

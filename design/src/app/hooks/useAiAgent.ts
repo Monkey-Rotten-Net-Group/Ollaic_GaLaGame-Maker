@@ -64,7 +64,7 @@ export interface AiErrorState {
 export const INITIAL_AI_MESSAGE: ChatMessage = {
   id: '1',
   role: 'assistant',
-  content: '你好，我是故事 AI 编辑器。直接告诉我要写、删、替换或讨论什么；涉及脚本修改时，我会先生成可预览的 txt 行级 diff，等你确认后再写入。',
+  content: '你好，我是故事编辑助手。你可以直接告诉我想续写剧情、调整对白、删除片段，或者一起讨论场景节奏和人物表现。',
 };
 
 interface UseAiAgentParams {

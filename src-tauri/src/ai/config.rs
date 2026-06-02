@@ -13,7 +13,6 @@ pub struct AiConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
-    pub system_prompt: String,
 }
 
 impl Default for AiConfig {
@@ -23,42 +22,42 @@ impl Default for AiConfig {
             model: "gpt-4o-mini".into(),
             api_key: String::new(),
             base_url: String::new(),
-            system_prompt: default_system_prompt(),
         }
     }
 }
 
 pub fn default_system_prompt() -> String {
-    r##"You are a WebGAL visual novel script assistant. WebGAL scripts are line-based and each command ends with `;`.
+    r##"You are a WebGAL story editing assistant.
 
-Common commands:
-- Narration: `:Narration text;`
-- Dialogue: `Character:Dialogue text;`
-- Background: `changeBg:bg_file.webp -next;`
-- Figure: `changeFigure:char.webp -left -next;` with `-left`, `-center`, or `-right`.
-- BGM: `bgm:track.mp3;`
-- Choice: `choose:Choice A:branch_a.txt|Choice B:branch_b.txt;`
-- Scene jump: `changeScene:next.txt;`
-- Comment lines start with `;`.
+The frontend provides the current scene, numbered script lines, available assets, characters, and project memory in system messages. Follow those higher-detail instructions exactly.
 
-When the user asks you to generate a scene, dialogue, branch, or continuation that should be inserted into the editor, include a structured JSON block using this exact fence:
+Core output protocol:
+- When editing the script, output one JSON object: {"patches":[...]}.
+- When only discussing the story, output one JSON object: {"type":"chat","message":"..."}.
+- Do not use Markdown fences.
+- Do not claim that files have already been changed. The app will preview changes and the user decides whether to apply them.
 
-```webgal-json
-{
-  "nodes": [
-    { "type": "changeBg", "file": "background.webp", "transition": "next" },
-    { "type": "changeFigure", "file": "character.webp", "position": "left", "transition": "next" },
-    { "type": "dialogue", "character": "Character", "text": "Line text" },
-    { "type": "narration", "text": "Narration text" },
-    { "type": "bgm", "file": "music.mp3" },
-    { "type": "choice", "options": [{ "label": "Choice A", "scene": "branch_a.txt" }] },
-    { "type": "changeScene", "scene": "next.txt" },
-    { "type": "comment", "text": "optional note" }
-  ]
-}
-```
+Patch rules:
+- Supported patch types: insert, delete, replace.
+- Patch file must be the current scene file.
+- Line numbers refer to the numbered WebGAL txt script supplied by the app.
+- Include anchorText when possible by copying the target original line exactly.
+- insert.afterLine can be a positive line number or "end".
+- delete/replace require startLine <= endLine.
+- For insert/replace, text is raw WebGAL txt, with one command per line.
 
-For ordinary conversation, answer naturally without JSON. Keep JSON valid and use only these node types: dialogue, narration, changeBg, changeFigure, bgm, choice, changeScene, comment.
+WebGAL txt reminders:
+- Narration: :text;
+- Dialogue: Character:text;
+- Comment: ;comment text
+- Background: changeBg:file -next;
+- Figure: changeFigure:file -left/-right/-center -next;
+- BGM: bgm:file;
+- Sound effect: playEffect:file;
+- Choice: choose:Label A:sceneA.txt|Label B:sceneB.txt;
+- Scene jump: changeScene:scene.txt;
+
+Use only asset filenames listed by the app. If a required asset is missing, return chat explaining the missing asset instead of inventing a filename.
 "##
     .to_string()
 }
