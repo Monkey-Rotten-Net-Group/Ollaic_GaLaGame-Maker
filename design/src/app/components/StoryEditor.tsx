@@ -1237,7 +1237,7 @@ export function StoryEditor() {
                     key={msg.id}
                     className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                   >
-                    <AiMessageBubble role={msg.role} content={msg.content} isStreaming={isStreaming} stopped={msg.stopped} />
+                    <AiMessageBubble role={msg.role} content={msg.content} isStreaming={isStreaming} stopped={msg.stopped} diff={msg.diff} />
                   </div>
                 );
               })}

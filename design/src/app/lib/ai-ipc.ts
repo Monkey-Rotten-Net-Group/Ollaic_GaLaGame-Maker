@@ -1,7 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-export { extractWebGalJson, webGalJsonToScript } from './webgal-schema';
-export type { WebGalScene } from './webgal-schema';
 
 export type AiProvider =
   | 'openai'

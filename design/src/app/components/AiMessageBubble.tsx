@@ -1,14 +1,53 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { CheckCircle2, ChevronRight } from 'lucide-react';
-import { extractWebGalJsonBlocks, summarizeScene } from '../lib/webgal-schema';
-import { extractStoryEditPlan, summarizeEditPlan } from '../lib/story-agent';
+import { CheckCircle2, ChevronRight, FileEdit } from 'lucide-react';
+import type { ChatDiffLine } from '../hooks/useChatSession';
 
 interface AiMessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
   isStreaming?: boolean;
   stopped?: boolean;
+  diff?: ChatDiffLine[];
+}
+
+function DiffBlock({ diff }: { diff: ChatDiffLine[] }) {
+  const [open, setOpen] = useState(false);
+  const added = diff.filter(l => l.kind === 'added').length;
+  const removed = diff.filter(l => l.kind === 'removed').length;
+  const label = [added > 0 && `+${added}`, removed > 0 && `-${removed}`].filter(Boolean).join(' ');
+
+  return (
+    <div className="mt-2 text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="flex w-full items-center gap-2 rounded-md border border-border/50 bg-background/35 px-2 py-1.5 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+        aria-expanded={open}
+      >
+        <FileEdit className="h-3.5 w-3.5 shrink-0 text-chart-2" />
+        <span className="flex-1 text-left">查看修改内容</span>
+        {label && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{label}</span>}
+        <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-1 max-h-52 overflow-auto rounded-md border border-border/50 bg-background/35 p-1.5 font-mono text-[11px] leading-relaxed">
+          {diff.map((line, i) => {
+            if (line.kind === 'added') {
+              return <div key={i} className="text-green-400 whitespace-pre-wrap"><span className="select-none text-green-600">+ </span>{line.text}</div>;
+            }
+            if (line.kind === 'removed') {
+              return <div key={i} className="text-red-400 whitespace-pre-wrap line-through decoration-red-600/50"><span className="select-none no-underline text-red-600">- </span>{line.text}</div>;
+            }
+            if (line.text === '...') {
+              return <div key={i} className="text-muted-foreground/50 select-none text-center">···</div>;
+            }
+            return <div key={i} className="text-muted-foreground/70 whitespace-pre-wrap"><span className="select-none">  </span>{line.text}</div>;
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
@@ -70,23 +109,20 @@ function MarkdownText({ text, enabled }: { text: string; enabled: boolean }) {
   return <>{output}</>;
 }
 
-export function AiMessageBubble({ role, content, isStreaming = false, stopped = false }: AiMessageBubbleProps) {
+export function AiMessageBubble({ role, content, isStreaming = false, stopped = false, diff }: AiMessageBubbleProps) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  const webgalBlocks = extractWebGalJsonBlocks(content);
-  const storyEditPlan = extractStoryEditPlan(content);
-  const completeBlockRegex = /```(?:webgal-json|story-edit-json|json)\s*[\s\S]*?```/gi;
-  const completeBlockTestRegex = /```(?:webgal-json|story-edit-json|json)\s*[\s\S]*?```/i;
-  const openBlockRegex = /```(?:webgal-json|story-edit-json|json)\s*[\s\S]*$/i;
-  const hasStructuredBlocks = webgalBlocks.length > 0 || !!storyEditPlan || completeBlockTestRegex.test(content) || openBlockRegex.test(content);
+  const completeBlockRegex = /```(?:[a-z-]+|json)?\s*[\s\S]*?```/gi;
+  const completeBlockTestRegex = /```(?:[a-z-]+|json)?\s*[\s\S]*?```/i;
+  const openBlockRegex = /```(?:[a-z-]+|json)?\s*[\s\S]*$/i;
+  const hasStructuredBlocks = completeBlockTestRegex.test(content) || openBlockRegex.test(content);
   const textParts = hasStructuredBlocks
     ? content.replace(openBlockRegex, '').split(completeBlockRegex)
     : [content];
   const hasOpenStructuredBlock = openBlockRegex.test(content);
-  const fallbackCardLabel = storyEditPlan
-    ? summarizeEditPlan(storyEditPlan)
-    : hasOpenStructuredBlock && isStreaming
-    ? '正在生成结构化修改方案...'
-    : '已生成结构化修改方案';
+  const fallbackCardLabel = hasOpenStructuredBlock && isStreaming
+    ? '正在生成修改预览...'
+    : '已生成修改预览';
+  const structuredBlocks = Array.from(content.matchAll(/```(?:[a-z-]+|json)?\s*([\s\S]*?)(?:```|$)/gi), (match) => match[1] ?? '');
 
   return (
     <div
@@ -99,53 +135,22 @@ export function AiMessageBubble({ role, content, isStreaming = false, stopped = 
       {textParts.map((part, index) => (
         <div key={`part-${index}`}>
           {part.trim() && <MarkdownText text={part.trim()} enabled={role === 'assistant'} />}
-          {(webgalBlocks[index] || (index === 0 && (storyEditPlan || hasOpenStructuredBlock))) && (
+          {(structuredBlocks[index] !== undefined || (index === 0 && hasOpenStructuredBlock)) && (
             <div className="my-2 text-xs">
-              {webgalBlocks[index]?.scene ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setExpanded((prev) => ({ ...prev, [index]: !prev[index] }))}
-                    className="flex w-full items-center gap-2 rounded-md border border-border/50 bg-background/35 px-2 py-1.5 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
-                    aria-expanded={expanded[index]}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 text-chart-5" />
-                    <span className="min-w-0 flex-1 truncate text-left">
-                      已生成 {summarizeScene(webgalBlocks[index].scene)}
-                    </span>
-                    <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded[index] ? 'rotate-90' : ''}`} />
-                  </button>
-                  {expanded[index] && (
-                    <pre className="mt-1.5 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border/50 bg-background/35 p-2 text-[11px] leading-relaxed text-muted-foreground">
-                      {webgalBlocks[index].raw}
-                    </pre>
-                  )}
-                </>
-              ) : storyEditPlan || hasOpenStructuredBlock ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setExpanded((prev) => ({ ...prev, [index]: !prev[index] }))}
-                    className="flex w-full items-center gap-2 rounded-md border border-border/50 bg-background/35 px-2 py-1.5 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
-                    aria-expanded={expanded[index]}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 text-chart-5" />
-                    <span className="min-w-0 flex-1 truncate text-left">{fallbackCardLabel}</span>
-                    <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded[index] ? 'rotate-90' : ''}`} />
-                  </button>
-                  {expanded[index] && (
-                    <pre className="mt-1.5 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border/50 bg-background/35 p-2 text-[11px] leading-relaxed text-muted-foreground">
-                      {content.match(/```(?:webgal-json|story-edit-json|json)\s*([\s\S]*?)(?:```|$)/i)?.[1] ?? ''}
-                    </pre>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2 px-1 py-1 text-muted-foreground">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>已收到结构化内容，生成结束后会校验。</span>
-                  </div>
-                </>
+              <button
+                type="button"
+                onClick={() => setExpanded((prev) => ({ ...prev, [index]: !prev[index] }))}
+                className="flex w-full items-center gap-2 rounded-md border border-border/50 bg-background/35 px-2 py-1.5 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
+                aria-expanded={expanded[index]}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 text-chart-5" />
+                <span className="min-w-0 flex-1 truncate text-left">{fallbackCardLabel}</span>
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded[index] ? 'rotate-90' : ''}`} />
+              </button>
+              {expanded[index] && (
+                <pre className="mt-1.5 max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border/50 bg-background/35 p-2 text-[11px] leading-relaxed text-muted-foreground">
+                  {structuredBlocks[index] ?? ''}
+                </pre>
               )}
             </div>
           )}
@@ -153,6 +158,7 @@ export function AiMessageBubble({ role, content, isStreaming = false, stopped = 
       ))}
       {!content && isStreaming && '思考中...'}
       {isStreaming && content && <span className="inline-block w-2 h-3 ml-1 bg-current align-middle animate-pulse" />}
+      {diff && diff.length > 0 && !isStreaming && <DiffBlock diff={diff} />}
       {stopped && <div className="mt-1 text-[11px] text-muted-foreground">已停止</div>}
     </div>
   );

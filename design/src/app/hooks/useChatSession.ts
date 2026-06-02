@@ -1,10 +1,16 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
+export interface ChatDiffLine {
+  kind: 'context' | 'added' | 'removed';
+  text: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   stopped?: boolean;
+  diff?: ChatDiffLine[];
 }
 
 interface PersistedChatSession {

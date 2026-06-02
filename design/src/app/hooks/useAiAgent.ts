@@ -1,27 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatStream, extractWebGalJson, webGalJsonToScript, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatStream, type AiChatMessage } from '../lib/ai-ipc';
 import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
 import type { Character } from '../lib/character-types';
+import { applyEditorPatches } from '../lib/editor-executor';
+import {
+  describeParseError,
+  extractEditorResponse,
+  extractPatchAssetRefs,
+  summarizePatches,
+  validatePatchText,
+  type EditorPatch,
+  type EditorResponse,
+} from '../lib/editor-patch';
 import { buildMemoryContext, emptyProjectMemory, readProjectMemory, saveProjectMemory, type ProjectMemory } from '../lib/project-memory';
 import {
-  applyStoryEditPlan,
-  applyFallbackAssets,
   buildNumberedScriptContext,
   buildAssetContext,
   createLineDiff,
-  extractStoryEditPlan,
   formatMissingAssetIssues,
-  hasStoryEditJsonBlock,
   hasAssetContextTruncation,
   truncateContextMessages,
-  validateSceneAssets,
   type DiffLine,
   type MissingAssetIssue,
 } from '../lib/story-agent';
 import { parseScene, serializeScene, saveScene, getScenePath } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
-import { appendGeneratedNodes, reconnectSequentialNodes } from '../lib/scene-editing';
 import { useChatSession, type ChatMessage } from './useChatSession';
 
 export type AiPanelStatus =
@@ -57,12 +61,10 @@ export interface AiErrorState {
   retryable: boolean;
 }
 
-type UserIntent = 'append' | 'edit';
-
 export const INITIAL_AI_MESSAGE: ChatMessage = {
   id: '1',
   role: 'assistant',
-  content: '你好，我是故事编织 Agent。直接告诉我你的创作想法，我会结合当前场景、角色设定和 WebGAL 格式给出建议；如果生成了可插入内容，会先进入待确认预览。',
+  content: '你好，我是故事 AI 编辑器。直接告诉我要写、删、替换或讨论什么；涉及脚本修改时，我会先生成可预览的 txt 行级 diff，等你确认后再写入。',
 };
 
 interface UseAiAgentParams {
@@ -147,20 +149,6 @@ function classifyAiError(raw: string): AiErrorState {
   return { kind: 'other', retryable: true, message: `AI 服务出错：${raw}` };
 }
 
-function detectUserIntent(prompt: string): UserIntent {
-  const text = prompt.toLowerCase();
-  const appendWords = ['新增', '追加', '续写', '加一段', '添加一段', '接着写', '插入到末尾', 'append'];
-  const editWords = [
-    '修改', '改成', '改一下', '完善', '优化', '调整', '替换', '删除', '删掉', '重写', '重新设计',
-    '补充实现', '不是追加', '不要加在最后', '位置', '立绘切换', '没有变化', '没修改', '修正',
-    'change', 'replace', 'delete', 'edit', 'rewrite',
-  ];
-
-  if (editWords.some((word) => text.includes(word))) return 'edit';
-  if (appendWords.some((word) => text.includes(word))) return 'append';
-  return 'append';
-}
-
 export function useAiAgent(params: UseAiAgentParams) {
   const navigate = useNavigate();
   const {
@@ -190,7 +178,6 @@ export function useAiAgent(params: UseAiAgentParams) {
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [memory, setMemory] = useState<ProjectMemory | null>(null);
   const [missingIssues, setMissingIssues] = useState<MissingAssetIssue[]>([]);
-  const [lastScene, setLastScene] = useState<ReturnType<typeof extractWebGalJson> | null>(null);
   const [lastPrompt, setLastPrompt] = useState('');
   const [retryCount, setRetryCount] = useState(0);
   const [cooldown, setCooldown] = useState(0);
@@ -210,7 +197,6 @@ export function useAiAgent(params: UseAiAgentParams) {
     setPendingChange(null);
     setError(null);
     setMissingIssues([]);
-    setLastScene(null);
     setInput('');
   }, [currentSceneName]);
 
@@ -243,14 +229,18 @@ export function useAiAgent(params: UseAiAgentParams) {
   const buildSystemContext = useCallback((): string => {
     const currentScript = buildNumberedScriptContext(scriptSource);
     return [
-      '你是故事编织 Agent，负责把用户自然语言创作意图转换为安全的 WebGAL 创作建议。',
-      '不要声称已经直接修改文件。若要提供可插入内容，必须只输出一个结构化 JSON 代码块，系统会负责转换、校验、预览和用户确认。',
-      '结构化代码块必须是合法 JSON：必须使用双引号，不要尾随逗号，不要注释，不要 Markdown 列表，不要把说明文字写进 JSON 代码块。',
-      '代码块外只写本次改动摘要和后续建议；不要在代码块外重复 WebGAL 脚本或 JSON。',
-      '如果用户要求删除、替换、移动或改写当前脚本中的已有内容，必须使用 ```story-edit-json 代码块输出编辑方案，不要用 webgal-json 追加重复内容。',
-      'story-edit-json 格式：{"type":"edit_script","summary":"...","operations":[{"kind":"delete_line","line":12},{"kind":"delete_range","startLine":12,"endLine":15},{"kind":"replace_line","line":12,"content":"角色:新台词;"},{"kind":"insert_after_line","line":12,"content":"新增内容;"}]}。行号必须对应下方带编号的当前脚本。',
-      '如果用户要求新增内容或续写到末尾，使用 ```webgal-json 代码块。格式必须是 {"nodes":[...]}。支持节点：dialogue、narration、changeBg、changeFigure、miniAvatar、bgm、playEffect、playVideo、choice、changeScene、comment。',
-      '引用素材时只能使用当前素材库列表中的文件名。缺少素材时，请在自然语言回复里说明缺口和可选操作，不要在 webgal-json 中编造不存在的素材名。',
+      '你是 WebGAL txt 脚本编辑器助手。',
+      '输出规则：只输出一个 JSON 对象，不要 Markdown 包裹，不要解释。',
+      '需要修改脚本时返回 {"patches":[...]}；只聊天讨论时返回 {"type":"chat","message":"..."}。',
+      'patch type 只能是 insert、delete、replace。file 必须是当前场景文件名。',
+      'insert: {"type":"insert","file":"...","afterLine":正整数或"end","anchorText":"对应行原文","text":"WebGAL txt"}。',
+      'delete: {"type":"delete","file":"...","startLine":正整数,"endLine":正整数,"anchorText":"起始行原文"}。',
+      'replace: {"type":"replace","file":"...","startLine":正整数,"endLine":正整数,"anchorText":"起始行原文","text":"WebGAL txt"}。',
+      '行号必须对应下方带行号脚本中的 txt 行号。anchorText 请原样复制目标行完整文本，用于行号漂移兜底。',
+      'text 字段直接写 WebGAL txt 行，多行用 \\n 分隔，不要写 JSON 节点结构。',
+      'WebGAL txt 格式：旁白 :文本; 对话 角色名:文本; 注释 ;注释内容 背景 changeBg:文件名 -next; 立绘 changeFigure:文件名 -left/-right/-center -next; BGM bgm:文件名; 音效 playEffect:文件名; 选择 choose:标签A:场景A.txt|标签B:场景B.txt; 跳转 changeScene:场景.txt;',
+      '引用素材时只能使用当前素材库列表中的文件名。缺少素材时，返回 chat 说明，不要在 patch.text 中编造不存在的素材名。',
+      '不要声称已经直接修改文件；系统会生成 diff preview，只有用户接受后才写入。',
       buildAssetContext(assets),
       buildCharacterContext(characters),
       buildMemoryContext(memory),
@@ -260,128 +250,77 @@ export function useAiAgent(params: UseAiAgentParams) {
     ].filter(Boolean).join('\n\n');
   }, [assets, characters, currentSceneName, memory, nodes, scriptSource, selectedNode]);
 
-  const buildPayload = useCallback((next: string): AiChatMessage[] => {
+  const buildPayload = useCallback((next: string, extraMessages: AiChatMessage[] = []): AiChatMessage[] => {
     const maxMessages = scriptSource.split('\n').length > 200 ? 6 : 12;
-    const intent = detectUserIntent(next);
     return [
       { role: 'system', content: buildSystemContext() },
-      ...(intent === 'edit'
-        ? [{
-            role: 'system' as const,
-            content: [
-              '本次用户请求被系统判定为“修改已有脚本”，不是追加。',
-              '优先输出 story-edit-json，行号必须是当前脚本里的正整数 txt 行号。',
-              '不要用 Markdown 表格描述修改，不要只写“我会修改/已修改”。必须给出可执行 JSON。',
-              '如果你选择输出完整 webgal-json，系统会把它当作“替换整个当前场景”的预览，绝不会追加到末尾。',
-            ].join('\n'),
-          }]
-        : [{
-            role: 'system' as const,
-            content: '本次请求若是新增剧情，才可以使用 webgal-json 追加；只要涉及已有内容变化，就必须使用 story-edit-json。',
-          }]),
       ...truncateContextMessages(messages, maxMessages),
       { role: 'user', content: next },
+      ...extraMessages,
     ];
   }, [buildSystemContext, messages, scriptSource]);
 
-  const createPendingChangeFromContent = useCallback(async (content: string, sourceMessageId: string, warnings: string[] = [], intent: UserIntent = 'append') => {
-    const editPlan = extractStoryEditPlan(content);
-    if (editPlan) {
-      setStatus('validating');
-      try {
-        const beforeNodes = nodes;
-        const beforeContent = scriptSource;
-        const editedContent = applyStoryEditPlan(beforeContent, editPlan);
-        const afterNodes = await parseScene(editedContent);
-        const afterContent = await serializeScene(afterNodes);
-        if (afterContent === beforeContent) {
-          setStatus('error');
-          setError({ kind: 'other', retryable: true, message: 'AI 返回了编辑方案，但应用后脚本没有任何变化。请让它基于当前 txt 行号重新生成 story-edit-json。' });
-          return;
-        }
-        const change: AiChangeRecord = {
-          id: `change-${Date.now()}`,
-          filePath: currentSceneName,
-          beforeContent,
-          afterContent,
-          diff: createLineDiff(beforeContent, afterContent),
-          summary: editPlan.summary || `AI 建议修改 ${currentSceneName}。`,
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-          beforeNodes,
-          afterNodes,
-          baseDirty: dirty,
-          sourceMessageId,
-          warnings,
-        };
-        setPendingChange(change);
-        setNodes(afterNodes);
-        setScriptSource(afterContent);
-        setSelectedNode(null);
-        setShowScript(false);
-        setDirty(true);
-        setSaveStatus('idle');
-        setStatus('pending');
-        setError(null);
-      } catch (e) {
-        setStatus('error');
-        setError({ kind: 'other', retryable: true, message: `AI 编辑方案无法应用：${String(e)}` });
+  const replaceAssistantMessage = useCallback((messageId: string, content: string, extra?: Partial<import('./useChatSession').ChatMessage>) => {
+    setMessages(prev => prev.map(message => (
+      message.id === messageId ? { ...message, content, ...extra } : message
+    )));
+  }, [setMessages]);
+
+  const validatePatchAssets = useCallback((patches: EditorPatch[]): MissingAssetIssue[] => {
+    const available = new Set(assets.map((asset) => `${asset.category}/${asset.name}`));
+    const issues: MissingAssetIssue[] = [];
+    for (const patch of patches) {
+      if (patch.type === 'delete') continue;
+      for (const ref of extractPatchAssetRefs(patch.text)) {
+        if (!available.has(`${ref.expectedCategory}/${ref.file}`)) issues.push(ref);
       }
+    }
+    return issues;
+  }, [assets]);
+
+  const createPendingChangeFromEditorResponse = useCallback(async (response: EditorResponse, sourceMessageId: string, warnings: string[] = []) => {
+    if (response.type === 'chat') {
+      replaceAssistantMessage(sourceMessageId, response.message);
+      setStatus('idle');
+      setError(null);
       return;
     }
 
-    if (intent === 'edit' && hasStoryEditJsonBlock(content)) {
-      setStatus('error');
-      setError({
-        kind: 'other',
-        retryable: true,
-        message: 'AI 返回了 story-edit-json，但 JSON 格式或行号无效。请重试，系统会要求它使用当前 txt 正整数行号重新生成。',
-      });
-      return;
-    }
-
-    const scene = extractWebGalJson(content);
-    setLastScene(scene);
-    if (!scene) {
-      if (intent === 'edit') {
-        setStatus('error');
-        setError({
-          kind: 'other',
-          retryable: true,
-          message: 'AI 没有返回可执行修改方案。修改已有内容必须返回 story-edit-json；如果返回完整 webgal-json，系统会按替换当前场景预览处理。',
-        });
-        return;
-      }
+    const patches = response.patches;
+    if (patches.length === 0) {
       setStatus('idle');
       return;
     }
+    const wrongFile = patches.find((patch) => patch.file !== currentSceneName);
+    if (wrongFile) {
+      setStatus('error');
+      setError({ kind: 'other', retryable: true, message: `AI patch 目标文件是 ${wrongFile.file}，但当前场景是 ${currentSceneName}。` });
+      return;
+    }
+    const textErrors = patches.flatMap((patch) => (patch.type === 'insert' || patch.type === 'replace') ? validatePatchText(patch.text) : []);
+    if (textErrors.length > 0) {
+      setStatus('error');
+      setError({ kind: 'other', retryable: true, message: `AI patch 中的 WebGAL txt 格式无效：\n${textErrors.join('\n')}` });
+      return;
+    }
+    const missing = projectPath ? validatePatchAssets(patches) : [];
+    if (missing.length > 0) {
+      setMissingIssues(missing);
+      setStatus('missing_assets');
+      setError({ kind: 'other', retryable: false, message: `AI patch 引用了素材库中不存在的文件，已阻止写入。\n${formatMissingAssetIssues(missing)}` });
+      return;
+    }
+
     setStatus('validating');
     try {
-      const missing = projectPath ? validateSceneAssets(scene, assets) : [];
-      if (missing.length > 0) {
-        setMissingIssues(missing);
-        setStatus('missing_assets');
-        setError({ kind: 'other', retryable: false, message: `AI 方案引用了素材库中不存在的文件，已阻止写入。\n${formatMissingAssetIssues(missing)}` });
-        return;
-      }
-
-      const script = webGalJsonToScript(scene);
-      const parsed = await parseScene(script);
       const beforeNodes = nodes;
       const beforeContent = scriptSource;
-      const replacingWholeScene = intent === 'edit';
-      const imported = parsed.map((node, index) => ({
-        ...node,
-        id: `ai-${Date.now()}-${index}`,
-        position: { x: 100, y: 60 + index * 110 },
-      }));
-      const afterNodes = replacingWholeScene
-        ? reconnectSequentialNodes(imported)
-        : appendGeneratedNodes(beforeNodes, parsed, `ai-${Date.now()}`);
+      const applied = applyEditorPatches(beforeContent, patches);
+      const afterNodes = await parseScene(applied.content);
       const afterContent = await serializeScene(afterNodes);
       if (afterContent === beforeContent) {
         setStatus('error');
-        setError({ kind: 'other', retryable: true, message: 'AI 生成了结构化内容，但转换后脚本没有任何变化。请让它重新输出可执行的修改方案。' });
+        setError({ kind: 'other', retryable: true, message: 'AI 返回了 patch，但应用后脚本没有任何变化。请让它基于当前 txt 行号重新生成。' });
         return;
       }
       const change: AiChangeRecord = {
@@ -390,19 +329,16 @@ export function useAiAgent(params: UseAiAgentParams) {
         beforeContent,
         afterContent,
         diff: createLineDiff(beforeContent, afterContent),
-        summary: replacingWholeScene
-          ? `AI 建议替换 ${currentSceneName} 的当前场景内容（由修改请求触发）。`
-          : `AI 建议向 ${currentSceneName} 追加 ${imported.length} 个节点。`,
+        summary: summarizePatches(patches),
         status: 'pending',
         createdAt: new Date().toISOString(),
         beforeNodes,
         afterNodes,
         baseDirty: dirty,
         sourceMessageId,
-        warnings: replacingWholeScene
-          ? [...warnings, '本次是修改类请求，AI 输出了完整 WebGAL 结构，系统已按“替换当前场景”生成预览，而不是追加到末尾。']
-          : warnings,
+        warnings: applied.correctedAnchors > 0 ? [...warnings, `已通过 anchorText 修正 ${applied.correctedAnchors} 处行号漂移。`] : warnings,
       };
+      replaceAssistantMessage(sourceMessageId, `已生成修改预览：${change.summary}`);
       setPendingChange(change);
       setNodes(afterNodes);
       setScriptSource(afterContent);
@@ -414,9 +350,9 @@ export function useAiAgent(params: UseAiAgentParams) {
       setError(null);
     } catch (e) {
       setStatus('error');
-      setError({ kind: 'other', retryable: true, message: `AI 修改方案无法通过 WebGAL 解析校验：${String(e)}` });
+      setError({ kind: 'other', retryable: true, message: `AI patch 无法应用或无法通过 WebGAL 解析校验：${String(e)}` });
     }
-  }, [assets, currentSceneName, dirty, nodes, projectPath, scriptSource, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
+  }, [currentSceneName, dirty, nodes, projectPath, replaceAssistantMessage, scriptSource, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript, validatePatchAssets]);
 
   const sendPrompt = useCallback(async (prompt: string) => {
     const text = prompt.trim();
@@ -426,7 +362,6 @@ export function useAiAgent(params: UseAiAgentParams) {
       return;
     }
     inFlightRef.current = true;
-    const intent = detectUserIntent(text);
     setLastPrompt(text);
     setError(null);
     setPendingChange(null);
@@ -441,21 +376,81 @@ export function useAiAgent(params: UseAiAgentParams) {
     setInput('');
     setBusy(true);
 
+    const isJsonLike = (s: string) => s.trimStart().startsWith('{') || s.trimStart().startsWith('```');
+
     const appendChunk = (chunk: string) => {
       assistantContent += chunk;
-      setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: m.content + chunk } : m)));
+      // JSON 输出不实时显示，等 onDone 后替换为人读摘要；聊天回复正常流式显示
+      if (!isJsonLike(assistantContent)) {
+        setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: m.content + chunk } : m)));
+      }
     };
 
     try {
       const { cancel } = await aiChatStream(buildPayload(text), {
         onChunk: appendChunk,
-        onDone: () => {
+        onDone: async () => {
           cancelRef.current = null;
           streamingIdRef.current = null;
-          inFlightRef.current = false;
-          setBusy(false);
-          setRetryCount(0);
-          void createPendingChangeFromContent(assistantContent, assistantId, [], intent);
+          const parsed = extractEditorResponse(assistantContent);
+          if (parsed) {
+            inFlightRef.current = false;
+            setBusy(false);
+            setRetryCount(0);
+            await createPendingChangeFromEditorResponse(parsed, assistantId);
+            return;
+          }
+
+          // 格式错误，静默重试一次，复用原气泡
+          const retryPrompt = `你的输出无法解析：${describeParseError(assistantContent)}。请只输出合法 JSON，不要 Markdown，不要解释。`;
+          let retryContent = '';
+          streamingIdRef.current = assistantId;
+          // 清空原气泡，继续显示"思考中..."
+          setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: '' } : m)));
+          try {
+            const retryResult = await aiChatStream(buildPayload(text, [
+              { role: 'assistant', content: assistantContent },
+              { role: 'user', content: retryPrompt },
+            ]), {
+              onChunk: (chunk) => {
+                retryContent += chunk;
+                if (!isJsonLike(retryContent)) {
+                  setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: m.content + chunk } : m)));
+                }
+              },
+              onDone: async () => {
+                cancelRef.current = null;
+                streamingIdRef.current = null;
+                inFlightRef.current = false;
+                setBusy(false);
+                setRetryCount(0);
+                const retryParsed = extractEditorResponse(retryContent);
+                if (retryParsed) {
+                  await createPendingChangeFromEditorResponse(retryParsed, assistantId);
+                  return;
+                }
+                replaceAssistantMessage(assistantId, 'AI 没有返回可执行方案，请重新描述你的需求。');
+                setStatus('idle');
+                setError({ kind: 'other', retryable: true, message: 'AI 没有返回可执行方案，请重新描述你的需求。' });
+              },
+              onError: (msg) => {
+                cancelRef.current = null;
+                streamingIdRef.current = null;
+                inFlightRef.current = false;
+                setBusy(false);
+                setStatus('error');
+                const classified = classifyAiError(msg);
+                setError(classified);
+                if (classified.kind === 'rate_limit') setCooldown(30);
+              },
+            });
+            cancelRef.current = retryResult.cancel;
+          } catch (e) {
+            inFlightRef.current = false;
+            setBusy(false);
+            setStatus('error');
+            setError(classifyAiError(String(e)));
+          }
         },
         onError: (msg) => {
           cancelRef.current = null;
@@ -476,7 +471,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       setStatus('error');
       setError(classifyAiError(String(e)));
     }
-  }, [buildPayload, busy, createPendingChangeFromContent, messages, pendingChange, setMessages]);
+  }, [buildPayload, busy, createPendingChangeFromEditorResponse, messages, pendingChange, setMessages]);
 
   const retry = useCallback(() => {
     if (!lastPrompt || busy || cooldown > 0) return;
@@ -501,9 +496,10 @@ export function useAiAgent(params: UseAiAgentParams) {
       setDirty(true);
       setSaveStatus('idle');
     }
+    replaceAssistantMessage(pendingChange.sourceMessageId, `已接受修改：${pendingChange.summary}`, { diff: pendingChange.diff });
     setPendingChange({ ...pendingChange, status: 'accepted' });
     setStatus('accepted');
-  }, [currentSceneName, pendingChange, projectPath, pushHistory, scriptSource, setDirty, setSaveStatus]);
+  }, [currentSceneName, pendingChange, projectPath, pushHistory, replaceAssistantMessage, scriptSource, setDirty, setSaveStatus]);
 
   const revertChange = useCallback(() => {
     if (!pendingChange) return;
@@ -512,9 +508,10 @@ export function useAiAgent(params: UseAiAgentParams) {
     setSelectedNode(null);
     setDirty(pendingChange.baseDirty);
     setSaveStatus('idle');
+    replaceAssistantMessage(pendingChange.sourceMessageId, `已撤销：${pendingChange.summary}`);
     setPendingChange({ ...pendingChange, status: 'reverted' });
     setStatus('reverted');
-  }, [pendingChange, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
+  }, [pendingChange, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChange) return;
@@ -539,15 +536,10 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [pendingChange]);
 
   const useFallbackAssets = useCallback(() => {
-    if (!lastScene) return;
-    const result = applyFallbackAssets(lastScene, assets);
-    if (result.unresolved.length > 0) {
-      setMissingIssues(result.unresolved);
-      return;
-    }
-    const content = `\`\`\`webgal-json\n${JSON.stringify(result.scene, null, 2)}\n\`\`\``;
-    void createPendingChangeFromContent(content, `fallback-${Date.now()}`, result.replacements);
-  }, [assets, createPendingChangeFromContent, lastScene]);
+    setStatus('idle');
+    setError(null);
+    setInput('请改用素材库中已有的文件名重新生成 patch。如果没有合适素材，请用 chat 说明缺少什么素材。');
+  }, []);
 
   const openAssets = useCallback(() => {
     if (projectId) navigate(`/editor/${projectId}/assets`);

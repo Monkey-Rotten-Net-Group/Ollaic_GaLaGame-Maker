@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { initProject, openProject, type ProjectInfo } from '../lib/webgal-ipc';
+import { saveProjectMemory } from '../lib/project-memory';
 
 export interface Project {
   id: string;
@@ -154,10 +155,19 @@ export function ProjectHome() {
 
     try {
       const info: ProjectInfo = await initProject(selectedDir, name);
+      const desc = projectDesc.trim();
+      if (desc) {
+        await saveProjectMemory(info.path, {
+          worldSetting: desc,
+          writingStyle: '',
+          userPreferences: '',
+          updatedAt: new Date().toISOString(),
+        });
+      }
       const newProject: Project = {
         id: Date.now().toString(),
         name: info.config.Game_name || name,
-        description: projectDesc.trim() || `WebGAL 项目 — ${name}`,
+        description: desc || `WebGAL 项目 — ${name}`,
         lastModified: new Date().toLocaleString(),
         path: info.path,
         isFavorite: false,
@@ -345,15 +355,18 @@ export function ProjectHome() {
                 {/* Description */}
                 <div>
                   <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-2 font-bold">
-                    简介（可选）
+                    故事简介（可选）
                   </label>
                   <textarea
                     value={projectDesc}
                     onChange={(e) => setProjectDesc(e.target.value)}
                     className="w-full h-20 px-4 py-3 bg-secondary/30 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none transition-all"
-                    placeholder="简单描述你的故事..."
+                    placeholder="描述故事背景、世界观或主要人物关系..."
                     aria-label="项目简介"
                   />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    此内容会作为 AI 的初始世界观记忆，请认真填写——写得越准确，AI 生成的内容越贴合你的故事。
+                  </p>
                 </div>
 
                 {/* Directory picker */}
