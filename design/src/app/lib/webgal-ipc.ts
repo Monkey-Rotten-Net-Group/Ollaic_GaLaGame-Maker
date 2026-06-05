@@ -143,72 +143,11 @@ export async function createScene(projectPath: string, sceneName: string): Promi
 export interface ExportResult {
   success: boolean;
   warnings: string[];
-  outputPath: string;
-  issues?: ExportValidationIssue[];
-}
-
-export interface ExportValidationIssue {
-  level: 'warning' | 'error';
-  code: string;
-  message: string;
-  path?: string;
-}
-
-export interface ProjectMetadata {
-  synopsis: string;
-  description: string;
-  coverPath: string;
-  tags: string[];
-  version: string;
-  releaseNotes: string;
-  lastExportDir: string;
-}
-
-export interface SnapshotInfo {
-  id: string;
-  label: string;
-  createdAt: string;
-  path: string;
-}
-
-/** Read editor/project metadata stored at the project root. */
-export async function readProjectMetadata(projectPath: string): Promise<ProjectMetadata | null> {
-  return invoke<ProjectMetadata | null>('read_project_metadata', { projectPath });
-}
-
-/** Persist editor/project metadata at the project root. */
-export async function saveProjectMetadata(projectPath: string, metadata: ProjectMetadata): Promise<void> {
-  return invoke<void>('save_project_metadata', { projectPath, metadata });
 }
 
 /** Export a WebGAL project to the given output directory. */
-export async function exportProject(
-  projectPath: string,
-  outputPath: string,
-  asZip?: boolean,
-  metadata?: ProjectMetadata | null,
-): Promise<ExportResult> {
-  return invoke<ExportResult>('export_project', {
-    projectPath,
-    outputPath,
-    asZip: asZip ?? false,
-    metadata: metadata ?? null,
-  });
-}
-
-/** Create a persistent whole-project snapshot. */
-export async function createProjectSnapshot(projectPath: string, label?: string): Promise<SnapshotInfo> {
-  return invoke<SnapshotInfo>('create_project_snapshot', { projectPath, label: label ?? null });
-}
-
-/** List persistent project snapshots, newest first. */
-export async function listProjectSnapshots(projectPath: string): Promise<SnapshotInfo[]> {
-  return invoke<SnapshotInfo[]>('list_project_snapshots', { projectPath });
-}
-
-/** Restore a persistent project snapshot. */
-export async function restoreProjectSnapshot(projectPath: string, snapshotId: string): Promise<void> {
-  return invoke<void>('restore_project_snapshot', { projectPath, snapshotId });
+export async function exportProject(projectPath: string, outputPath: string, asZip?: boolean): Promise<ExportResult> {
+  return invoke<ExportResult>('export_project', { projectPath, outputPath, asZip: asZip ?? false });
 }
 
 // ---------------------------------------------------------------------------

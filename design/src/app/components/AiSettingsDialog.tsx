@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react';
-import { X, Save, PlugZap, CheckCircle2, AlertCircle, List, Trash2, RefreshCw } from 'lucide-react';
+import { X, Save, PlugZap, CheckCircle2, AlertCircle } from 'lucide-react';
 import {
-  type AiLogEntry,
   type AiConfig,
   type AiValidationResult,
   getAiConfig,
   setAiConfig,
   validateAiConfig,
-  listAiLogs,
-  clearAiLogs,
-  getAiLogPath,
 } from '../lib/ai-ipc';
 
 interface ProviderPreset {
@@ -41,18 +37,13 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [logsLoading, setLogsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<AiValidationResult | null>(null);
-  const [logs, setLogs] = useState<AiLogEntry[]>([]);
-  const [logPath, setLogPath] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setValidation(null);
-    setLogs([]);
-    setLogPath('');
     getAiConfig()
       .then(setConfig)
       .catch((e) => setError(String(e)));
@@ -90,37 +81,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       setError(String(e));
     } finally {
       setVerifying(false);
-    }
-  };
-
-  const refreshLogs = async () => {
-    setLogsLoading(true);
-    setError(null);
-    try {
-      const [nextLogs, path] = await Promise.all([
-        listAiLogs(80),
-        getAiLogPath(),
-      ]);
-      setLogs(nextLogs);
-      setLogPath(path);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLogsLoading(false);
-    }
-  };
-
-  const handleClearLogs = async () => {
-    setLogsLoading(true);
-    setError(null);
-    try {
-      await clearAiLogs();
-      setLogs([]);
-      setLogPath(await getAiLogPath());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLogsLoading(false);
     }
   };
 
@@ -256,49 +216,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                 )}
               </div>
 
-              <div className="rounded-lg border border-border bg-secondary/20 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <List className="h-4 w-4" />
-                      AI 调用日志
-                    </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {logPath || '读取最近的验证与对话调用记录。'}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      onClick={refreshLogs}
-                      disabled={logsLoading}
-                      className="rounded-md border border-border bg-secondary px-3 py-2 text-xs hover:bg-secondary/70 disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${logsLoading ? 'animate-spin' : ''}`} />
-                      刷新
-                    </button>
-                    <button
-                      onClick={handleClearLogs}
-                      disabled={logsLoading}
-                      className="rounded-md border border-border bg-secondary px-3 py-2 text-xs hover:bg-secondary/70 disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      清空
-                    </button>
-                  </div>
-                </div>
-                {logs.length > 0 ? (
-                  <div className="mt-3 max-h-56 overflow-y-auto rounded-md border border-border bg-background/40">
-                    {logs.map((entry, index) => (
-                      <AiLogRow key={`${entry.timestampMs}-${index}`} entry={entry} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-3 rounded-md border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
-                    {logsLoading ? '正在读取日志…' : '暂无已加载日志。'}
-                  </div>
-                )}
-              </div>
-
               {error && (
                 <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/30 text-sm text-destructive">
                   <div className="flex items-start gap-2">
@@ -330,38 +247,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function AiLogRow({ entry }: { entry: AiLogEntry }) {
-  const time = new Date(Number(entry.timestampMs)).toLocaleString();
-  return (
-    <div className="border-b border-border px-3 py-2 last:border-b-0">
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <div className="min-w-0 truncate font-mono-family">
-          {time} · {entry.action} · {entry.provider}/{entry.model}
-        </div>
-        <span
-          className={`shrink-0 rounded px-1.5 py-0.5 ${
-            entry.success
-              ? 'bg-emerald-500/10 text-emerald-300'
-              : 'bg-destructive/10 text-destructive'
-          }`}
-        >
-          {entry.success ? '成功' : '失败'}
-        </span>
-      </div>
-      {entry.endpoint && (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">
-          {entry.endpoint}
-        </div>
-      )}
-      {entry.message && (
-        <div className="mt-1 break-words text-xs text-muted-foreground">
-          {entry.message}
-        </div>
-      )}
     </div>
   );
 }

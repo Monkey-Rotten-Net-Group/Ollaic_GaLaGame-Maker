@@ -79,29 +79,18 @@ pub fn load_config() -> AiConfig {
 pub fn save_config(config: &AiConfig) -> Result<(), String> {
     let path = config_path().ok_or_else(|| "Unable to locate user config directory".to_string())?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create config directory: {e}"))?;
     }
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     fs::write(&path, json).map_err(|e| format!("Failed to write config: {e}"))
 }
 
-pub fn log_path() -> Result<PathBuf, String> {
-    Ok(dirs::config_dir()
-        .ok_or_else(|| "Unable to locate user config directory".to_string())?
-        .join(CONFIG_DIR)
-        .join(LOG_FILE))
-}
-
 pub fn append_log_line(line: &str) -> Result<(), String> {
-    append_log_line_at(&log_path()?, line)
-}
-
-pub fn append_log_line_at(path: &PathBuf, line: &str) -> Result<(), String> {
-    let dir = path
-        .parent()
-        .ok_or_else(|| "Unable to locate log directory".to_string())?;
+    let dir = dirs::config_dir()
+        .ok_or_else(|| "Unable to locate user config directory".to_string())?
+        .join(CONFIG_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create log directory: {e}"))?;
+    let path = dir.join(LOG_FILE);
 
     use std::io::Write;
     let mut file = fs::OpenOptions::new()
@@ -110,34 +99,4 @@ pub fn append_log_line_at(path: &PathBuf, line: &str) -> Result<(), String> {
         .open(path)
         .map_err(|e| format!("Failed to open log file: {e}"))?;
     writeln!(file, "{line}").map_err(|e| format!("Failed to write log: {e}"))
-}
-
-pub fn read_log_lines(limit: usize) -> Result<Vec<String>, String> {
-    read_log_lines_at(&log_path()?, limit)
-}
-
-pub fn read_log_lines_at(path: &PathBuf, limit: usize) -> Result<Vec<String>, String> {
-    if limit == 0 || !path.exists() {
-        return Ok(Vec::new());
-    }
-    let text = fs::read_to_string(path).map_err(|e| format!("Failed to read log: {e}"))?;
-    let mut lines = text
-        .lines()
-        .rev()
-        .take(limit)
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>();
-    lines.reverse();
-    Ok(lines)
-}
-
-pub fn clear_log() -> Result<(), String> {
-    clear_log_at(&log_path()?)
-}
-
-pub fn clear_log_at(path: &PathBuf) -> Result<(), String> {
-    if path.exists() {
-        fs::remove_file(path).map_err(|e| format!("Failed to clear log: {e}"))?;
-    }
-    Ok(())
 }

@@ -6,11 +6,6 @@
     "dev": "pnpm --dir design dev",
     "build": "pnpm --dir design build",
     "preview": "pnpm --dir design preview",
-    "test": "pnpm --dir design test && cargo test --manifest-path src-tauri/Cargo.toml",
-    "test:ui": "pnpm --dir design test",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "e2e:web": "pnpm --dir design e2e:web",
-    "verify": "pnpm build && pnpm test",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

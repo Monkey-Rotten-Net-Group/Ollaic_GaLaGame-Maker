@@ -1,29 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { AlertTriangle, CheckCircle2, FolderOpen, Loader2, Package, RotateCcw, Save, X } from 'lucide-react';
-import type { ExportValidationIssue, ProjectMetadata } from '../lib/webgal-ipc';
-
-export type ExportTaskStatus = 'idle' | 'savingMetadata' | 'exporting' | 'succeeded' | 'failed';
-
-export interface ExportTaskState {
-  status: ExportTaskStatus;
-  outputPath?: string;
-  warnings: string[];
-  issues: ExportValidationIssue[];
-  error?: string;
-  failureCount: number;
-}
+import { FolderOpen, Package, Save, X } from 'lucide-react';
+import type { ProjectMetadata } from '../lib/webgal-ipc';
 
 interface Props {
   open: boolean;
   projectName: string;
   initialMetadata: ProjectMetadata | null;
-  exportTask?: ExportTaskState;
+  exporting?: boolean;
   saving?: boolean;
   onClose: () => void;
   onSave: (metadata: ProjectMetadata) => Promise<void> | void;
-  onExport: (metadata: ProjectMetadata, outputDir: string, asZip: boolean) => Promise<void> | void;
-  onRetryExport?: () => Promise<void> | void;
+  onExport: (metadata: ProjectMetadata, outputDir: string) => Promise<void> | void;
 }
 
 const EMPTY_METADATA: ProjectMetadata = {
@@ -40,17 +28,15 @@ export function ProjectMetadataDialog({
   open,
   projectName,
   initialMetadata,
-  exportTask,
+  exporting = false,
   saving = false,
   onClose,
   onSave,
   onExport,
-  onRetryExport,
 }: Props) {
   const [metadata, setMetadata] = useState<ProjectMetadata>(EMPTY_METADATA);
   const [tagsInput, setTagsInput] = useState('');
   const [outputDir, setOutputDir] = useState('');
-  const [asZip, setAsZip] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -73,14 +59,6 @@ export function ProjectMetadataDialog({
   );
 
   if (!open) return null;
-
-  const task = exportTask ?? {
-    status: 'idle',
-    warnings: [],
-    issues: [],
-    failureCount: 0,
-  };
-  const exporting = task.status === 'savingMetadata' || task.status === 'exporting';
 
   const update = (patch: Partial<ProjectMetadata>) => {
     setMetadata((prev) => ({ ...prev, ...patch }));
@@ -196,24 +174,9 @@ export function ProjectMetadataDialog({
                   <FolderOpen className="w-4 h-4" />
                 </button>
               </div>
-              <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={asZip}
-                  onChange={(e) => setAsZip(e.target.checked)}
-                  className="h-4 w-4 accent-primary"
-                />
-                同时打包为 zip 文件
-              </label>
             </Field>
           </div>
         </div>
-
-        {(task.status !== 'idle' || task.warnings.length > 0 || task.issues.length > 0) && (
-          <div className="border-t border-border px-5 py-4">
-            <ExportStatus task={task} onRetry={onRetryExport} retryDisabled={saving || exporting} />
-          </div>
-        )}
 
         <div className="flex items-center justify-between border-t border-border px-5 py-4">
           <div className="text-xs text-muted-foreground">
@@ -229,7 +192,7 @@ export function ProjectMetadataDialog({
               {saving ? '保存中…' : '保存元信息'}
             </button>
             <button
-              onClick={() => void onExport(normalizedMetadata, outputDir, asZip)}
+              onClick={() => void onExport(normalizedMetadata, outputDir)}
               disabled={saving || exporting || !outputDir.trim()}
               className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-2"
             >
@@ -241,113 +204,6 @@ export function ProjectMetadataDialog({
       </div>
     </div>
   );
-}
-
-function ExportStatus({
-  task,
-  onRetry,
-  retryDisabled,
-}: {
-  task: ExportTaskState;
-  onRetry?: () => Promise<void> | void;
-  retryDisabled: boolean;
-}) {
-  const warningIssues = task.issues.filter((issue) => issue.level === 'warning');
-  const errorIssues = task.issues.filter((issue) => issue.level === 'error');
-
-  if (task.status === 'savingMetadata' || task.status === 'exporting') {
-    return (
-      <div className="rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span>{task.status === 'savingMetadata' ? '正在保存项目元信息…' : '正在导出项目…'}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (task.status === 'succeeded') {
-    return (
-      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm">
-        <div className="flex items-start gap-2">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-500" />
-          <div className="min-w-0">
-            <div className="font-medium text-emerald-700 dark:text-emerald-300">导出成功</div>
-            {task.outputPath && <div className="mt-1 break-all text-xs text-muted-foreground">{task.outputPath}</div>}
-            <IssueList warnings={task.warnings} warningIssues={warningIssues} errorIssues={errorIssues} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (task.status === 'failed') {
-    return (
-      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
-        <div className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
-          <div className="min-w-0 flex-1">
-            <div className="font-medium text-destructive">
-              导出失败{task.failureCount > 1 ? `（第 ${task.failureCount} 次）` : ''}
-            </div>
-            {task.error && <div className="mt-1 break-words text-xs text-muted-foreground">{task.error}</div>}
-            <IssueList warnings={task.warnings} warningIssues={warningIssues} errorIssues={errorIssues} />
-          </div>
-          {onRetry && (
-            <button
-              onClick={() => void onRetry()}
-              disabled={retryDisabled}
-              className="shrink-0 rounded-md bg-secondary px-3 py-1.5 text-xs hover:bg-secondary/70 disabled:opacity-50 flex items-center gap-1.5"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              重试
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (task.warnings.length > 0 || task.issues.length > 0) {
-    return (
-      <div className="rounded-md border border-border bg-secondary/30 px-3 py-2 text-sm">
-        <IssueList warnings={task.warnings} warningIssues={warningIssues} errorIssues={errorIssues} />
-      </div>
-    );
-  }
-
-  return null;
-}
-
-function IssueList({
-  warnings,
-  warningIssues,
-  errorIssues,
-}: {
-  warnings: string[];
-  warningIssues: ExportValidationIssue[];
-  errorIssues: ExportValidationIssue[];
-}) {
-  const rows = [
-    ...errorIssues.map((issue) => ({ kind: '错误', text: formatIssue(issue) })),
-    ...warningIssues.map((issue) => ({ kind: '警告', text: formatIssue(issue) })),
-    ...warnings.map((warning) => ({ kind: '警告', text: warning })),
-  ];
-  if (rows.length === 0) return null;
-  return (
-    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-      {rows.map((row, index) => (
-        <div key={`${row.kind}-${index}`} className="break-words">
-          <span className="font-medium">{row.kind}: </span>
-          {row.text}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function formatIssue(issue: ExportValidationIssue): string {
-  return issue.path ? `${issue.message} (${issue.path})` : issue.message;
 }
 
 function Field({

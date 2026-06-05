@@ -163,11 +163,6 @@ fn main() {
             webgal::project::export_project,
             webgal::project::read_project_memory,
             webgal::project::save_project_memory,
-            webgal::project::read_project_metadata,
-            webgal::project::save_project_metadata,
-            webgal::project::create_project_snapshot,
-            webgal::project::list_project_snapshots,
-            webgal::project::restore_project_snapshot,
             // Runtime preview server
             get_runtime_url,
             set_runtime_project,
@@ -181,9 +176,6 @@ fn main() {
             ai::commands::set_ai_config,
             ai::commands::validate_ai_config,
             ai::commands::ai_chat_stream,
-            ai::commands::list_ai_logs,
-            ai::commands::clear_ai_logs,
-            ai::commands::get_ai_log_path,
             // Assets
             assets::commands::list_assets,
             assets::commands::list_all_assets,

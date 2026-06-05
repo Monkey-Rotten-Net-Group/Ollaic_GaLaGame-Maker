@@ -5,13 +5,8 @@ use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent, StreamChunk};
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
-
-const MAX_LOG_LIMIT: usize = 500;
-const DEFAULT_LOG_LIMIT: usize = 100;
-const MAX_LOG_FIELD_CHARS: usize = 1000;
 
 #[derive(Debug, Deserialize)]
 pub struct AiMessageInput {
@@ -49,29 +44,6 @@ struct AiLogEntry<'a> {
     message: &'a str,
 }
 
-#[derive(Debug, Deserialize)]
-struct RawAiLogEntry {
-    timestamp_ms: u128,
-    action: String,
-    provider: String,
-    model: String,
-    endpoint: String,
-    success: bool,
-    message: String,
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AiLogOutput {
-    pub timestamp_ms: u128,
-    pub action: String,
-    pub provider: String,
-    pub model: String,
-    pub endpoint: String,
-    pub success: bool,
-    pub message: String,
-}
-
 #[tauri::command]
 pub fn get_ai_config() -> AiConfig {
     config::load_config()
@@ -80,23 +52,6 @@ pub fn get_ai_config() -> AiConfig {
 #[tauri::command]
 pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
     config::save_config(&config)
-}
-
-#[tauri::command]
-pub fn list_ai_logs(limit: Option<usize>) -> Result<Vec<AiLogOutput>, String> {
-    let limit = normalize_log_limit(limit);
-    let lines = config::read_log_lines(limit)?;
-    Ok(parse_ai_log_lines(lines))
-}
-
-#[tauri::command]
-pub fn clear_ai_logs() -> Result<(), String> {
-    config::clear_log()
-}
-
-#[tauri::command]
-pub fn get_ai_log_path() -> Result<String, String> {
-    config::log_path().map(|path| path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -319,8 +274,6 @@ fn effective_endpoint(cfg: &AiConfig) -> String {
 }
 
 fn log_ai_event(action: &str, cfg: &AiConfig, endpoint: &str, success: bool, message: &str) {
-    let redacted_endpoint = sanitize_log_field(&redact_known_secret(endpoint, &cfg.api_key));
-    let redacted_message = sanitize_log_field(&redact_known_secret(message, &cfg.api_key));
     let entry = AiLogEntry {
         timestamp_ms: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -329,173 +282,11 @@ fn log_ai_event(action: &str, cfg: &AiConfig, endpoint: &str, success: bool, mes
         action,
         provider: &cfg.provider,
         model: &cfg.model,
-        endpoint: &redacted_endpoint,
+        endpoint,
         success,
-        message: &redacted_message,
+        message,
     };
     if let Ok(line) = serde_json::to_string(&entry) {
         let _ = config::append_log_line(&line);
-    }
-}
-
-fn normalize_log_limit(limit: Option<usize>) -> usize {
-    limit.unwrap_or(DEFAULT_LOG_LIMIT).min(MAX_LOG_LIMIT)
-}
-
-fn parse_ai_log_lines(lines: Vec<String>) -> Vec<AiLogOutput> {
-    lines
-        .into_iter()
-        .filter_map(|line| parse_ai_log_line(&line))
-        .collect()
-}
-
-fn parse_ai_log_line(line: &str) -> Option<AiLogOutput> {
-    let raw = serde_json::from_str::<RawAiLogEntry>(line).ok()?;
-    Some(AiLogOutput {
-        timestamp_ms: raw.timestamp_ms,
-        action: sanitize_log_field(&raw.action),
-        provider: sanitize_log_field(&raw.provider),
-        model: sanitize_log_field(&raw.model),
-        endpoint: sanitize_log_field(&raw.endpoint),
-        success: raw.success,
-        message: sanitize_log_field(&raw.message),
-    })
-}
-
-fn sanitize_log_field(value: &str) -> String {
-    truncate_log_field(&redact_common_secrets(value))
-}
-
-fn redact_known_secret(value: &str, secret: &str) -> String {
-    let secret = secret.trim();
-    if secret.is_empty() {
-        value.to_string()
-    } else {
-        value.replace(secret, "[REDACTED]")
-    }
-}
-
-fn redact_common_secrets(value: &str) -> String {
-    let mut output = value.to_string();
-    for marker in [
-        "authorization=bearer ",
-        "api_key=",
-        "apikey=",
-        "access_token=",
-        "token=",
-        "key=",
-        "authorization=",
-        "bearer ",
-    ] {
-        output = redact_after_marker(&output, marker);
-    }
-    output
-}
-
-fn redact_after_marker(value: &str, marker: &str) -> String {
-    let lower = value.to_ascii_lowercase();
-    let mut cursor = 0;
-    let mut redacted = String::new();
-
-    while let Some(relative_start) = lower[cursor..].find(marker) {
-        let start = cursor + relative_start;
-        let marker_end = start + marker.len();
-        let mut end = marker_end;
-        while end < value.len() {
-            let ch = value.as_bytes()[end] as char;
-            if ch == '&' || ch == '"' || ch == '\'' || ch.is_ascii_whitespace() {
-                break;
-            }
-            end += 1;
-        }
-
-        redacted.push_str(&value[cursor..marker_end]);
-        redacted.push_str("[REDACTED]");
-        cursor = end;
-    }
-
-    if cursor == 0 {
-        value.to_string()
-    } else {
-        redacted.push_str(&value[cursor..]);
-        redacted
-    }
-}
-
-fn truncate_log_field(value: &str) -> String {
-    let mut chars = value.chars();
-    let truncated = chars.by_ref().take(MAX_LOG_FIELD_CHARS).collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
-    }
-}
-
-#[cfg(test)]
-fn list_ai_logs_from_path(
-    path: &PathBuf,
-    limit: Option<usize>,
-) -> Result<Vec<AiLogOutput>, String> {
-    let limit = normalize_log_limit(limit);
-    let lines = config::read_log_lines_at(path, limit)?;
-    Ok(parse_ai_log_lines(lines))
-}
-
-#[cfg(test)]
-fn clear_ai_logs_at(path: &PathBuf) -> Result<(), String> {
-    config::clear_log_at(path)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn ai_logs_can_list_and_clear_with_redaction() {
-        let tmp = std::env::temp_dir().join("webgal_test_ai_logs.jsonl");
-        let _ = fs::remove_file(&tmp);
-        config::append_log_line_at(
-            &tmp,
-            r#"{"timestamp_ms":1,"action":"validate","provider":"openai","model":"gpt","endpoint":"https://example.test/v1?api_key=secret123","success":false,"message":"Authorization=Bearer secret123 token=abc"}"#,
-        )
-        .unwrap();
-        config::append_log_line_at(
-            &tmp,
-            r#"{"timestamp_ms":2,"action":"chat_stream","provider":"openai","model":"gpt","endpoint":"https://example.test/v1","success":true,"message":"ok"}"#,
-        )
-        .unwrap();
-
-        let logs = list_ai_logs_from_path(&tmp, Some(10)).unwrap();
-        assert_eq!(logs.len(), 2);
-        assert_eq!(logs[0].timestamp_ms, 1);
-        assert!(logs[0].endpoint.contains("[REDACTED]"));
-        assert!(!logs[0].endpoint.contains("secret123"));
-        assert!(!logs[0].message.contains("abc"));
-
-        clear_ai_logs_at(&tmp).unwrap();
-        assert!(!tmp.exists());
-    }
-
-    #[test]
-    fn ai_log_list_honors_limit() {
-        let tmp = std::env::temp_dir().join("webgal_test_ai_logs_limit.jsonl");
-        let _ = fs::remove_file(&tmp);
-        for timestamp_ms in 1..=3 {
-            config::append_log_line_at(
-                &tmp,
-                &format!(
-                    r#"{{"timestamp_ms":{timestamp_ms},"action":"validate","provider":"openai","model":"gpt","endpoint":"","success":true,"message":"ok"}}"#
-                ),
-            )
-            .unwrap();
-        }
-
-        let logs = list_ai_logs_from_path(&tmp, Some(2)).unwrap();
-        assert_eq!(logs.len(), 2);
-        assert_eq!(logs[0].timestamp_ms, 2);
-        assert_eq!(logs[1].timestamp_ms, 3);
-        let _ = fs::remove_file(&tmp);
     }
 }
