@@ -789,7 +789,7 @@ function CharacterFigurePicker({
           className={inputClass}
           aria-label="关联角色"
         >
-          <option value="">无（手动输入文件名）</option>
+          <option value="">无</option>
           {characters.map((character) => (
             <option key={character.id} value={character.name}>{character.name}</option>
           ))}

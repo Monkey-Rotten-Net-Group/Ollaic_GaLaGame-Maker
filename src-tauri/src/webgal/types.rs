@@ -87,6 +87,10 @@ pub struct WebGalNode {
     pub figure_position: Option<FigurePosition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub figure_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub figure_character: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub figure_emotion: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub choices: Option<Vec<ChoiceBranch>>,
@@ -144,6 +148,8 @@ impl WebGalNode {
             asset: None,
             figure_position: None,
             figure_id: None,
+            figure_character: None,
+            figure_emotion: None,
             choices: None,
             target_scene: None,
             label_name: None,

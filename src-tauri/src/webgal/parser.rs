@@ -300,6 +300,12 @@ fn build_command_node(
             if let Some(id) = flag_str(flags, "id") {
                 node.figure_id = Some(id.to_string());
             }
+            if let Some(ch) = flag_str(flags, "figureCharacter") {
+                node.figure_character = Some(ch.to_string());
+            }
+            if let Some(em) = flag_str(flags, "figureEmotion") {
+                node.figure_emotion = Some(em.to_string());
+            }
         }
 
         CommandType::ChangeScene | CommandType::CallScene => {

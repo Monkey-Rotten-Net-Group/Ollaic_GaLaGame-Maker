@@ -53,6 +53,16 @@ fn serialize_flags(node: &WebGalNode) -> String {
             parts.push(format!("-id={}", id));
         }
     }
+    if let Some(ch) = &node.figure_character {
+        if !ch.is_empty() {
+            parts.push(format!("-figureCharacter={}", ch));
+        }
+    }
+    if let Some(em) = &node.figure_emotion {
+        if !em.is_empty() {
+            parts.push(format!("-figureEmotion={}", em));
+        }
+    }
     if node.next == Some(true) {
         parts.push("-next".into());
     }
