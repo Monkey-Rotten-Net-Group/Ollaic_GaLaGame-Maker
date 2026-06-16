@@ -1060,11 +1060,28 @@ function ScriptCommandCard({
                 ))}
               </div>
             </>
+          ) : node.type === 'changeFigure' ? (
+            <div className="flex items-center gap-4">
+              <div className="flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded">
+                {projectPath && (node.asset || node.content) && (node.asset || node.content) !== 'none' ? (
+                  <img
+                    src={convertFileSrc(`${projectPath}/game/figure/${node.asset || node.content}`)}
+                    alt=""
+                    className="h-full w-full object-contain object-top"
+                  />
+                ) : (
+                  <Users className="h-5 w-5 text-on-surface-variant/30" />
+                )}
+              </div>
+              <span className="min-w-0 truncate text-sm">
+                {figureLabel(node, characters)}
+              </span>
+            </div>
           ) : (
             <div className="flex items-center gap-3">
               <Icon className="h-5 w-5 shrink-0 text-primary" />
               <span className="min-w-0 truncate text-sm">
-                {node.type === 'changeFigure' ? figureLabel(node, characters) : getCommandSummary(node)}
+                {getCommandSummary(node)}
               </span>
             </div>
           )}
