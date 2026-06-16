@@ -201,7 +201,6 @@ function renderTypeFields(
   const backgroundAliases = aliasesForCategory(metadata, 'background');
   const figureAliases = aliasesForCategory(metadata, 'figure');
   const bgmAliases = aliasesForCategory(metadata, 'bgm');
-  const sfxAliases = aliasesForCategory(metadata, 'sfx');
   const vocalAliases = aliasesForCategory(metadata, 'vocal');
   const videoAliases = aliasesForCategory(metadata, 'video');
 
@@ -487,11 +486,11 @@ function renderTypeFields(
               {projectPath && (
                 <AssetPickerButton
                   projectPath={projectPath}
-                  category={node.type === 'playEffect' ? 'sfx' : node.type === 'playVideo' ? 'video' : 'bgm'}
+                  category={node.type === 'playEffect' ? 'vocal' : node.type === 'playVideo' ? 'video' : 'bgm'}
                   currentValue={node.asset || node.content}
                   aliases={
                     node.type === 'playEffect'
-                      ? sfxAliases
+                      ? vocalAliases
                       : node.type === 'playVideo'
                         ? videoAliases
                         : bgmAliases

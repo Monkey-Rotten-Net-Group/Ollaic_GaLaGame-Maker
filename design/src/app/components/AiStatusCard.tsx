@@ -26,7 +26,7 @@ const categoryLabels: Record<string, string> = {
   background: '背景',
   figure: '立绘',
   bgm: 'BGM',
-  sfx: '音效',
+  vocal: '语音 / 音效',
   video: '视频',
 };
 

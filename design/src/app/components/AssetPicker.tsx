@@ -12,7 +12,7 @@ import {
 
 interface Props {
   projectPath: string;
-  category: string; // "background" | "figure" | "bgm" | "sfx" | "video"
+  category: string; // "background" | "figure" | "bgm" | "vocal" | "video"
   currentValue: string;
   onSelect: (filename: string) => void;
   aliases?: Record<string, string>;
@@ -31,8 +31,7 @@ function titleForCategory(category: string): string {
     background: '选择背景',
     figure: '选择立绘',
     bgm: '选择背景音乐',
-    sfx: '选择音效',
-    vocal: '选择语音',
+    vocal: '选择语音 / 音效',
     video: '选择视频',
   };
   return labels[category] || '选择素材';

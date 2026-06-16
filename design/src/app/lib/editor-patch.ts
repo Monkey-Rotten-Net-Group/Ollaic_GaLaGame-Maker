@@ -139,7 +139,7 @@ export function extractPatchAssetRefs(text: string): Array<{ command: string; fi
     changeFigure: 'figure',
     miniAvatar: 'figure',
     bgm: 'bgm',
-    playEffect: 'sfx',
+    playEffect: 'vocal',
     playVideo: 'video',
   };
   const refs: Array<{ command: string; file: string; expectedCategory: string }> = [];

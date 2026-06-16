@@ -138,7 +138,7 @@ const readTools: AgentTool[] = [
   {
     name: 'search_assets',
     description:
-      '查询素材库可用文件。可按 category（background/figure/bgm/sfx/vocal/video）筛选，按 query 子串匹配文件名。引用素材时只能使用这里返回的文件名。',
+      '查询素材库可用文件。可按 category（background/figure/bgm/vocal/video）筛选，按 query 子串匹配文件名。引用素材时只能使用这里返回的文件名。',
     kind: 'read',
     schema: {
       type: 'object',

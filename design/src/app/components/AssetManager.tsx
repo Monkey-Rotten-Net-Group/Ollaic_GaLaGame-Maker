@@ -74,7 +74,7 @@ import { StoryOsSideNav, StoryOsTopBar } from './StoryOsChrome';
 import { VoiceDubbingPanel } from './VoiceDubbingPanel';
 
 type TabId = 'scene' | 'cg' | 'music' | 'character' | 'dubbing';
-type MusicCategory = 'bgm' | 'sfx' | 'dubbing' | 'vocal';
+type MusicCategory = 'bgm' | 'dubbing' | 'vocal';
 type SceneLibraryItem =
   | { kind: 'sceneCard'; card: SceneAssetCard; asset?: AssetInfo }
   | { kind: 'asset'; asset: AssetInfo };
@@ -82,16 +82,14 @@ type VoiceLibraryItem = { kind: 'asset'; asset: AssetInfo };
 
 const musicTabs: { id: MusicCategory; label: string }[] = [
   { id: 'bgm', label: 'BGM 背景音乐' },
-  { id: 'sfx', label: 'SFX 音效' },
   { id: 'dubbing', label: '配音清单' },
-  { id: 'vocal', label: '语音文件' },
+  { id: 'vocal', label: '语音 / 音效' },
 ];
 
 const musicCategoryLabels: Record<MusicCategory, string> = {
   bgm: 'BGM',
-  sfx: '音效',
   dubbing: '配音清单',
-  vocal: '语音文件',
+  vocal: '语音 / 音效',
 };
 
 const voiceEmotionOptions = [
@@ -120,7 +118,7 @@ function tabToCategories(tab: TabId): string[] {
   switch (tab) {
     case 'scene': return ['background'];
     case 'cg': return ['background'];
-    case 'music': return ['bgm', 'sfx', 'vocal'];
+    case 'music': return ['bgm', 'vocal'];
     case 'character': return ['figure'];
     case 'dubbing': return ['vocal'];
   }
@@ -147,8 +145,7 @@ function formatCategory(category: string): string {
     background: '背景',
     figure: '立绘',
     bgm: '背景音乐',
-    sfx: '音效',
-    vocal: '语音',
+    vocal: '语音 / 音效',
   };
   return labels[category] || category;
 }
@@ -681,7 +678,7 @@ export function AssetManager() {
   const tabCounts = {
     scene: allAssets.filter(a => a.category === 'background').length,
     cg: Object.keys(metadata.cgCards ?? {}).length,
-    music: allAssets.filter(a => a.category === 'bgm' || a.category === 'sfx' || a.category === 'vocal').length,
+    music: allAssets.filter(a => a.category === 'bgm' || a.category === 'vocal').length,
     character: characterCount,
     dubbing: 0,
   };

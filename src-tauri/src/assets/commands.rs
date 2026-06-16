@@ -108,8 +108,7 @@ fn category_to_dir(category: &str) -> Option<String> {
             }
         }
         "music" | "bgm" => Some("bgm".to_string()),
-        "sfx" => Some("sfx".to_string()),
-        "vocal" => Some("vocal".to_string()),
+        "vocal" | "sfx" => Some("vocal".to_string()),
         "video" => Some("video".to_string()),
         "animation" => Some("animation".to_string()),
         "tex" => Some("tex".to_string()),
@@ -231,7 +230,7 @@ fn list_dir_files(dir: &PathBuf) -> Result<Vec<AssetInfo>, String> {
 fn reference_dir_for_asset(project_path: &str, subdir: &str, filename: &str) -> Option<PathBuf> {
     let reference_kind = match subdir {
         "background" => "backgrounds",
-        "bgm" | "sfx" | "vocal" => "audio",
+        "bgm" | "vocal" => "audio",
         _ => return None,
     };
     Some(
@@ -291,7 +290,7 @@ fn rename_metadata_entry<T>(
 fn owns_asset_metadata(category: &str) -> bool {
     matches!(
         category,
-        "background" | "figure" | "bgm" | "sfx" | "vocal" | "video" | "animation" | "tex"
+        "background" | "figure" | "bgm" | "vocal" | "video" | "animation" | "tex"
     )
 }
 
@@ -419,7 +418,6 @@ pub fn list_all_assets(project_path: String) -> Result<Vec<AssetInfo>, String> {
         "background",
         "figure",
         "bgm",
-        "sfx",
         "vocal",
         "video",
         "animation",

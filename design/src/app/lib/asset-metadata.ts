@@ -433,7 +433,7 @@ export function setAssetReferences(
 
 export function referenceCategoryForAsset(category: string, filename: string): string | null {
   if (category === 'background') return `reference/backgrounds/${filename}`;
-  if (category === 'bgm' || category === 'sfx' || category === 'vocal') {
+  if (category === 'bgm' || category === 'vocal') {
     return `reference/audio/${filename}`;
   }
   return null;

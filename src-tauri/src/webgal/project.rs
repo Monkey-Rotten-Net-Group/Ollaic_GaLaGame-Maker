@@ -14,7 +14,6 @@ const GAME_DIRS: &[&str] = &[
     "figure",
     "scene",
     "bgm",
-    "sfx",
     "vocal",
     "video",
     "tex",
@@ -1446,7 +1445,7 @@ mod tests {
         fs::create_dir_all(tmp.join("game").join("background")).unwrap();
         fs::create_dir_all(tmp.join("game").join("bgm")).unwrap();
         fs::create_dir_all(tmp.join("game").join("figure")).unwrap();
-        fs::create_dir_all(tmp.join("game").join("sfx")).unwrap();
+        fs::create_dir_all(tmp.join("game").join("vocal")).unwrap();
 
         // Write some content
         fs::write(tmp.join("game").join("config.txt"), "Game_name:Test;").unwrap();
@@ -1461,7 +1460,7 @@ mod tests {
         )
         .unwrap();
         fs::write(tmp.join("game").join("bgm").join("music.mp3"), "fake-audio").unwrap();
-        fs::write(tmp.join("game").join("sfx").join("click.wav"), "fake-sfx").unwrap();
+        fs::write(tmp.join("game").join("vocal").join("click.wav"), "fake-vocal").unwrap();
 
         let out = tmp.join("exported");
 
@@ -1482,7 +1481,7 @@ mod tests {
         assert!(out.join("game").join("scene").join("start.txt").exists());
         assert!(out.join("game").join("background").join("bg.webp").exists());
         assert!(out.join("game").join("bgm").join("music.mp3").exists());
-        assert!(out.join("game").join("sfx").join("click.wav").exists());
+        assert!(out.join("game").join("vocal").join("click.wav").exists());
 
         // Verify content preserved
         assert_eq!(
@@ -1503,7 +1502,7 @@ mod tests {
         fs::create_dir_all(tmp.join("game").join("background")).unwrap();
         fs::create_dir_all(tmp.join("game").join("bgm")).unwrap();
         fs::create_dir_all(tmp.join("game").join("figure")).unwrap();
-        fs::create_dir_all(tmp.join("game").join("sfx")).unwrap();
+        fs::create_dir_all(tmp.join("game").join("vocal")).unwrap();
 
         // Only bg.webp exists; peaceful.mp3 and missing_figure.webp are referenced but missing
         fs::write(tmp.join("game").join("background").join("bg.webp"), "img").unwrap();
