@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo, memo, Fragment } fro
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   Image, Search, Plus, Send, X,
   FileText, FolderOpen, Loader2,
@@ -742,6 +743,7 @@ interface ScriptCommandStreamProps {
   characters?: Character[];
   searchQuery?: string;
   previewEntries?: NodeDiffEntry[];
+  projectPath?: string;
 }
 
 // --- Sub-components for DnD and insert zones ---
@@ -851,6 +853,7 @@ interface ScriptCommandCardProps {
   query?: string;
   /** Characters for resolving changeFigure labels. */
   characters?: Character[];
+  projectPath?: string;
 }
 
 function ScriptCommandCard({
@@ -879,6 +882,7 @@ function ScriptCommandCard({
   clipboardNode,
   query,
   characters,
+  projectPath,
 }: ScriptCommandCardProps) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -939,8 +943,16 @@ function ScriptCommandCard({
 
           {isBackground ? (
             <div className="flex items-center gap-4">
-              <div className="flex h-16 w-24 shrink-0 items-center justify-center border border-outline-variant/20 bg-surface-container-highest">
-                <Image className="h-5 w-5 text-on-surface-variant/30" />
+              <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden border border-outline-variant/20 bg-surface-container-highest">
+                {projectPath && (node.asset || node.content) ? (
+                  <img
+                    src={convertFileSrc(`${projectPath}/game/background/${node.asset || node.content}`)}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Image className="h-5 w-5 text-on-surface-variant/30" />
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="mb-1 font-bold text-foreground">设置背景: {node.asset || node.content || '未选择背景'}</p>
@@ -1170,6 +1182,7 @@ function ScriptCommandStream({
   characters,
   searchQuery,
   previewEntries,
+  projectPath,
 }: ScriptCommandStreamProps) {
   const query = searchQuery?.trim().toLowerCase() ?? '';
 
@@ -1382,6 +1395,7 @@ function ScriptCommandStream({
                 clipboardNode={clipboardNode}
                 query={query}
                 characters={characters}
+                projectPath={projectPath}
               />
             </Fragment>
           );
@@ -2738,6 +2752,7 @@ export function StoryEditor() {
               characters={charactersForAi}
               searchQuery={commandSearchQuery}
               previewEntries={aiPreviewEntries}
+              projectPath={projectPath ?? undefined}
             />
           )}
 
