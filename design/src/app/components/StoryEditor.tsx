@@ -7,7 +7,7 @@ import {
   Image, Search, Plus, Send, X,
   FileText, FolderOpen, Loader2,
   MessageCircle, GitBranch, Users, Music, Wand2, ArrowRight,
-  GripVertical, MoreHorizontal, Copy, Trash2, Clipboard, Scissors,
+  GripVertical, MoreHorizontal, Copy, Trash2, Clipboard, Scissors, Play,
   BookOpen,
   MessageSquarePlus, Pencil, AlertCircle,
 } from 'lucide-react';
@@ -205,6 +205,8 @@ interface SceneWorldlinePanelProps {
   onOpenScene: (sceneName: string) => void;
   onOpenSceneManager?: () => void;
   characterColors?: Record<string, string>;
+  onDeleteNode?: (nodeId: string) => void;
+  onJumpToIndex?: (index: number) => void;
 }
 
 interface FullScreenWorldlineProps {
@@ -222,6 +224,8 @@ interface FullScreenWorldlineProps {
   onDeleteScene?: (sceneName: string) => void;
   onRenameScene?: (sceneName: string) => void;
   onOpenSceneManager?: () => void;
+  onDeleteNode?: (nodeId: string) => void;
+  onJumpToIndex?: (index: number) => void;
 }
 
 function FullScreenWorldline({
@@ -239,6 +243,8 @@ function FullScreenWorldline({
   onDeleteScene,
   onRenameScene,
   onOpenSceneManager,
+  onDeleteNode,
+  onJumpToIndex,
 }: FullScreenWorldlineProps) {
   const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
   const [ctxMenu, setCtxMenu] = useState<{ sceneName: string; x: number; y: number } | null>(null);
@@ -374,24 +380,52 @@ function FullScreenWorldline({
               const charColor = node.type === 'dialogue' && node.character && characterColors?.[node.character]
                 ? characterColors[node.character]
                 : undefined;
+              const nodeIndex = nodes.indexOf(node);
               return (
-                <button
+                <div
                   key={node.id}
-                  type="button"
-                  onClick={() => onSelectNode(node)}
-                  className={`flex w-full items-start gap-2 border-l-2 px-3 py-2 text-left transition-colors ${
-                    sel ? 'border-secondary bg-surface-container-low' : 'border-transparent hover:bg-surface-container-low'
-                  }`}
+                  className="group flex items-start border-l-2 transition-colors hover:bg-surface-container-low"
+                  style={{ borderColor: sel ? 'var(--color-secondary)' : 'transparent' }}
                 >
-                  <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${commandToneFor(node.type)}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-mono-family text-[10px] text-muted-foreground">{index + 1} {node.type}</span>
-                    <span className="block truncate text-xs text-on-surface">{getCommandSummary(node)}</span>
-                  </span>
-                  {charColor && (
-                    <span className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: charColor }} />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectNode(node)}
+                    className={`flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left ${sel ? 'bg-surface-container-low' : ''}`}
+                  >
+                    <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${commandToneFor(node.type)}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-mono-family text-[10px] text-muted-foreground">{index + 1} {node.type}</span>
+                      <span className="block truncate text-xs text-on-surface">{getCommandSummary(node)}</span>
+                    </span>
+                    {charColor && (
+                      <span className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: charColor }} />
+                    )}
+                  </button>
+                  <div className="flex shrink-0 items-center gap-0.5 pr-1 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onJumpToIndex && (
+                      <button
+                        type="button"
+                        onClick={() => onJumpToIndex(nodeIndex)}
+                        className="rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                        title="运行到此处"
+                        aria-label="运行到此处"
+                      >
+                        <Play className="h-3 w-3" />
+                      </button>
+                    )}
+                    {onDeleteNode && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteNode(node.id)}
+                        className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        title="删除"
+                        aria-label="删除节点"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -412,6 +446,8 @@ function SceneWorldlinePanel({
   onOpenScene,
   onOpenSceneManager,
   characterColors,
+  onDeleteNode,
+  onJumpToIndex,
 }: SceneWorldlinePanelProps) {
   const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
 
@@ -454,26 +490,54 @@ function SceneWorldlinePanel({
           const charColor = node.type === 'dialogue' && node.character && characterColors?.[node.character]
             ? characterColors[node.character]
             : undefined;
+          const nodeIndex = nodes.indexOf(node);
           return (
-            <button
+            <div
               key={node.id}
-              type="button"
-              onClick={() => onSelectNode(node)}
-              className={`flex w-full items-start gap-2 border-l-2 px-3 py-2 text-left transition-colors ${
-                selected
-                  ? 'border-secondary bg-surface-container-low'
-                  : 'border-transparent hover:bg-surface-container-low'
-              }`}
+              className="group flex items-start border-l-2 transition-colors hover:bg-surface-container-low"
+              style={{ borderColor: selected ? 'var(--color-secondary)' : 'transparent' }}
             >
-              <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${commandToneFor(node.type)}`} />
-              <span className="min-w-0 flex-1">
-                <span className="block font-mono-family text-[10px] text-muted-foreground">{index + 1} {node.type}</span>
-                <span className="block truncate text-xs text-on-surface">{getCommandSummary(node)}</span>
-              </span>
-              {charColor && (
-                <span className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: charColor }} />
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={() => onSelectNode(node)}
+                className={`flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left ${
+                  selected ? 'bg-surface-container-low' : ''
+                }`}
+              >
+                <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${commandToneFor(node.type)}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono-family text-[10px] text-muted-foreground">{index + 1} {node.type}</span>
+                  <span className="block truncate text-xs text-on-surface">{getCommandSummary(node)}</span>
+                </span>
+                {charColor && (
+                  <span className="ml-auto mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: charColor }} />
+                )}
+              </button>
+              <div className="flex shrink-0 items-center gap-0.5 pr-1 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                {onJumpToIndex && (
+                  <button
+                    type="button"
+                    onClick={() => onJumpToIndex(nodeIndex)}
+                    className="rounded p-1 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                    title="运行到此处"
+                    aria-label="运行到此处"
+                  >
+                    <Play className="h-3 w-3" />
+                  </button>
+                )}
+                {onDeleteNode && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteNode(node.id)}
+                    className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    title="删除"
+                    aria-label="删除节点"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -2726,6 +2790,8 @@ export function StoryEditor() {
             onDeleteScene={handleDeleteScene}
             onRenameScene={handleRenameScene}
             onOpenSceneManager={() => setSceneManagerOpen(true)}
+            onDeleteNode={deleteNode}
+            onJumpToIndex={jumpToNode}
           />
         ) : (
           <>
@@ -2742,6 +2808,8 @@ export function StoryEditor() {
             onOpenScene={stableSwitchScene}
             onOpenSceneManager={() => setSceneManagerOpen(true)}
             characterColors={characterColors}
+            onDeleteNode={deleteNode}
+            onJumpToIndex={jumpToNode}
           />
 
           {/* Center - Script Command Stream / Script Source */}
