@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-/// 抠图模型（isnet-anime，Apache-2.0）的下载地址与预期大小。
-/// 模型不入 git 仓库（168MB），改由构建时下载到 `models/`，再由 Tauri 打进安装包。
+/// 抠图模型（BiRefNet-lite fp16，MIT）的下载地址与预期大小。
+/// 模型不入 git 仓库（115MB），改由构建时下载到 `models/`，再由 Tauri 打进安装包。
 const MODEL_URL: &str =
-    "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-anime.onnx";
-const MODEL_EXPECTED_BYTES: u64 = 176_069_933;
+    "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx";
+const MODEL_EXPECTED_BYTES: u64 = 114_538_221;
+const MODEL_FILENAME: &str = "birefnet-lite-fp16.onnx";
 /// 下载读取上限（略高于预期大小，绕过 ureq 默认 10MB 限制）。
-const DOWNLOAD_LIMIT_BYTES: u64 = 220 * 1024 * 1024;
+const DOWNLOAD_LIMIT_BYTES: u64 = 150 * 1024 * 1024;
 
 fn main() {
     // 仅在 build.rs 自身变化时重跑下载检查；模型文件不参与（避免每次都校验大文件）。
@@ -19,7 +20,7 @@ fn main() {
         // 运行时若仍找不到模型，remove_background 会返回明确错误。
         println!("cargo:warning=抠图模型准备失败：{e}");
         println!(
-            "cargo:warning=可手动下载 {MODEL_URL} 到 src-tauri/models/isnet-anime.onnx，或设置 MATTING_MODEL_PATH 指向已有模型。"
+            "cargo:warning=可手动下载 {MODEL_URL} 到 src-tauri/models/{MODEL_FILENAME}，或设置 MATTING_MODEL_PATH 指向已有模型。"
         );
     }
 
@@ -41,7 +42,7 @@ fn ensure_matting_model() -> Result<(), String> {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let models_dir = manifest_dir.join("models");
-    let model_path = models_dir.join("isnet-anime.onnx");
+    let model_path = models_dir.join(MODEL_FILENAME);
 
     // 已存在且大小匹配 → 认为完好，跳过。
     if let Ok(meta) = std::fs::metadata(&model_path) {
@@ -60,7 +61,7 @@ fn ensure_matting_model() -> Result<(), String> {
     std::fs::create_dir_all(&models_dir)
         .map_err(|e| format!("创建 models 目录失败: {e}"))?;
 
-    println!("cargo:warning=正在下载抠图模型 isnet-anime.onnx（约 168MB，首次构建需要一些时间）...");
+    println!("cargo:warning=正在下载抠图模型 {MODEL_FILENAME}（约 115MB，首次构建需要一些时间）...");
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(600)))
@@ -87,7 +88,7 @@ fn ensure_matting_model() -> Result<(), String> {
     }
 
     // 先写临时文件再原子重命名，避免构建中断留下半截文件。
-    let tmp_path = models_dir.join("isnet-anime.onnx.part");
+    let tmp_path = models_dir.join(format!("{MODEL_FILENAME}.part"));
     std::fs::write(&tmp_path, &bytes)
         .map_err(|e| format!("写入临时模型文件失败: {e}"))?;
     std::fs::rename(&tmp_path, &model_path)

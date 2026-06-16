@@ -46,6 +46,7 @@ import {
   type AssetInfo,
   type AssetUsage,
 } from '../lib/assets-ipc';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
   aiGenerateImage,
   removeBackground,
@@ -150,11 +151,11 @@ function buildSpritePrompt(
   instruction: string,
 ): string {
   return [
-    'visual novel character sprite, full body, transparent background, clean anime game asset, consistent character design',
+    'visual novel character sprite, full body, plain white background, clean anime game asset, consistent character design',
     isReference ? 'main reference sprite, neutral readable pose, front-facing character design sheet quality' : '',
     instruction ? `本次生成提示词：${instruction}` : '',
     sprite.emotion ? `立绘形态/情绪：${sprite.emotion}` : '',
-    'avoid background scene, avoid text, avoid watermark, avoid extra characters',
+    'the background must be plain white or very light gray with no gradients shadows or patterns, avoid background scene, avoid text, avoid watermark, avoid extra characters',
   ].filter(Boolean).join('\n');
 }
 
@@ -524,12 +525,25 @@ export function CharacterPanel({
     }
   }, [projectPath, selectedId]);
 
-  // 判断某情绪是否已在素材库生成过（按文件名前缀匹配，命名规则同 generateSprite）。
+  // sprite.file 优先；否则按情绪前缀匹配素材库中最新文件。
+  const findSpriteAssetSrc = useCallback((sprite: CharacterSprite): string | null => {
+    if (!selected) return null;
+    if (sprite.file) {
+      const tail = figureFileTail(sprite.file);
+      const match = figureAssets.find((asset) => figureFileTail(asset.name) === tail);
+      if (match) return convertFileSrc(match.path);
+      return convertFileSrc(`${projectPath}/game/figure/${sprite.file}`);
+    }
+    const prefix = spritePrefix(characterFilenamePart(selected), sprite.emotion);
+    const matches = figureAssets
+      .filter((asset) => figureFileTail(asset.name).startsWith(prefix))
+      .sort((a, b) => figureFileTail(b.name).localeCompare(figureFileTail(a.name)));
+    return matches[0] ? convertFileSrc(matches[0].path) : null;
+  }, [figureAssets, projectPath, selected]);
+
   const hasGeneratedAsset = useCallback((emotion: string): boolean => {
-    if (!selected) return false;
-    const prefix = spritePrefix(characterFilenamePart(selected), emotion);
-    return figureAssets.some((asset) => figureFileTail(asset.name).startsWith(prefix));
-  }, [figureAssets, selected]);
+    return findSpriteAssetSrc({ emotion, file: '' }) !== null;
+  }, [findSpriteAssetSrc]);
 
   const refreshMainCandidates = useCallback(async () => {
     if (!selectedId) {
@@ -1182,7 +1196,6 @@ export function CharacterPanel({
                       <div>
                         <div className="mb-2 flex items-center justify-between">
                           <label className={labelClass}>主体参考图（可选）</label>
-                          <span className="text-[10px] text-muted-foreground">图生图需 Gemini 模型 · 火山引擎不支持本地参考图 · 最多 5 张</span>
                         </div>
                         <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
                           {(selected.referenceImages ?? []).map((filename) => {
@@ -1416,25 +1429,65 @@ export function CharacterPanel({
                               </button>
                             </div>
 
-                            {/* 状态占位区 — 变体图只进素材库，此处不绑定具体图片 */}
-                            <div
-                              className="aspect-[3/4] flex flex-col items-center justify-center gap-1 overflow-hidden border-b border-border"
-                              style={{
-                                background: `linear-gradient(135deg, color-mix(in srgb, ${color} 18%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
-                              }}
-                            >
-                              {generated ? (
-                                <>
-                                  <Check className="w-6 h-6 opacity-70" style={{ color }} />
-                                  <span className="text-[10px] font-medium" style={{ color }}>已入素材库</span>
-                                </>
-                              ) : (
-                                <>
-                                  <ImageIcon className="w-6 h-6 opacity-60" style={{ color }} />
-                                  <span className="text-[10px]" style={{ color }}>{sprite.emotion || '待生成'} · 未生成</span>
-                                </>
-                              )}
-                            </div>
+                            {(() => {
+                              const src = findSpriteAssetSrc(sprite);
+                              return (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="w-full aspect-square flex items-center justify-center overflow-hidden border-b border-border relative cursor-pointer hover:opacity-80 transition-opacity"
+                                      style={{
+                                        background: src ? undefined : `linear-gradient(135deg, color-mix(in srgb, ${color} 18%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
+                                      }}
+                                    >
+                                      {src ? (
+                                        <img src={src} alt={sprite.emotion} className="w-full h-full object-cover object-top" />
+                                      ) : (
+                                        <ImageIcon className="w-6 h-6 opacity-60" style={{ color }} />
+                                      )}
+                                    </button>
+                                  </PopoverTrigger>
+                                  <PopoverContent align="start" className="w-64 p-2 max-h-72 overflow-y-auto">
+                                    <div className="mb-1.5 flex items-center justify-between">
+                                      <span className="text-xs text-muted-foreground">选择立绘图片</span>
+                                      {sprite.file && (
+                                        <button
+                                          type="button"
+                                          onClick={() => updateSprite(selected.id, index, 'file', '')}
+                                          className="text-[10px] text-muted-foreground hover:text-foreground"
+                                        >
+                                          清除绑定
+                                        </button>
+                                      )}
+                                    </div>
+                                    {figureAssets.length === 0 ? (
+                                      <div className="py-4 text-center text-[11px] text-muted-foreground">暂无素材图片</div>
+                                    ) : (
+                                      <div className="grid grid-cols-3 gap-1.5">
+                                        {figureAssets.map((asset) => {
+                                          const tail = figureFileTail(asset.name);
+                                          const qualified = `${selected.id}/${tail}`;
+                                          const isCurrent = sprite.file === qualified;
+                                          return (
+                                            <button
+                                              type="button"
+                                              key={asset.path}
+                                              onClick={() => updateSprite(selected.id, index, 'file', qualified)}
+                                              className={`aspect-square rounded border overflow-hidden transition-colors ${
+                                                isCurrent ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-primary/50'
+                                              }`}
+                                            >
+                                              <img src={convertFileSrc(asset.path)} alt={tail} className="w-full h-full object-cover object-top" />
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </PopoverContent>
+                                </Popover>
+                              );
+                            })()}
 
                             <div className="p-1.5 space-y-1.5">
                               {/* 提示词折叠：默认一行摘要，点击展开编辑 */}

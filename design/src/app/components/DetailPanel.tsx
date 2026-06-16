@@ -951,6 +951,31 @@ function CharacterEmotionDialog({
     `${sprite.emotion} ${sprite.file}`.toLowerCase().includes(search.toLowerCase()),
   );
 
+  // 收集所有已被 sprite 条目关联的文件名（含前缀匹配的变体），剩余的为「未绑定」素材。
+  const boundTails = useMemo(() => {
+    const set = new Set<string>();
+    for (const sprite of character.sprites) {
+      if (sprite.file) {
+        set.add(figureFileTail(sprite.file));
+      } else {
+        const prefix = spritePrefix(character, sprite.emotion);
+        for (const asset of assets) {
+          if (figureFileTail(asset.name).startsWith(prefix)) set.add(figureFileTail(asset.name));
+        }
+      }
+    }
+    return set;
+  }, [character, assets]);
+
+  const unboundAssets = useMemo(() => {
+    const list = assets.filter((asset) => !boundTails.has(figureFileTail(asset.name)));
+    return search
+      ? list.filter((asset) => figureFileTail(asset.name).toLowerCase().includes(search.toLowerCase()))
+      : list;
+  }, [assets, boundTails, search]);
+
+  const hasAnything = character.sprites.length > 0 || unboundAssets.length > 0;
+
   return (
     <>
       <button
@@ -968,7 +993,7 @@ function CharacterEmotionDialog({
               )}
             </div>
             <div className="min-w-0">
-              <div className="text-sm truncate">{character.name} · {selectedSprite?.emotion || '已选立绘'}</div>
+              <div className="text-sm truncate">{selectedSprite?.emotion ? `${character.name} · ${selectedSprite.emotion}` : character.name}</div>
               <div className="mt-1 text-[11px] text-muted-foreground truncate font-mono-family">{figureFileTail(currentFile)}</div>
             </div>
           </div>
@@ -998,36 +1023,68 @@ function CharacterEmotionDialog({
             </div>
           </div>
           <div className="max-h-[60vh] overflow-y-auto p-5">
-            {character.sprites.length === 0 ? (
+            {!hasAnything ? (
               <div className="py-12 text-center text-sm text-muted-foreground">该角色暂无立绘，请先在素材库中添加。</div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {filtered.map((sprite) => {
-                  const resolved = resolveSpriteImage(character, sprite, assets, projectPath);
-                  const selected = (resolved.file || sprite.file) === currentFile;
-                  return (
-                    <button
-                      type="button"
-                      key={`${character.id}-${sprite.file}-${sprite.emotion}`}
-                      onClick={() => { onSelect({ ...sprite, file: resolved.file || sprite.file }); setOpen(false); }}
-                      className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
-                        selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
-                      }`}
-                    >
-                      <div className="h-28 bg-secondary/30 flex items-center justify-center overflow-hidden">
-                        {resolved.src ? (
-                          <img src={resolved.src} alt="" className="w-full h-full object-cover object-top" />
-                        ) : (
-                          <Image className="w-7 h-7 text-muted-foreground/40" />
-                        )}
-                      </div>
-                      <div className="px-2 py-1 text-center">
-                        <div className="truncate text-xs">{character.name} · {sprite.emotion || '默认'}</div>
-                        <div className="mt-0.5 truncate text-[10px] text-muted-foreground font-mono-family">{resolved.file || sprite.file || '（未绑定图片）'}</div>
-                      </div>
-                    </button>
-                  );
-                })}
+              <div className="space-y-4">
+                {filtered.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {filtered.map((sprite) => {
+                      const resolved = resolveSpriteImage(character, sprite, assets, projectPath);
+                      const selected = (resolved.file || sprite.file) === currentFile;
+                      return (
+                        <button
+                          type="button"
+                          key={`${character.id}-${sprite.file}-${sprite.emotion}`}
+                          onClick={() => { onSelect({ ...sprite, file: resolved.file || sprite.file }); setOpen(false); }}
+                          className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
+                            selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
+                          }`}
+                        >
+                          <div className="h-28 bg-secondary/30 flex items-center justify-center overflow-hidden">
+                            {resolved.src ? (
+                              <img src={resolved.src} alt="" className="w-full h-full object-cover object-top" />
+                            ) : (
+                              <Image className="w-7 h-7 text-muted-foreground/40" />
+                            )}
+                          </div>
+                          <div className="px-2 py-1 text-center">
+                            <div className="truncate text-xs">{sprite.emotion || '默认'}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {unboundAssets.length > 0 && (
+                  <>
+                    <div className="text-[11px] text-muted-foreground uppercase tracking-wide">未绑定素材</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {unboundAssets.map((asset) => {
+                        const tail = figureFileTail(asset.name);
+                        const qualifiedFile = `${character.id}/${tail}`;
+                        const selected = qualifiedFile === currentFile;
+                        return (
+                          <button
+                            type="button"
+                            key={asset.path}
+                            onClick={() => { onSelect({ emotion: '', file: qualifiedFile }); setOpen(false); }}
+                            className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
+                              selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
+                            }`}
+                          >
+                            <div className="h-28 bg-secondary/30 flex items-center justify-center overflow-hidden">
+                              <img src={convertFileSrc(asset.path)} alt="" className="w-full h-full object-cover object-top" />
+                            </div>
+                            <div className="px-2 py-1 text-center">
+                              <div className="truncate text-xs text-muted-foreground">{tail}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
