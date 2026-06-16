@@ -1611,12 +1611,20 @@ export function StoryEditor() {
   // Keep a ref in sync so the close-requested handler always sees current dirty state
   const dirtyRef = useRef(dirty);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+  useEffect(() => {
+    if (selectedNode) {
+      const idx = nodesRef.current.findIndex((n) => n.id === selectedNode.id);
+      if (idx >= 0) selectedIndexRef.current = idx;
+    }
+  }, [selectedNode]);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
+  const selectedIndexRef = useRef(0);
 
   // Auto-save wiring
   const [autoSaveInterval, setAutoSaveInterval] = useState(30);
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
 
   useEffect(() => {
     const settings = loadAppSettings();
@@ -2135,19 +2143,24 @@ export function StoryEditor() {
     return () => window.removeEventListener('keydown', handler);
   }, [selectedNode, clipboardNode, nodes, copyNode, cutNode, pasteNode]);
 
-  // Auto-save: periodic save when dirty
+  // Auto-save: periodic save when dirty.
+  // Use refs to avoid recreating the interval on every dirty/handleSave change.
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
+
   useEffect(() => {
-    if (autoSaveInterval <= 0 || !projectPath) return;
+    if (!autoSaveEnabled || autoSaveInterval <= 0 || !projectPath) return;
+    const interval = Math.min(autoSaveInterval, 3) * 1000;
     if (autoSaveRef.current) clearInterval(autoSaveRef.current);
     autoSaveRef.current = setInterval(() => {
-      if (dirty) {
-        handleSave();
+      if (dirtyRef.current) {
+        handleSaveRef.current();
       }
-    }, autoSaveInterval * 1000);
+    }, interval);
     return () => {
       if (autoSaveRef.current) clearInterval(autoSaveRef.current);
     };
-  }, [autoSaveInterval, dirty, handleSave, projectPath]);
+  }, [autoSaveEnabled, autoSaveInterval, projectPath]);
 
   // ---------------------------------------------------------------------------
   // Open project folder
@@ -2680,6 +2693,8 @@ export function StoryEditor() {
           searchValue={commandSearchQuery}
           searchPlaceholder="搜索指令 / 角色 / 内容..."
           saveStatus={saveStatus}
+          autoSave={autoSaveEnabled}
+          onAutoSaveChange={setAutoSaveEnabled}
           onSettings={() => setAppSettingsOpen(true)}
         />
         <StoryOsSideNav

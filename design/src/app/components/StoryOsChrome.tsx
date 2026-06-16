@@ -23,6 +23,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { Switch } from './ui/switch';
+
 type StoryOsSection = 'home' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
 
 export type StoryOsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -44,6 +46,8 @@ interface StoryOsTopBarProps {
   searchValue?: string;
   searchPlaceholder?: string;
   saveStatus?: StoryOsSaveStatus;
+  autoSave?: boolean;
+  onAutoSaveChange?: (enabled: boolean) => void;
   onSettings?: () => void;
 }
 
@@ -88,6 +92,8 @@ export function StoryOsTopBar({
   searchValue,
   searchPlaceholder,
   saveStatus = 'idle',
+  autoSave,
+  onAutoSaveChange,
   onSettings,
 }: StoryOsTopBarProps) {
   const topActions = [
@@ -197,6 +203,16 @@ export function StoryOsTopBar({
               aria-label="搜索"
             />
           </div>
+        )}
+        {onAutoSaveChange && (
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <Switch
+              checked={autoSave}
+              onCheckedChange={onAutoSaveChange}
+              className="scale-75"
+            />
+            <span>自动保存</span>
+          </label>
         )}
         {saveStatus !== 'idle' && (
           <span
