@@ -19,7 +19,7 @@ import { ProjectMetadataDialog, type ExportTaskState } from './ProjectMetadataDi
 import { SnapshotManagerDialog } from './SnapshotManagerDialog';
 import { SceneManagerPanel } from './SceneManagerPanel';
 import type { WebGalNode, WebGalCommandType, SceneLink } from '../lib/webgal-types';
-import { extractSceneLinks, commandCategories, commandLabels, categoryLabels, categoryTagClass, getCommandCategory } from '../lib/webgal-types';
+import { extractSceneLinks, commandCategories, commandLabels, categoryLabels, categoryTagClass, getCommandCategory, isMetadataComment } from '../lib/webgal-types';
 import {
   parseScene, serializeScene, saveScene, loadScene,
   openProject, getScenePath, createScene,
@@ -240,7 +240,7 @@ function FullScreenWorldline({
   onRenameScene,
   onOpenSceneManager,
 }: FullScreenWorldlineProps) {
-  const visibleNodes = nodes.filter((node) => node.type !== 'comment' || node.content?.trim());
+  const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
   const [ctxMenu, setCtxMenu] = useState<{ sceneName: string; x: number; y: number } | null>(null);
 
   // Close context menu on click outside
@@ -413,7 +413,7 @@ function SceneWorldlinePanel({
   onOpenSceneManager,
   characterColors,
 }: SceneWorldlinePanelProps) {
-  const visibleNodes = nodes.filter((node) => node.type !== 'comment' || node.content?.trim());
+  const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
 
   return (
     <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-surface-container-lowest">
@@ -823,6 +823,7 @@ function InsertZone({ atIndex, onInsert }: { atIndex: number; onInsert: (type: W
 interface ScriptCommandCardProps {
   node: WebGalNode;
   index: number;
+  displayIndex: number;
   selected: boolean;
   Icon: ReturnType<typeof commandIconFor>;
   tag: string;
@@ -859,6 +860,7 @@ interface ScriptCommandCardProps {
 function ScriptCommandCard({
   node,
   index,
+  displayIndex,
   selected,
   Icon,
   tag,
@@ -920,7 +922,7 @@ function ScriptCommandCard({
         <div className={`flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-bold ${
           selected ? 'border-primary text-primary' : 'border-outline-variant/30 text-on-surface-variant/40'
         }`}>
-          {String(index + 1).padStart(2, '0')}
+          {String(displayIndex + 1).padStart(2, '0')}
         </div>
         <div className="my-2 w-px flex-1 bg-outline-variant/20" />
       </div>
@@ -1262,13 +1264,14 @@ function ScriptCommandStream({
     ? nodes
         .map((node, index) => ({ node, index }))
         .filter(({ node }) => {
+          if (isMetadataComment(node)) return false;
           const haystack = [node.type, node.character, node.content, node.asset, node.voice]
             .filter(Boolean)
             .join(' ')
             .toLowerCase();
           return haystack.includes(query);
         })
-    : nodes.map((node, index) => ({ node, index }));
+    : nodes.map((node, index) => ({ node, index })).filter(({ node }) => !isMetadataComment(node));
 
   return (
     <section className="relative flex min-w-0 flex-1 flex-col bg-background">
@@ -1345,7 +1348,7 @@ function ScriptCommandStream({
             <Search className="h-6 w-6 opacity-50" />
             <div className="text-sm">没有匹配 "{query}" 的指令</div>
           </div>
-        ) : visibleNodes.map(({ node, index }) => {
+        ) : visibleNodes.map(({ node, index }, visibleIndex) => {
           if (absorbedIds.has(node.id)) return null; // merged into its head card
           const Icon = commandIconFor(node.type);
           const continuationLines = continuationsByHead.get(node.id);
@@ -1372,6 +1375,7 @@ function ScriptCommandStream({
               <ScriptCommandCard
                 node={node}
                 index={index}
+                displayIndex={visibleIndex}
                 selected={selected}
                 Icon={Icon}
                 tag={tag}
