@@ -43,8 +43,10 @@ export interface AssetMetadata {
   tags: Record<string, string[]>;
   references: Record<string, string[]>;
   sceneCards: Record<string, SceneAssetCard>;
+  cgCards: Record<string, SceneAssetCard>;
   voiceCards: Record<string, VoiceAssetCard>;
   deletedSceneCards: string[];
+  deletedCgCards: string[];
   deletedVoiceCards: string[];
 }
 

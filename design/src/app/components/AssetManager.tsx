@@ -56,6 +56,7 @@ import {
   setAssetReferences,
   sceneCardId,
   defaultSceneTargetStem,
+  defaultCgTargetStem,
   extractSceneBgmAssets,
   type AssetMetadata,
 } from '../lib/asset-metadata';
@@ -326,6 +327,7 @@ export function AssetManager() {
   const [aiGenerateOpen, setAiGenerateOpen] = useState(false);
   const [editingSceneCard, setEditingSceneCard] = useState<SceneAssetCard | null>(null);
   const [selectedSceneCard, setSelectedSceneCard] = useState<SceneAssetCard | null>(null);
+  const [selectedCgCard, setSelectedCgCard] = useState<SceneAssetCard | null>(null);
   const [voiceCards, setVoiceCards] = useState<VoiceAssetCard[]>([]);
   const [selectedVoiceCard, setSelectedVoiceCard] = useState<VoiceAssetCard | null>(null);
   const [aiAssetPrompt, setAiAssetPrompt] = useState('');
@@ -613,6 +615,11 @@ export function AssetManager() {
     const filename = sceneCardTargetFilename(selectedSceneCard);
     return assetMetadataEntry(metadata.references, 'background', filename) ?? [];
   })();
+  const cgCardReferences = (() => {
+    if (!selectedCgCard) return [];
+    const filename = sceneCardTargetFilename(selectedCgCard);
+    return assetMetadataEntry(metadata.references, 'background', filename) ?? [];
+  })();
 
   const filteredAssets = assets.filter((a) => {
     const q = searchQuery.toLowerCase();
@@ -645,6 +652,24 @@ export function AssetManager() {
     });
   })();
 
+  // CG 卡片流：与场景独立的卡片集合，只展示 cgCards（不混入背景散图，体现 CG ≠ 背景）。
+  const cgLibraryItems: SceneLibraryItem[] = (() => {
+    const cards = Object.values(metadata.cgCards ?? {});
+    const assetByName = new Map(assets.map((asset) => [asset.name, asset]));
+    const cardItems = cards.map((card) => {
+      const asset = card.imageAsset ? assetByName.get(card.imageAsset) : undefined;
+      return { kind: 'sceneCard' as const, card, asset };
+    });
+    const q = searchQuery.toLowerCase();
+    return cardItems.filter((item) => {
+      if (!q) return true;
+      return item.card.title.toLowerCase().includes(q)
+        || item.card.prompt.toLowerCase().includes(q)
+        || (item.card.imageAsset ?? '').toLowerCase().includes(q)
+        || (item.card.targetStem ?? '').toLowerCase().includes(q);
+    });
+  })();
+
   const voiceLibraryItems: VoiceLibraryItem[] = (() => {
     const fileItems = assets
       .filter((asset) => asset.category === 'vocal')
@@ -660,7 +685,7 @@ export function AssetManager() {
   // dubbing tasks have their own workspace and should not inflate asset counts.
   const tabCounts = {
     scene: allAssets.filter(a => a.category === 'background').length,
-    cg: allAssets.filter(a => a.category === 'background').length,
+    cg: Object.keys(metadata.cgCards ?? {}).length,
     music: allAssets.filter(a => a.category === 'bgm' || a.category === 'sfx' || a.category === 'vocal').length,
     character: characterCount,
     dubbing: 0,
@@ -672,7 +697,7 @@ export function AssetManager() {
   const aiActionLabel = activeTab === 'scene'
     ? '新建场景'
     : activeTab === 'cg'
-      ? 'AI 生成 CG 剧情画'
+      ? '新建 CG'
       : activeTab === 'music'
         ? `AI 生成${musicCategoryLabels[musicCategory]}`
         : '批量生成当前角色立绘';
@@ -1032,6 +1057,60 @@ export function AssetManager() {
     setSelectedSceneCard(card);
   }, [persistMetadata]);
 
+  const handleSaveCgCard = useCallback((card: SceneAssetCard) => {
+    const currentMetadata = metadataRef.current;
+    persistMetadata({
+      ...currentMetadata,
+      deletedCgCards: (currentMetadata.deletedCgCards ?? []).filter((id) => id !== card.id),
+      cgCards: {
+        ...(currentMetadata.cgCards ?? {}),
+        [card.id]: card,
+      },
+    });
+    setSelectedCgCard(card);
+  }, [persistMetadata]);
+
+  const handleNewCgCard = useCallback(() => {
+    const index = Object.keys(metadataRef.current.cgCards ?? {}).length + 1;
+    const card: SceneAssetCard = {
+      id: `cg-${Date.now()}`,
+      title: '新 CG',
+      sceneFile: null,
+      imageAsset: null,
+      targetStem: defaultCgTargetStem(index),
+      prompt: '',
+      style: '',
+      negativePrompt: '',
+    };
+    const currentMetadata = metadataRef.current;
+    persistMetadata({
+      ...currentMetadata,
+      cgCards: { ...(currentMetadata.cgCards ?? {}), [card.id]: card },
+    });
+    setSelectedCgCard(card);
+    setSelectedSceneCard(null);
+    setSelectedAsset(null);
+    setSelectedVoiceCard(null);
+    setEditingSceneCard(null);
+  }, [persistMetadata]);
+
+  const handleDeleteCgCard = useCallback((card: SceneAssetCard) => {
+    if (!confirm(`确定删除 CG "${card.title || card.targetStem || card.id}"？\n绑定的图片文件不会被删除。`)) return;
+    const currentMetadata = metadataRef.current;
+    const nextCgCards = { ...(currentMetadata.cgCards ?? {}) };
+    delete nextCgCards[card.id];
+    const deletedCgCards = Array.from(new Set([...(currentMetadata.deletedCgCards ?? []), card.id]));
+    persistMetadata({
+      ...currentMetadata,
+      cgCards: nextCgCards,
+      deletedCgCards,
+    });
+    if (selectedCgCard?.id === card.id) {
+      setSelectedCgCard(null);
+      setEditingSceneCard(null);
+    }
+  }, [persistMetadata, selectedCgCard]);
+
   const handleSaveVoiceCard = useCallback((card: VoiceAssetCard) => {
     const currentMetadata = metadataRef.current;
     const normalizedCard = {
@@ -1178,6 +1257,7 @@ export function AssetManager() {
                     setActiveTab(id);
                     setSelectedAsset(null);
                     setSelectedSceneCard(null);
+                    setSelectedCgCard(null);
                     setSelectedVoiceCard(null);
                     setEditingSceneCard(null);
                   }}
@@ -1202,6 +1282,10 @@ export function AssetManager() {
                   onClick={() => {
                     if (activeTab === 'scene') {
                       handleNewSceneCard();
+                      return;
+                    }
+                    if (activeTab === 'cg') {
+                      handleNewCgCard();
                       return;
                     }
                     setEditingSceneCard(null);
@@ -1381,7 +1465,7 @@ export function AssetManager() {
                     <p className="text-sm">点击右上角「新建场景」开始设定背景图</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' : 'space-y-2'}>
                     {sceneLibraryItems.map((item) => {
                       const card = item.kind === 'sceneCard' ? item.card : null;
                       const asset = item.kind === 'sceneCard' ? item.asset : item.asset;
@@ -1395,22 +1479,68 @@ export function AssetManager() {
                         : asset
                           ? selectedAsset?.path === asset.path
                           : false;
+                      const handleSelect = () => {
+                        if (asset && !card) {
+                          setSelectedAsset(asset);
+                          setSelectedSceneCard(null);
+                          setSelectedVoiceCard(null);
+                          setEditingSceneCard(null);
+                        } else if (card) {
+                          setSelectedSceneCard(card);
+                          setEditingSceneCard(card);
+                          setSelectedAsset(null);
+                          setSelectedVoiceCard(null);
+                        }
+                      };
+                      const handleRemove = () => {
+                        if (asset && !card) {
+                          void handleDelete(asset);
+                        } else if (card) {
+                          handleDeleteSceneCard(card);
+                        }
+                      };
+                      if (viewMode === 'list') {
+                        return (
+                          <div
+                            key={card ? `scene-${card.id}` : `asset-${asset?.path}`}
+                            onClick={handleSelect}
+                            className={`group flex cursor-pointer items-center gap-4 rounded-lg border p-3 transition-all ${
+                              isSelected
+                                ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                                : 'border-border bg-card/50 hover:border-secondary'
+                            }`}
+                          >
+                            <div className="aspect-video h-16 flex-shrink-0 overflow-hidden rounded bg-secondary/30">
+                              {thumbnail ? (
+                                <img src={thumbnail} alt={title} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center">
+                                  <Image className="h-6 w-6 text-muted-foreground/40" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-sm font-medium">{title}</h3>
+                              <p className="truncate text-xs text-muted-foreground">{subtitle || (card ? '尚未生成图片' : '')}</p>
+                              {card?.prompt && (
+                                <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{card.prompt}</p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRemove(); }}
+                              className="rounded-full p-2 text-muted-foreground opacity-0 transition-colors hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                              aria-label={asset && !card ? '删除素材' : '删除场景'}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        );
+                      }
                       return (
                         <div
                           key={card ? `scene-${card.id}` : `asset-${asset?.path}`}
-                          onClick={() => {
-                            if (asset && !card) {
-                              setSelectedAsset(asset);
-                              setSelectedSceneCard(null);
-                              setSelectedVoiceCard(null);
-                              setEditingSceneCard(null);
-                            } else if (card) {
-                              setSelectedSceneCard(card);
-                              setEditingSceneCard(card);
-                              setSelectedAsset(null);
-                              setSelectedVoiceCard(null);
-                            }
-                          }}
+                          onClick={handleSelect}
                           className={`group overflow-hidden rounded-lg bg-card text-left transition-all hover:scale-[1.02] cursor-pointer ${
                             isSelected
                               ? 'ring-2 ring-primary shadow-[0_0_20px_color-mix(in_srgb,var(--color-warm-glow)_60%,transparent)]'
@@ -1429,16 +1559,116 @@ export function AssetManager() {
                             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (asset && !card) {
-                                    void handleDelete(asset);
-                                  } else if (card) {
-                                    handleDeleteSceneCard(card);
-                                  }
-                                }}
+                                onClick={(e) => { e.stopPropagation(); handleRemove(); }}
                                 className="absolute right-2 top-2 p-2 rounded-full bg-destructive/90 text-destructive-foreground hover:bg-destructive transition-colors"
                                 aria-label={asset && !card ? '删除素材' : '删除场景'}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="border-t border-border p-3">
+                            <div className="truncate text-sm font-medium">{title}</div>
+                            <div className="mt-1 truncate text-xs text-muted-foreground">{subtitle}</div>
+                            {card?.prompt && (
+                              <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">{card.prompt}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : activeTab === 'cg' ? (
+                cgLibraryItems.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                    <FolderOpen className="w-16 h-16 mb-4 opacity-50" />
+                    <p className="text-lg mb-2">暂无 CG</p>
+                    <p className="text-sm">点击右上角「新建 CG」开始设定剧情画</p>
+                  </div>
+                ) : (
+                  <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' : 'space-y-2'}>
+                    {cgLibraryItems.map((item) => {
+                      const card = item.kind === 'sceneCard' ? item.card : null;
+                      const asset = item.kind === 'sceneCard' ? item.asset : item.asset;
+                      const thumbnail = asset ? getThumbnail(asset) : null;
+                      const title = card?.title || (asset ? (aliasForAsset(asset) || asset.name) : '');
+                      const subtitle = card
+                        ? (card.imageAsset || `${card.targetStem}.png`) || '尚未生成图片'
+                        : asset ? asset.name : '';
+                      const isSelected = card ? selectedCgCard?.id === card.id : false;
+                      const handleSelect = () => {
+                        if (!card) return;
+                        setSelectedCgCard(card);
+                        setEditingSceneCard(card);
+                        setSelectedSceneCard(null);
+                        setSelectedAsset(null);
+                        setSelectedVoiceCard(null);
+                      };
+                      const handleRemove = () => { if (card) handleDeleteCgCard(card); };
+                      if (viewMode === 'list') {
+                        return (
+                          <div
+                            key={`cg-${card?.id ?? asset?.path}`}
+                            onClick={handleSelect}
+                            className={`group flex cursor-pointer items-center gap-4 rounded-lg border p-3 transition-all ${
+                              isSelected
+                                ? 'border-primary bg-primary/10 ring-1 ring-primary'
+                                : 'border-border bg-card/50 hover:border-secondary'
+                            }`}
+                          >
+                            <div className="aspect-video h-16 flex-shrink-0 overflow-hidden rounded bg-secondary/30">
+                              {thumbnail ? (
+                                <img src={thumbnail} alt={title} className="h-full w-full object-cover" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center">
+                                  <Award className="h-6 w-6 text-muted-foreground/40" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-sm font-medium">{title}</h3>
+                              <p className="truncate text-xs text-muted-foreground">{subtitle || '尚未生成图片'}</p>
+                              {card?.prompt && (
+                                <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{card.prompt}</p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRemove(); }}
+                              className="rounded-full p-2 text-muted-foreground opacity-0 transition-colors hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                              aria-label="删除 CG"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div
+                          key={`cg-${card?.id ?? asset?.path}`}
+                          onClick={handleSelect}
+                          className={`group overflow-hidden rounded-lg bg-card text-left transition-all hover:scale-[1.02] cursor-pointer ${
+                            isSelected
+                              ? 'ring-2 ring-primary shadow-[0_0_20px_color-mix(in_srgb,var(--color-warm-glow)_60%,transparent)]'
+                              : 'hover:ring-1 hover:ring-border'
+                          }`}
+                        >
+                          <div className="aspect-video bg-secondary/30 relative overflow-hidden">
+                            {thumbnail ? (
+                              <img src={thumbnail} alt={title} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                                <Award className="h-10 w-10 opacity-40" />
+                                <span className="text-xs">未生成 CG 图</span>
+                              </div>
+                            )}
+                            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleRemove(); }}
+                                className="absolute right-2 top-2 p-2 rounded-full bg-destructive/90 text-destructive-foreground hover:bg-destructive transition-colors"
+                                aria-label="删除 CG"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
@@ -1870,8 +2100,27 @@ export function AssetManager() {
 
           {/* Right Sidebar - Details */}
           {activeTab !== 'character' && (
-          <aside className="my-4 mr-4 w-80 overflow-hidden rounded border border-border bg-surface-bright/90 shadow-[-4px_0_24px_var(--shadow-faint)] backdrop-blur-xl">
-            {selectedSceneCard ? (
+          <aside className="mb-4 mr-4 w-80 overflow-hidden rounded border border-border bg-surface-bright/90 shadow-[-4px_0_24px_var(--shadow-faint)] backdrop-blur-xl">
+            {selectedCgCard ? (
+              <SceneCardDetails
+                card={selectedCgCard}
+                projectPath={projectPath}
+                backgroundAssets={allAssets.filter((asset) => asset.category === 'background')}
+                getThumbnail={getThumbnail}
+                references={cgCardReferences}
+                referenceUploading={referenceUploading}
+                onReferenceUpload={handleSceneCardReferenceUpload}
+                onReferenceRemove={handleSceneCardReferenceRemove}
+                onSave={handleSaveCgCard}
+                onGenerate={(card) => {
+                  handleSaveCgCard(card);
+                  setEditingSceneCard(card);
+                  setAiAssetPrompt('');
+                  setAiGenerateOpen(true);
+                }}
+                onOpenUsage={openUsage}
+              />
+            ) : selectedSceneCard ? (
               <SceneCardDetails
                 card={selectedSceneCard}
                 projectPath={projectPath}
@@ -2109,6 +2358,18 @@ export function AssetManager() {
                 setError(`生成图片已保存，但写入剧本引用失败：${String(e)}`);
               }
             }
+          }
+          if (activeTab === 'cg' && editingSceneCard) {
+            const updated: SceneAssetCard = { ...editingSceneCard, imageAsset: asset.name };
+            handleSaveCgCard(updated);
+            setSelectedCgCard(updated);
+            setEditingSceneCard(null);
+            persistMetadata(setAssetDescription(
+              metadataRef.current,
+              'background',
+              asset.name,
+              editingSceneCard.prompt,
+            ));
           }
           if (activeTab === 'music' && selectedVoiceCard) {
             handleSaveVoiceCard({ ...selectedVoiceCard, voiceAsset: asset.name });

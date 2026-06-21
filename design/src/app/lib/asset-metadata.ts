@@ -23,6 +23,11 @@ export function defaultSceneTargetStem(index: number): string {
   return `${String(index).padStart(3, '0')}_scene_dusk`;
 }
 
+/** Default generated-image filename stem for a new CG card. */
+export function defaultCgTargetStem(index: number): string {
+  return `cg_${String(index).padStart(3, '0')}`;
+}
+
 /**
  * Ensure a background scene card exists for the given scene file. Returns the
  * (possibly unchanged) metadata. No-op if a card already exists or the card was
@@ -308,7 +313,7 @@ const legacyReferencesKey = (projectId: string) => `asset-references-${projectId
 const pendingSaves = new Map<string, Promise<void>>();
 
 export function emptyAssetMetadata(): AssetMetadata {
-  return { aliases: {}, descriptions: {}, tags: {}, references: {}, sceneCards: {}, voiceCards: {}, deletedSceneCards: [], deletedVoiceCards: [] };
+  return { aliases: {}, descriptions: {}, tags: {}, references: {}, sceneCards: {}, cgCards: {}, voiceCards: {}, deletedSceneCards: [], deletedCgCards: [], deletedVoiceCards: [] };
 }
 
 export function assetMetadataKey(category: string, filename: string): string {
@@ -361,8 +366,10 @@ function loadLegacyMetadata(projectId: string): AssetMetadata {
         tags: parsed.tags ?? {},
         references: parsed.references ?? {},
         sceneCards: parsed.sceneCards ?? {},
+        cgCards: parsed.cgCards ?? {},
         voiceCards: parsed.voiceCards ?? {},
         deletedSceneCards: parsed.deletedSceneCards ?? [],
+        deletedCgCards: parsed.deletedCgCards ?? [],
         deletedVoiceCards: parsed.deletedVoiceCards ?? [],
       };
     }
@@ -375,8 +382,10 @@ function loadLegacyMetadata(projectId: string): AssetMetadata {
     tags: parseRecord<string[]>(legacyTagsKey(projectId)),
     references: parseRecord<string[]>(legacyReferencesKey(projectId)),
     sceneCards: {},
+    cgCards: {},
     voiceCards: {},
     deletedSceneCards: [],
+    deletedCgCards: [],
     deletedVoiceCards: [],
   };
 }

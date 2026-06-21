@@ -100,7 +100,7 @@ export function StoryOsTopBar({
     { label: '撤销', icon: RotateCcw, handler: onUndo },
     { label: '重做', icon: RotateCw, handler: onRedo },
     { label: '运行预览', icon: Play, handler: onRun },
-    { label: '导出/发布', icon: Upload, handler: onPublish },
+    { label: '打包发布', icon: Upload, handler: onPublish },
     { label: '保存', icon: Save, handler: onSave, primary: true },
   ].filter((action) => action.handler);
 

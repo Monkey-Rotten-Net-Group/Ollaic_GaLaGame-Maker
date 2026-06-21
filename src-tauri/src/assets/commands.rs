@@ -39,9 +39,13 @@ pub struct AssetMetadata {
     #[serde(default)]
     pub scene_cards: HashMap<String, SceneAssetCard>,
     #[serde(default)]
+    pub cg_cards: HashMap<String, SceneAssetCard>,
+    #[serde(default)]
     pub voice_cards: HashMap<String, VoiceAssetCard>,
     #[serde(default)]
     pub deleted_scene_cards: Vec<String>,
+    #[serde(default)]
+    pub deleted_cg_cards: Vec<String>,
     #[serde(default)]
     pub deleted_voice_cards: Vec<String>,
 }
