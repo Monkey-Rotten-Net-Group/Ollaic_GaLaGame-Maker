@@ -26,7 +26,7 @@ import {
   exportProject, readProjectMetadata, saveProjectMetadata,
   createProjectSnapshot, listProjectSnapshots, renameProjectSnapshot, deleteProjectSnapshot, restoreProjectSnapshot,
   setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
-  readFileText, parseSceneHeader, deleteScene, renameScene,
+  readFileText, writeFileText, parseSceneHeader, deleteScene, renameScene,
   type ProjectInfo, type SceneHeader, type ProjectMetadata, type SnapshotInfo,
 } from '../lib/webgal-ipc';
 import { listCharacters, listCharacterNames } from '../lib/character-ipc';
@@ -988,7 +988,7 @@ function ScriptCommandCard({
   const unlockLabel = node.type === 'changeBg' ? '加入CG鉴赏' : '加入BGM鉴赏';
 
   return (
-    <div ref={preview} key={node.id} data-cmd-card data-cmd-index={index} className="group flex gap-3" style={{ opacity: isDragging ? 0.4 : 1 }}>
+    <div ref={preview} key={node.id} data-cmd-card data-cmd-index={index} data-node-id={node.id} className="group flex gap-3" style={{ opacity: isDragging ? 0.4 : 1 }}>
       <div className="flex w-12 shrink-0 flex-col items-center pt-2">
         <div className={`flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-bold ${
           selected ? 'border-primary text-primary' : 'border-outline-variant/30 text-on-surface-variant/40'
@@ -2498,15 +2498,82 @@ export function StoryEditor() {
   }, [markDirty]);
 
   const handleExport = useCallback(async () => {
-    const text = await serializeScene(nodes);
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = currentSceneName;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      console.log('开始导出场景:', currentSceneName, '节点数:', nodes.length);
+
+      // Ensure filename has .txt extension
+      const filename = currentSceneName.endsWith('.txt') ? currentSceneName : `${currentSceneName}.txt`;
+
+      // Let user choose where to save
+      const savePath = await saveDialog({
+        title: '导出场景',
+        defaultPath: filename,
+        filters: [{
+          name: 'WebGAL 场景文件',
+          extensions: ['txt']
+        }]
+      });
+
+      if (!savePath) {
+        console.log('用户取消了导出');
+        return;
+      }
+
+      console.log('用户选择保存到:', savePath);
+
+      const text = await serializeScene(nodes);
+      console.log('序列化完成，文本长度:', text.length);
+
+      // Write to file using Tauri
+      await writeFileText(savePath, text);
+
+      console.log('导出成功:', savePath);
+
+      // Show success notification
+      const notification = document.createElement('div');
+      notification.textContent = `✓ 已导出: ${filename}`;
+      notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: rgba(34, 197, 94, 0.9);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        z-index: 9999;
+        font-size: 14px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      `;
+      document.body.appendChild(notification);
+
+      // Remove notification after 3 seconds
+      setTimeout(() => {
+        if (notification.parentNode) {
+          document.body.removeChild(notification);
+        }
+      }, 3000);
+    } catch (e) {
+      console.error('导出场景失败:', e);
+      alert(`导出场景失败: ${e}`);
+    }
   }, [nodes, currentSceneName]);
+
+  // Handle node selection from scene index with auto-scroll to the node
+  const handleSelectNodeWithScroll = useCallback((node: WebGalNode) => {
+    setSelectedNode(node);
+
+    // Scroll to the corresponding node in the command stream
+    // Use a small delay to ensure the selection state is updated first
+    setTimeout(() => {
+      const cardElement = document.querySelector(`[data-node-id="${node.id}"]`);
+      if (cardElement) {
+        cardElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }
+    }, 50);
+  }, []);
 
   const handleApplyScript = useCallback(async () => {
     const parsed = await parseScene(scriptSource);
@@ -2863,7 +2930,7 @@ export function StoryEditor() {
             sceneLinkMap={sceneLinkMap}
             nodes={nodes}
             selectedNode={selectedNode}
-            onSelectNode={setSelectedNode}
+            onSelectNode={handleSelectNodeWithScroll}
             onOpenScene={stableSwitchScene}
             onOpenSceneManager={() => setSceneManagerOpen(true)}
             characterColors={characterColors}

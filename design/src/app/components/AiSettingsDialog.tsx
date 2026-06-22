@@ -243,7 +243,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const loaded = config && imageConfig && ttsConfig && musicConfig;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-[720px] max-h-[85vh] flex flex-col bg-card border border-border rounded-lg shadow-2xl">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-lg font-display-family">

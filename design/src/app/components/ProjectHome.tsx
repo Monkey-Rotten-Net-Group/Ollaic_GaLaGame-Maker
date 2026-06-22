@@ -10,7 +10,6 @@ import {
   Folder,
   FolderOpen,
   Grid3x3,
-  History,
   Home,
   Layout,
   List as ListIcon,
@@ -82,8 +81,30 @@ export function ProjectHome() {
   }, [projects]);
 
   const activeProjects = projects.filter((project) => !project.deleted);
-  const activeProject = activeProjects[0] ?? null;
-  const recentProjects = activeProjects.slice(0, 5);
+
+  // Time-aware greeting + engineering-style date tag for the header.
+  const greeting = useMemo(() => {
+    const now = new Date();
+    const hour = now.getHours();
+    const title = hour < 5 ? '夜深了，创作者'
+      : hour < 11 ? '早安，创作者'
+      : hour < 14 ? '午安，创作者'
+      : hour < 18 ? '下午好，创作者'
+      : '晚上好，创作者';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const tag = `STORY OS · ${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} · 在线`;
+    return { title, tag };
+  }, []);
+
+  const filterLabel = useMemo(() => {
+    if (searchQuery.trim()) return '搜索结果';
+    switch (sidebarFilter) {
+      case 'favorites': return '我的收藏';
+      case 'recent': return '最近编辑';
+      case 'trash': return '回收站';
+      default: return '全部项目';
+    }
+  }, [sidebarFilter, searchQuery]);
 
   const filteredProjects = useMemo(() => {
     let list = projects;
@@ -244,7 +265,7 @@ export function ProjectHome() {
     <button
       type="button"
       onClick={() => setSidebarFilter(id)}
-      className={`flex w-full items-center gap-3 rounded px-3 py-2 text-left text-sm transition-colors ${
+      className={`flex items-center gap-3 rounded px-3 py-2 text-left text-sm transition-colors md:w-full ${
         sidebarFilter === id
           ? 'border border-secondary/30 bg-secondary/20 text-secondary'
           : 'text-muted-foreground hover:bg-surface-container-high hover:text-foreground'
@@ -252,7 +273,7 @@ export function ProjectHome() {
     >
       {icon}
       <span className="font-medium">{label}</span>
-      {count !== undefined && <span className="ml-auto text-xs opacity-60">{count}</span>}
+      {count !== undefined && <span className="text-xs opacity-60 md:ml-auto">{count}</span>}
     </button>
   );
 
@@ -261,13 +282,13 @@ export function ProjectHome() {
       {/* Home header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface-bright px-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <div className="story-os-chamfer-tr flex h-7 w-7 items-center justify-center bg-primary/10 text-primary">
             <Home className="h-4 w-4" />
           </div>
           <span className="font-display-family text-base font-semibold tracking-tight text-primary">
             Story OS
           </span>
-          <span className="hidden text-sm text-muted-foreground sm:inline">工作台</span>
+          <span className="hidden font-mono-family text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:inline">工作台</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative hidden sm:block">
@@ -276,303 +297,228 @@ export function ProjectHome() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-56 rounded border border-border bg-input-background py-1.5 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="w-64 rounded border border-border bg-input-background py-1.5 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
               placeholder="搜索项目..."
               aria-label="搜索项目"
             />
           </div>
-          <button
-            type="button"
-            onClick={handleOpenProject}
-            className="flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-sm font-medium text-on-surface-variant hover:bg-surface-container-high hover:text-foreground transition-colors"
-          >
-            <FolderOpen className="h-4 w-4" />
-            打开项目
-          </button>
-          <button
-            type="button"
-            onClick={openCreateDialog}
-            className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-sm font-medium text-on-primary hover:opacity-90 transition-opacity"
-          >
-            <Plus className="h-4 w-4" />
-            新建
-          </button>
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto grid max-w-7xl grid-cols-12 gap-4 pt-6">
-          <div className="col-span-12">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h1 className="font-display-family text-3xl font-semibold tracking-tight text-foreground">早安，创作者</h1>
-                <p className="mt-1 text-sm text-muted-foreground">Story OS 2.0 准备就绪，今天想创造怎样的世界？</p>
-              </div>
+      <main className="story-os-blueprint min-h-0 flex-1 overflow-hidden bg-surface-container-low p-4">
+        <div className="mx-auto flex h-full max-w-7xl flex-col gap-5 pt-2">
+          {/* Greeting */}
+          <div className="relative shrink-0">
+            <div className="mb-2 inline-flex items-center gap-2 rounded border border-border/60 bg-surface-container-lowest/80 px-2.5 py-1 font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant backdrop-blur">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-tertiary animate-pulse" />
+              {greeting.tag}
             </div>
+            <h1 className="font-display-family text-3xl font-semibold tracking-tight text-foreground">{greeting.title}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Story OS 2.0 准备就绪，今天想创造怎样的世界？</p>
           </div>
 
-          <section className="col-span-12 flex flex-col gap-4 lg:col-span-8">
+          {/* Quick actions */}
+          <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
             <button
               type="button"
-              onClick={() => activeProject ? navigate(`/editor/${activeProject.id}`) : openCreateDialog()}
-              className="story-os-hard-shadow group relative h-[320px] overflow-hidden rounded border border-border bg-surface-container-lowest text-left"
+              onClick={openCreateDialog}
+              className="story-os-hard-shadow story-os-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-primary bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
             >
-              <div className="absolute inset-0 bg-surface-container-low">
-                <svg className="h-full w-full opacity-10" fill="none" viewBox="0 0 800 400" aria-hidden="true">
-                  <path d="M0 0L800 400M800 0L0 400" stroke="currentColor" strokeWidth="1" />
-                  <circle cx="400" cy="200" r="150" stroke="currentColor" strokeWidth="1" />
-                  <rect height="300" stroke="currentColor" strokeWidth="1" width="600" x="100" y="50" />
-                </svg>
+              <div className="story-os-dot-grid pointer-events-none absolute inset-0 opacity-40" />
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition-transform group-hover:scale-110">
+                <Plus className="h-6 w-6" />
               </div>
-              <div className="absolute inset-0 flex flex-col justify-between p-6">
-                <div className="flex items-start justify-between">
-                  <span className="story-os-chamfer-tr rounded bg-primary px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-primary-foreground">
-                    {activeProject ? '活跃项目' : '未绑定项目'}
-                  </span>
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full border border-white/50 bg-background/70 text-primary backdrop-blur">
-                    <ArrowRight className="h-5 w-5" />
-                  </span>
-                </div>
-
-                <div className="max-w-md rounded border border-white/50 bg-background/70 p-4 backdrop-blur-md">
-                  <h2 className="font-display-family text-3xl font-semibold text-primary">
-                    {activeProject ? activeProject.name : '创建你的第一部作品'}
-                  </h2>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{activeProject?.lastModified ?? '等待开始'}</span>
-                    <span>•</span>
-                    <span className="inline-flex items-center gap-1"><Layout className="h-3 w-3" />脚本流: {activeProject?.sceneCount ?? 0} scenes</span>
-                  </div>
-                  <div className="mt-4">
-                    <div className="mb-1 flex justify-between text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                      <span>剧本完成度</span>
-                      <span>{activeProject ? `${Math.min(99, Math.round((activeProject.sceneCount || 0) * 12))}%` : '0%'}</span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-surface-container-highest">
-                      <div className="h-full rounded-full bg-primary-container" style={{ width: activeProject ? `${Math.min(99, Math.round((activeProject.sceneCount || 0) * 12))}%` : '0%' }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </button>
-
-            <div className="grid h-[120px] grid-cols-1 gap-4 md:grid-cols-2">
-              <button
-                type="button"
-                onClick={openCreateDialog}
-                className="story-os-hard-shadow relative overflow-hidden rounded border border-l-4 border-border border-l-primary bg-surface-container-lowest px-6 text-left transition-colors hover:bg-surface-container"
-              >
-                <div className="absolute right-0 top-0 h-24 w-24 translate-x-4 -translate-y-4 rounded-bl-full bg-primary/10 transition-transform group-hover:scale-110" />
-                <Plus className="mb-2 h-8 w-8 text-primary" />
-                <div className="text-xl font-semibold">新建项目</div>
+              <div className="relative min-w-0">
+                <div className="text-lg font-semibold">新建项目</div>
                 <div className="text-sm text-muted-foreground">从零开始构建剧本</div>
-              </button>
-              <button
-                type="button"
-                onClick={handleOpenProject}
-                className="story-os-hard-shadow relative overflow-hidden rounded border border-l-4 border-border border-l-accent bg-surface-container-lowest px-6 text-left transition-colors hover:bg-surface-container"
-              >
-                <FileDown className="mb-2 h-8 w-8 text-secondary" />
-                <div className="text-xl font-semibold">从项目导入</div>
-                <div className="text-sm text-muted-foreground">打开已有 WebGAL 工程</div>
-              </button>
-            </div>
-
-            <StoryOsPanel
-              title="项目索引"
-              icon={Folder}
-              action={(
-                <div className="flex items-center gap-1 rounded border border-border bg-surface-container px-1 py-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('grid')}
-                    className={`rounded p-1 ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-container-high'}`}
-                    aria-label="网格视图"
-                  >
-                    <Grid3x3 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('list')}
-                    className={`rounded p-1 ${viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-container-high'}`}
-                    aria-label="列表视图"
-                  >
-                    <ListIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            >
-              <div className="border-b border-border/50 bg-surface-container-lowest p-3">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full rounded border border-border bg-input-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    placeholder="搜索项目、路径或简介..."
-                    aria-label="搜索项目"
-                  />
-                </div>
               </div>
+              <ArrowRight className="relative ml-auto h-5 w-5 shrink-0 text-muted-foreground opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100" />
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenProject}
+              className="story-os-hard-shadow story-os-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-accent bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
+            >
+              <div className="story-os-dot-grid pointer-events-none absolute inset-0 opacity-40" />
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-secondary/10 text-secondary transition-transform group-hover:scale-110">
+                <FileDown className="h-6 w-6" />
+              </div>
+              <div className="relative min-w-0">
+                <div className="text-lg font-semibold">打开已有项目</div>
+                <div className="text-sm text-muted-foreground">导入已有 WebGAL 工程</div>
+              </div>
+              <ArrowRight className="relative ml-auto h-5 w-5 shrink-0 text-muted-foreground opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100" />
+            </button>
+          </div>
 
-              <div className="grid grid-cols-[180px_minmax(0,1fr)]">
-                <aside className="border-r border-border/60 bg-surface-container-lowest p-3">
-                  <div className="space-y-1">
-                    {filterButton('all', '全部项目', <Folder className="h-4 w-4" />, activeProjects.length)}
-                    {filterButton('favorites', '我的收藏', <Star className="h-4 w-4" />, activeProjects.filter((p) => p.isFavorite).length)}
-                    {filterButton('recent', '最近编辑', <Clock className="h-4 w-4" />)}
-                    {filterButton('trash', '回收站', <Trash2 className="h-4 w-4" />, projects.filter((p) => p.deleted).length)}
-                  </div>
+          {/* Project library */}
+          <StoryOsPanel
+            title="项目库"
+            icon={Folder}
+            className="flex min-h-0 flex-1 flex-col"
+            action={(
+              <div className="flex items-center gap-1 rounded border border-border bg-surface-container px-1 py-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className={`rounded p-1 ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-container-high'}`}
+                  aria-label="网格视图"
+                >
+                  <Grid3x3 className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`rounded p-1 ${viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-container-high'}`}
+                  aria-label="列表视图"
+                >
+                  <ListIcon className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          >
+            <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)]">
+              {/* Left filter sidebar */}
+              <aside className="flex flex-row flex-wrap gap-1.5 border-b border-border/50 bg-surface-container-lowest p-3 md:flex-col md:gap-1 md:border-b-0 md:border-r md:overflow-y-auto">
+                {filterButton('all', '全部项目', <Folder className="h-4 w-4" />, activeProjects.length)}
+                {filterButton('favorites', '我的收藏', <Star className="h-4 w-4" />, activeProjects.filter((p) => p.isFavorite).length)}
+                {filterButton('recent', '最近编辑', <Clock className="h-4 w-4" />)}
+                {filterButton('trash', '回收站', <Trash2 className="h-4 w-4" />, projects.filter((p) => p.deleted).length)}
 
-                  <div className="mt-4 rounded border border-primary/10 bg-gradient-to-br from-primary/5 to-transparent p-3">
-                    <h3 className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                      <BookOpen className="h-3.5 w-3.5" />
-                      使用技巧
-                    </h3>
-                    <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
-                      点击"新建"选择存放位置，将自动生成 WebGAL 标准目录结构。也可以点击"打开项目"导入已有的 WebGAL 项目。
-                    </p>
-                  </div>
-                </aside>
+                <div className="mt-auto hidden rounded border border-primary/10 bg-gradient-to-br from-primary/5 to-transparent p-3 md:block">
+                  <h3 className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                    <BookOpen className="h-3.5 w-3.5" />
+                    使用技巧
+                  </h3>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                    点击星标可收藏常用项目。项目较多时，可用右上角搜索框或切换列表视图快速定位。
+                  </p>
+                </div>
+              </aside>
 
-                <div className="min-h-[260px] p-3">
-                  {filteredProjects.length === 0 ? (
-                    <div className="flex h-full min-h-[240px] flex-col items-center justify-center rounded border-2 border-dashed border-border/50 bg-surface-container-low text-center text-muted-foreground">
-                      {(() => {
-                        if (searchQuery.trim()) {
-                          return (
-                            <>
-                              <div className="mb-3 rounded-full bg-surface-container p-3">
-                                <Search className="h-8 w-8 opacity-30" />
-                              </div>
-                              <p className="text-sm font-medium">没有找到相关项目</p>
-                              <p className="mt-1 text-xs text-muted-foreground/60">换个关键词试试</p>
-                              <button type="button" onClick={() => setSearchQuery('')} className="mt-3 text-xs text-primary hover:underline">
-                                清除搜索
-                              </button>
-                            </>
-                          );
-                        }
-                        if (sidebarFilter === 'trash') {
-                          return (
-                            <>
-                              <div className="mb-3 rounded-full bg-surface-container p-3">
-                                <Trash2 className="h-8 w-8 opacity-30" />
-                              </div>
-                              <p className="text-sm font-medium">回收站是空的</p>
-                              <p className="mt-1 text-xs text-muted-foreground/60">移入回收站的项目将在这里显示</p>
-                            </>
-                          );
-                        }
-                        if (sidebarFilter === 'favorites') {
-                          return (
-                            <>
-                              <div className="mb-3 rounded-full bg-surface-container p-3">
-                                <Star className="h-8 w-8 opacity-20" />
-                              </div>
-                              <p className="text-sm font-medium">还没有收藏的项目</p>
-                              <p className="mt-1 text-xs text-muted-foreground/60">点击项目卡片上的星标即可收藏</p>
-                            </>
-                          );
-                        }
-                        if (sidebarFilter === 'recent') {
-                          return (
-                            <>
-                              <div className="mb-3 rounded-full bg-surface-container p-3">
-                                <Clock className="h-8 w-8 opacity-20" />
-                              </div>
-                              <p className="text-sm font-medium">暂无最近编辑的项目</p>
-                              <p className="mt-1 text-xs text-muted-foreground/60">打开项目后将在这里显示</p>
-                            </>
-                          );
-                        }
+              {/* Right project area */}
+              <div className="flex min-h-0 flex-col p-4">
+                {/* Result count bar */}
+                <div className="mb-3 flex shrink-0 items-center justify-between">
+                  <span className="font-mono-family text-[11px] uppercase tracking-widest text-muted-foreground">
+                    {filterLabel} · {filteredProjects.length} 个
+                  </span>
+                  {searchQuery.trim() && (
+                    <button type="button" onClick={() => setSearchQuery('')} className="text-xs text-primary hover:underline">
+                      清除搜索
+                    </button>
+                  )}
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                {filteredProjects.length === 0 ? (
+                  <div className="flex h-full min-h-[280px] flex-col items-center justify-center rounded border-2 border-dashed border-border/50 bg-surface-container-low text-center text-muted-foreground">
+                    {(() => {
+                      if (searchQuery.trim()) {
                         return (
                           <>
                             <div className="mb-3 rounded-full bg-surface-container p-3">
-                              <Folder className="h-8 w-8 opacity-30" />
+                              <Search className="h-8 w-8 opacity-30" />
                             </div>
-                            <p className="text-sm font-medium">还没有项目</p>
-                            <p className="mt-1 text-xs text-muted-foreground/60">创建新项目或打开已有的 WebGAL 项目开始</p>
-                            <div className="mt-4 flex gap-2">
-                              <button type="button" onClick={handleOpenProject} className="rounded border border-border bg-surface-container px-3 py-1.5 text-xs hover:bg-surface-container-high">
-                                <FolderOpen className="mr-1 inline h-3 w-3" />
-                                打开项目
-                              </button>
-                              <button type="button" onClick={openCreateDialog} className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground">
-                                <Plus className="mr-1 inline h-3 w-3" />
-                                创建新项目
-                              </button>
-                            </div>
+                            <p className="text-sm font-medium">没有找到相关项目</p>
+                            <p className="mt-1 text-xs text-muted-foreground/60">换个关键词试试</p>
+                            <button type="button" onClick={() => setSearchQuery('')} className="mt-3 text-xs text-primary hover:underline">
+                              清除搜索
+                            </button>
                           </>
                         );
-                      })()}
-                    </div>
-                  ) : viewMode === 'grid' ? (
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                      {filteredProjects.map((project) => (
-                        <ProjectRecord
-                          key={project.id}
-                          project={project}
-                          deletedView={sidebarFilter === 'trash'}
-                          onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
-                          onFavorite={toggleFavorite}
-                          onEdit={openEditDialog}
-                          onDelete={deleteProject}
-                          onRestore={restoreProject}
-                          onPermanentDelete={permanentlyDeleteProject}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredProjects.map((project) => (
-                        <ProjectRow
-                          key={project.id}
-                          project={project}
-                          deletedView={sidebarFilter === 'trash'}
-                          onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
-                          onFavorite={toggleFavorite}
-                          onEdit={openEditDialog}
-                          onDelete={deleteProject}
-                          onRestore={restoreProject}
-                          onPermanentDelete={permanentlyDeleteProject}
-                        />
-                      ))}
-                    </div>
-                  )}
+                      }
+                      if (sidebarFilter === 'trash') {
+                        return (
+                          <>
+                            <div className="mb-3 rounded-full bg-surface-container p-3">
+                              <Trash2 className="h-8 w-8 opacity-30" />
+                            </div>
+                            <p className="text-sm font-medium">回收站是空的</p>
+                            <p className="mt-1 text-xs text-muted-foreground/60">移入回收站的项目将在这里显示</p>
+                          </>
+                        );
+                      }
+                      if (sidebarFilter === 'favorites') {
+                        return (
+                          <>
+                            <div className="mb-3 rounded-full bg-surface-container p-3">
+                              <Star className="h-8 w-8 opacity-20" />
+                            </div>
+                            <p className="text-sm font-medium">还没有收藏的项目</p>
+                            <p className="mt-1 text-xs text-muted-foreground/60">点击项目卡片上的星标即可收藏</p>
+                          </>
+                        );
+                      }
+                      if (sidebarFilter === 'recent') {
+                        return (
+                          <>
+                            <div className="mb-3 rounded-full bg-surface-container p-3">
+                              <Clock className="h-8 w-8 opacity-20" />
+                            </div>
+                            <p className="text-sm font-medium">暂无最近编辑的项目</p>
+                            <p className="mt-1 text-xs text-muted-foreground/60">打开项目后将在这里显示</p>
+                          </>
+                        );
+                      }
+                      return (
+                        <>
+                          <div className="mb-3 rounded-full bg-surface-container p-3">
+                            <Folder className="h-8 w-8 opacity-30" />
+                          </div>
+                          <p className="text-sm font-medium">还没有项目</p>
+                          <p className="mt-1 text-xs text-muted-foreground/60">创建新项目或打开已有的 WebGAL 项目开始</p>
+                          <div className="mt-4 flex gap-2">
+                            <button type="button" onClick={handleOpenProject} className="rounded border border-border bg-surface-container px-3 py-1.5 text-xs hover:bg-surface-container-high">
+                              <FolderOpen className="mr-1 inline h-3 w-3" />
+                              打开项目
+                            </button>
+                            <button type="button" onClick={openCreateDialog} className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground">
+                              <Plus className="mr-1 inline h-3 w-3" />
+                              创建新项目
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : viewMode === 'grid' ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+                    {filteredProjects.map((project) => (
+                      <ProjectRecord
+                        key={project.id}
+                        project={project}
+                        deletedView={sidebarFilter === 'trash'}
+                        onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
+                        onFavorite={toggleFavorite}
+                        onEdit={openEditDialog}
+                        onDelete={deleteProject}
+                        onRestore={restoreProject}
+                        onPermanentDelete={permanentlyDeleteProject}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredProjects.map((project) => (
+                      <ProjectRow
+                        key={project.id}
+                        project={project}
+                        deletedView={sidebarFilter === 'trash'}
+                        onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
+                        onFavorite={toggleFavorite}
+                        onEdit={openEditDialog}
+                        onDelete={deleteProject}
+                        onRestore={restoreProject}
+                        onPermanentDelete={permanentlyDeleteProject}
+                      />
+                    ))}
+                  </div>
+                )}
                 </div>
               </div>
-            </StoryOsPanel>
-          </section>
-
-          <aside className="col-span-12 lg:col-span-4">
-            <StoryOsPanel title="最近项目" icon={History} className="min-h-[460px]">
-              <div className="flex flex-col gap-2 p-4">
-                {recentProjects.length === 0 ? (
-                  <div className="rounded border border-dashed border-border bg-surface-container-low p-6 text-center text-sm text-muted-foreground">
-                    打开或创建项目后会出现在这里。
-                  </div>
-                ) : recentProjects.map((project) => (
-                  <button
-                    type="button"
-                    key={project.id}
-                    onClick={() => navigate(`/editor/${project.id}`)}
-                    className="group flex items-center gap-4 rounded border border-transparent p-2 text-left transition-colors hover:border-border hover:bg-surface-container-high"
-                  >
-                    <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded bg-gradient-to-br from-secondary/30 to-surface-container">
-                      <BookOpen className="h-4 w-4 text-muted-foreground opacity-25" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold group-hover:text-primary">{project.name}</div>
-                      <div className="truncate text-xs text-muted-foreground">{project.lastModified}</div>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                  </button>
-                ))}
-              </div>
-            </StoryOsPanel>
-          </aside>
+            </div>
+          </StoryOsPanel>
         </div>
       </main>
 
@@ -638,14 +584,19 @@ function ProjectRecord({
           onOpen();
         }
       }}
-      className={`story-os-interactive group cursor-pointer overflow-hidden rounded border border-border bg-surface-container-lowest text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
+      className={`story-os-interactive story-os-chamfer-tr group cursor-pointer overflow-hidden border border-border bg-surface-container-lowest text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
     >
-      <div className="relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-secondary/30 to-surface-container">
+      <div className="story-os-blueprint relative aspect-[16/9] overflow-hidden bg-gradient-to-br from-secondary/25 to-surface-container">
         <div className="flex h-full w-full items-center justify-center">
-          <BookOpen className="h-16 w-16 text-muted-foreground opacity-15" />
+          <BookOpen className="h-16 w-16 text-muted-foreground opacity-15 transition-transform duration-300 group-hover:scale-110" />
         </div>
+        {project.isFavorite && (
+          <div className="absolute left-3 top-3">
+            <Star className="h-4 w-4 fill-primary text-primary drop-shadow" />
+          </div>
+        )}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-3">
-          <div className="flex items-center gap-1 rounded bg-white/10 px-2 py-0.5 text-[10px] text-white backdrop-blur">
+          <div className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-0.5 font-mono-family text-[10px] text-white backdrop-blur">
             <Layout className="h-3 w-3" />
             {project.sceneCount} 场景
           </div>
@@ -678,7 +629,10 @@ function ProjectRecord({
       <div className="p-3">
         <div className="truncate text-base font-semibold group-hover:text-primary">{project.name}</div>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{project.description}</p>
-        <div className="mt-3 truncate border-t border-border/60 pt-2 text-[10px] text-muted-foreground">{project.path}</div>
+        <div className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-2 font-mono-family text-[10px] text-muted-foreground">
+          <MapPin className="h-3 w-3 shrink-0 opacity-60" />
+          <span className="truncate">{project.path}</span>
+        </div>
       </div>
     </div>
   );

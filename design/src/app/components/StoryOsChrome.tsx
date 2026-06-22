@@ -69,7 +69,7 @@ interface StoryOsPanelProps {
 }
 
 const navItems: Array<{ id: StoryOsSection; label: string; icon: LucideIcon }> = [
-  { id: 'home', label: '项目', icon: Home },
+  { id: 'home', label: '首页', icon: Home },
   { id: 'script', label: '脚本流', icon: BookOpen },
   { id: 'world', label: '场景', icon: GitBranch },
   { id: 'assets', label: '资源库', icon: Boxes },
@@ -101,7 +101,8 @@ export function StoryOsTopBar({
     { label: '重做', icon: RotateCw, handler: onRedo },
     { label: '运行预览', icon: Play, handler: onRun },
     { label: '打包发布', icon: Upload, handler: onPublish },
-    { label: '保存', icon: Save, handler: onSave, primary: true },
+    // Manual save button - dimmed when auto-save is on, but still functional
+    { label: '保存', icon: Save, handler: onSave, primary: true, dimWhenAutoSave: true },
   ].filter((action) => action.handler);
 
   const secondaryActions = [
@@ -147,16 +148,17 @@ export function StoryOsTopBar({
       </div>
 
       <nav className="hidden items-center gap-1 md:flex">
-        {topActions.map(({ label, icon: Icon, handler, primary }) => (
+        {topActions.map(({ label, icon: Icon, handler, primary, dimWhenAutoSave }) => (
           <button
             key={label}
             type="button"
             onClick={handler}
             className={
               primary
-                ? 'story-os-top-action text-primary hover:text-primary'
+                ? `story-os-top-action text-primary hover:text-primary ${dimWhenAutoSave && autoSave ? 'opacity-50' : ''}`
                 : 'story-os-top-action'
             }
+            title={dimWhenAutoSave && autoSave ? '已开启自动保存，也可手动保存' : label}
           >
             <Icon className="h-4 w-4" />
             {label}
@@ -204,26 +206,29 @@ export function StoryOsTopBar({
             />
           </div>
         )}
+        {/* Save controls group: auto-save toggle + status indicator */}
         {onAutoSaveChange && (
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-            <Switch
-              checked={autoSave}
-              onCheckedChange={onAutoSaveChange}
-              className="scale-75"
-            />
-            <span>自动保存</span>
-          </label>
-        )}
-        {saveStatus !== 'idle' && (
-          <span
-            className={`flex h-8 w-8 items-center justify-center rounded ${saveIndicatorTone}`}
-            title={saveIndicatorTitle}
-            aria-label={saveIndicatorTitle}
-          >
-            <SaveIndicatorIcon
-              className={`h-4 w-4 ${saveStatus === 'saving' ? 'animate-spin' : ''}`}
-            />
-          </span>
+          <div className="flex items-center gap-2 pl-2 border-l border-border/40">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <Switch
+                checked={autoSave}
+                onCheckedChange={onAutoSaveChange}
+                className="scale-75"
+              />
+              <span>自动保存</span>
+            </label>
+            {saveStatus !== 'idle' && (
+              <span
+                className={`flex h-8 w-8 items-center justify-center rounded ${saveIndicatorTone}`}
+                title={saveIndicatorTitle}
+                aria-label={saveIndicatorTitle}
+              >
+                <SaveIndicatorIcon
+                  className={`h-4 w-4 ${saveStatus === 'saving' ? 'animate-spin' : ''}`}
+                />
+              </span>
+            )}
+          </div>
         )}
         {onSettings && (
           <button type="button" onClick={onSettings} className="story-os-icon-button" aria-label="设置">

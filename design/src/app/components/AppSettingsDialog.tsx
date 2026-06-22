@@ -237,7 +237,7 @@ export function AppSettingsDialog({
           {onOpenAiSettings && (
             <div className="pt-2 border-t border-border">
               <button
-                onClick={() => { onClose(); onOpenAiSettings(); }}
+                onClick={onOpenAiSettings}
                 className="text-sm text-primary hover:underline"
               >
                 打开 AI 设置 →

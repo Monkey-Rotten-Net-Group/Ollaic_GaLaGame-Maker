@@ -22,12 +22,7 @@ import {
   Copy,
   X,
   Award,
-  CheckCircle,
-  Shuffle,
-  Eraser,
-  HardDrive,
   Eye,
-  Minimize2,
 } from 'lucide-react';
 import {
   listAssets,
@@ -702,10 +697,6 @@ export function AssetManager() {
         ? `AI 生成${musicCategoryLabels[musicCategory]}`
         : '批量生成当前角色立绘';
 
-  const totalStorageBytes = allAssets.reduce((sum, a) => sum + (a.size ?? 0), 0);
-  const storageQuotaBytes = 2 * 1024 * 1024 * 1024;
-  const storagePercent = Math.min(100, Math.round((totalStorageBytes / storageQuotaBytes) * 100));
-
   // --- Actions ---
   const handleImport = useCallback(async () => {
     if (!projectPath || !importConfig) return;
@@ -989,16 +980,6 @@ export function AssetManager() {
   const openUsage = useCallback((usage: AssetUsage) => {
     navigate(`/editor/${projectId}?scene=${encodeURIComponent(usage.sceneFile)}&line=${usage.lineNumber}`);
   }, [navigate, projectId]);
-
-  const runAssetTool = useCallback((tool: 'compress' | 'validate' | 'convert' | 'purge') => {
-    const labels: Record<typeof tool, string> = {
-      compress: '资源压缩',
-      validate: '素材校验',
-      convert: '转换为 WEBP',
-      purge: '清理未使用素材',
-    };
-    alert(`${labels[tool]} 功能即将推出`);
-  }, []);
 
   // Thumbnail URL
   const getThumbnail = (asset: AssetInfo): string | null => {
@@ -2038,63 +2019,6 @@ export function AssetManager() {
               )}
             </div>
               </>
-            )}
-
-            {activeTab !== 'character' && (
-              <div className="pointer-events-none absolute bottom-3 left-4 right-4 z-10 flex items-center justify-between rounded border border-border bg-surface-container-lowest/90 px-3 py-2 shadow-sm backdrop-blur">
-                <div className="flex items-center gap-3">
-                  <span className="border-r border-border pr-3 font-mono-family text-[10px] font-semibold tracking-widest text-on-surface-variant">
-                    ASSET TOOLBOX
-                  </span>
-                  <div className="flex gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => runAssetTool('compress')}
-                      className="flex items-center gap-1 rounded border border-border bg-surface-bright px-2 py-1 text-[11px] text-on-surface-variant transition-colors hover:border-secondary"
-                    >
-                      <Minimize2 className="h-3.5 w-3.5" />
-                      资源压缩
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => runAssetTool('validate')}
-                      className="flex items-center gap-1 rounded border border-border bg-surface-bright px-2 py-1 text-[11px] text-on-surface-variant transition-colors hover:border-secondary"
-                    >
-                      <CheckCircle className="h-3.5 w-3.5" />
-                      素材校验
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => runAssetTool('convert')}
-                      className="flex items-center gap-1 rounded border border-border bg-surface-bright px-2 py-1 text-[11px] text-on-surface-variant transition-colors hover:border-secondary"
-                    >
-                      <Shuffle className="h-3.5 w-3.5" />
-                      转为 WEBP
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => runAssetTool('purge')}
-                      className="flex items-center gap-1 rounded border border-border bg-surface-bright px-2 py-1 text-[11px] text-on-surface-variant transition-colors hover:border-secondary"
-                    >
-                      <Eraser className="h-3.5 w-3.5" />
-                      清理未使用
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 font-mono-family text-[10px] text-muted-foreground">
-                  <HardDrive className="h-3.5 w-3.5" />
-                  <span>
-                    Storage: {formatSize(totalStorageBytes)} / {formatSize(storageQuotaBytes)}
-                  </span>
-                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-variant">
-                    <div
-                      className={`h-full ${storagePercent > 80 ? 'bg-error' : 'bg-primary'}`}
-                      style={{ width: `${storagePercent}%` }}
-                    />
-                  </div>
-                  <span>{storagePercent}%</span>
-                </div>
-              </div>
             )}
           </main>
 
