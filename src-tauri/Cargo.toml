@@ -29,3 +29,4 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 ort = "2.0.0-rc.12"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 ndarray = "0.17"
+crc32fast = "1"

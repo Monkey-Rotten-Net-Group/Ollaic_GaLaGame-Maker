@@ -5,6 +5,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -459,10 +460,14 @@ pub fn import_asset(
     validate_asset_filename(&normalized_filename)?;
     let target = target_dir.join(&normalized_filename);
 
-    // Avoid overwriting — append (1), (2), etc.
-    let target = unique_path(target);
-
-    fs::copy(&source, &target).map_err(|e| format!("复制文件失败: {e}"))?;
+    // Skip copy if an identical file (same size + CRC32) already exists in the target dir.
+    let target = if let Some(existing) = find_duplicate_in_dir(&source, &target_dir) {
+        existing
+    } else {
+        let target = unique_path(target);
+        fs::copy(&source, &target).map_err(|e| format!("复制文件失败: {e}"))?;
+        target
+    };
 
     let metadata = target.metadata().map_err(|e| e.to_string())?;
     let ext = target
@@ -896,6 +901,40 @@ fn unique_path(path: PathBuf) -> PathBuf {
         }
     }
     path // fallback — should never reach here
+}
+
+fn file_crc32(path: &Path) -> std::io::Result<u32> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = crc32fast::Hasher::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize())
+}
+
+/// Find an existing file in `dir` with identical content (by size + CRC32).
+fn find_duplicate_in_dir(source: &Path, dir: &Path) -> Option<PathBuf> {
+    let src_len = source.metadata().ok()?.len();
+    let src_crc = file_crc32(source).ok()?;
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path.metadata().map(|m| m.len()).unwrap_or(0) != src_len {
+            continue;
+        }
+        if file_crc32(&path).ok() == Some(src_crc) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
