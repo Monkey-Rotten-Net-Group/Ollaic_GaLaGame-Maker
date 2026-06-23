@@ -6,7 +6,6 @@ import { getRuntimeInfo, installRuntime, type RuntimeInfo } from '../lib/webgal-
 export interface AppSettings {
   defaultProjectDir: string;
   runtimeTemplateDir: string;
-  autoSaveInterval: number; // seconds, 0 = disabled
   language: 'zh-CN' | 'en';
   theme: 'dark' | 'light';
 }
@@ -16,7 +15,6 @@ const STORAGE_KEY = 'webgal-app-settings';
 const DEFAULTS: AppSettings = {
   defaultProjectDir: '',
   runtimeTemplateDir: '',
-  autoSaveInterval: 30,
   language: 'zh-CN',
   theme: 'dark',
 };
@@ -177,25 +175,6 @@ export function AppSettingsDialog({
             <p className="mt-1 text-xs text-muted-foreground">
               默认使用运行时自动检测的路径。如有需要可选择本地 `WebGAL_Template` 目录覆盖。
             </p>
-          </div>
-
-          {/* Auto-save interval */}
-          <div>
-            <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-1.5 font-mono-family">
-              自动保存间隔
-            </label>
-            <select
-              value={settings.autoSaveInterval}
-              onChange={(e) => update({ autoSaveInterval: Number(e.target.value) })}
-              className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              aria-label="自动保存间隔"
-            >
-              <option value={0}>禁用自动保存</option>
-              <option value={15}>15 秒</option>
-              <option value={30}>30 秒</option>
-              <option value={60}>60 秒</option>
-              <option value={120}>2 分钟</option>
-            </select>
           </div>
 
           {/* Language */}

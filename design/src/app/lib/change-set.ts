@@ -86,9 +86,14 @@ export interface StagingContext {
   memory: ProjectMemory;
 }
 
-export interface StageError {
-  message: string;
+/** A staging failure with a user-facing message (and optional missing-asset detail). */
+export class StageError extends Error {
   missingAssets?: MissingAssetIssue[];
+  constructor(message: string, missingAssets?: MissingAssetIssue[]) {
+    super(message);
+    this.name = 'StageError';
+    this.missingAssets = missingAssets;
+  }
 }
 
 function validateSceneAssets(patches: EditorPatch[], assets: AssetInfo[]): MissingAssetIssue[] {
@@ -122,12 +127,12 @@ export async function stageSceneEdit(
     p.type === 'insert' || p.type === 'replace' ? validatePatchText(p.text) : [],
   );
   if (textErrors.length > 0) {
-    throw { message: `WebGAL txt 格式无效：\n${textErrors.join('\n')}` } satisfies StageError;
+    throw new StageError(`WebGAL txt 格式无效：\n${textErrors.join('\n')}`);
   }
 
   const missing = validateSceneAssets(staged.patches, ctx.assets);
   if (missing.length > 0) {
-    throw { message: '引用了素材库中不存在的文件。', missingAssets: missing } satisfies StageError;
+    throw new StageError('引用了素材库中不存在的文件。', missing);
   }
 
   const applied = applyEditorPatches(beforeContent, staged.patches);
@@ -136,7 +141,7 @@ export async function stageSceneEdit(
 
   const originalBefore = existing?.beforeContent ?? beforeContent;
   if (afterContent === originalBefore) {
-    throw { message: 'patch 应用后脚本没有任何变化。' } satisfies StageError;
+    throw new StageError('patch 应用后脚本没有任何变化。');
   }
 
   const beforeNodes = existing?.beforeNodes ?? (isCurrent ? ctx.currentNodes : await parseScene(originalBefore));
@@ -157,10 +162,38 @@ export async function stageSceneEdit(
 
 function diffObjectFields(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
   const changed: string[] = [];
-  for (const key of Object.keys(after)) {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changed.push(key);
   }
   return changed;
+}
+
+// Editable character fields, by value shape. `id` is intentionally excluded so
+// a model can never repoint an edit at a different character; complex fields
+// (sprites/relations) are edited through dedicated flows, not free-form partials.
+const CHARACTER_STRING_FIELDS = [
+  'name', 'description', 'personality', 'stance', 'dialogueStyle',
+  'gender', 'age', 'defaultVoice', 'voiceTimbre', 'colorTheme', 'notes',
+] as const;
+const CHARACTER_STRING_ARRAY_FIELDS = ['aliases', 'keywords', 'referenceImages'] as const;
+const MEMORY_STRING_FIELDS = ['worldSetting', 'writingStyle', 'userPreferences'] as const;
+
+/** Keep only known fields with the expected type from a model-supplied partial. */
+function sanitizePartial(
+  partial: Record<string, unknown>,
+  stringFields: readonly string[],
+  stringArrayFields: readonly string[] = [],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of stringFields) {
+    if (typeof partial[key] === 'string') out[key] = partial[key];
+  }
+  for (const key of stringArrayFields) {
+    const value = partial[key];
+    if (Array.isArray(value) && value.every((v) => typeof v === 'string')) out[key] = value;
+  }
+  return out;
 }
 
 /** Build (or merge into) a CharacterEdit from a staged partial update. */
@@ -170,9 +203,10 @@ export function stageCharacterEdit(
   ctx: StagingContext,
 ): CharacterEdit {
   const before = existing?.before ?? ctx.getCharacter(staged.id);
-  if (!before) throw { message: `找不到角色 id：${staged.id}` } satisfies StageError;
+  if (!before) throw new StageError(`找不到角色 id：${staged.id}`);
   const baseAfter = existing?.after ?? before;
-  const after = { ...baseAfter, ...staged.partial } as Character;
+  const safePartial = sanitizePartial(staged.partial, CHARACTER_STRING_FIELDS, CHARACTER_STRING_ARRAY_FIELDS);
+  const after = { ...baseAfter, ...safePartial } as Character;
   return {
     kind: 'character',
     id: staged.id,
@@ -191,7 +225,8 @@ export function stageMemoryEdit(
 ): MemoryEdit {
   const before = existing?.before ?? ctx.memory;
   const baseAfter = existing?.after ?? before;
-  const after = { ...baseAfter, ...staged.partial, updatedAt: new Date().toISOString() } as ProjectMemory;
+  const safePartial = sanitizePartial(staged.partial, MEMORY_STRING_FIELDS);
+  const after = { ...baseAfter, ...safePartial, updatedAt: new Date().toISOString() } as ProjectMemory;
   return {
     kind: 'memory',
     before,
@@ -209,11 +244,11 @@ export async function stageCreateSceneEdit(
   ctx: StagingContext,
 ): Promise<CreateSceneEdit> {
   const base = staged.name.trim().replace(/\\/g, '/').split('/').pop() ?? staged.name.trim();
-  if (!base) throw { message: 'create_scene 的场景名为空。' } satisfies StageError;
+  if (!base) throw new StageError('create_scene 的场景名为空。');
   const file = base.toLowerCase().endsWith('.txt') ? base : `${base}.txt`;
   const existing = await ctx.listSceneFiles();
   if (existing.some((f) => f.toLowerCase() === file.toLowerCase())) {
-    throw { message: `场景「${file}」已存在，换个名字，或用 edit_scene 修改它。` } satisfies StageError;
+    throw new StageError(`场景「${file}」已存在，换个名字，或用 edit_scene 修改它。`);
   }
   return { kind: 'create_scene', file, chapter: staged.chapter, outline: staged.outline };
 }

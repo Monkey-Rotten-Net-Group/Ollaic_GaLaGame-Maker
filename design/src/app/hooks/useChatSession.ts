@@ -93,7 +93,28 @@ function readIndex(projectId: string | undefined): SessionIndex | null {
 }
 
 function writeIndex(projectId: string | undefined, index: SessionIndex): void {
-  localStorage.setItem(indexKey(projectId), JSON.stringify(index));
+  safeSetItem(indexKey(projectId), JSON.stringify(index));
+}
+
+/**
+ * localStorage writes can throw (QuotaExceededError, private mode, disabled
+ * storage). These run inside setState updaters, so an uncaught throw would
+ * crash rendering. Persistence is best-effort — swallow and warn instead.
+ */
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn('[chat] localStorage write failed:', e);
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch (e) {
+    console.warn('[chat] localStorage remove failed:', e);
+  }
 }
 
 /** Best-effort one-time migration of the old per-scene `ai-chat-*` storage. */
@@ -115,7 +136,7 @@ function migrateLegacy(projectId: string | undefined): SessionIndex | null {
   const meta = makeMeta('历史对话');
   const index: SessionIndex = { activeId: meta.id, sessions: [meta] };
   writeIndex(projectId, index);
-  localStorage.setItem(
+  safeSetItem(
     sessionKey(projectId, meta.id),
     JSON.stringify({ messages: trimMessages(legacyMessages), lastUpdatedAt: nowIso() } satisfies PersistedChatSession),
   );
@@ -176,12 +197,13 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
 
   const persistMessages = useCallback((sessionId: string, next: ChatMessage[]) => {
     const body = trimMessages(next.filter((m) => m.id !== initialMessage.id));
-    localStorage.setItem(
+    const ts = nowIso();
+    safeSetItem(
       sessionKey(projectId, sessionId),
-      JSON.stringify({ messages: body, lastUpdatedAt: nowIso() } satisfies PersistedChatSession),
+      JSON.stringify({ messages: body, lastUpdatedAt: ts } satisfies PersistedChatSession),
     );
     setIndex((prev) => {
-      const updated = { ...prev, sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, updatedAt: nowIso() } : s)) };
+      const updated = { ...prev, sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, updatedAt: ts } : s)) };
       writeIndex(projectId, updated);
       return updated;
     });
@@ -217,7 +239,7 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
   }, [initialMessage, projectId]);
 
   const deleteSession = useCallback((id: string) => {
-    localStorage.removeItem(sessionKey(projectId, id));
+    safeRemoveItem(sessionKey(projectId, id));
     setIndex((prev) => {
       const remaining = prev.sessions.filter((s) => s.id !== id);
       if (remaining.length === 0) {

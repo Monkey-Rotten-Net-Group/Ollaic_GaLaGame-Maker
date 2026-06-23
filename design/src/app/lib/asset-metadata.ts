@@ -57,21 +57,6 @@ export function ensureSceneCard(
   };
 }
 
-export function extractSceneBackgroundAsset(
-  nodes: WebGalNode[],
-  availableBackgrounds?: Set<string>,
-): string | null {
-  for (const node of nodes) {
-    if (node.type !== 'changeBg') continue;
-    const asset = (node.asset || node.content || '').trim();
-    if (!asset) continue;
-    if (availableBackgrounds && !availableBackgrounds.has(asset)) continue;
-    return asset;
-  }
-  return null;
-}
-
-/** Collect all distinct background filenames referenced by changeBg nodes. */
 export function extractSceneBackgroundAssets(nodes: WebGalNode[]): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
@@ -177,54 +162,6 @@ export function linkSceneCardImageAsset(
         ...card,
         imageAsset,
         targetStem: card.targetStem || imageAsset.replace(/\.[^.]+$/, ''),
-      },
-    },
-  };
-}
-
-export function setSceneCardBackgroundTarget(
-  metadata: AssetMetadata,
-  sceneFile: string,
-  index: number,
-  backgroundTarget: string,
-  targetExists: boolean,
-): AssetMetadata {
-  const id = sceneCardId(sceneFile);
-  const fallbackCard: SceneAssetCard = {
-    id,
-    title: sceneTitleFromFile(sceneFile),
-    sceneFile,
-    imageAsset: null,
-    targetStem: defaultSceneTargetStem(index),
-    prompt: '',
-    style: '',
-    negativePrompt: '',
-  };
-  const ensured: AssetMetadata = {
-    ...metadata,
-    deletedSceneCards: (metadata.deletedSceneCards ?? []).filter((deletedId) => deletedId !== id),
-    sceneCards: {
-      ...(metadata.sceneCards ?? {}),
-      [id]: metadata.sceneCards?.[id] ?? fallbackCard,
-    },
-  };
-  const card = ensured.sceneCards?.[id];
-  if (!card) return ensured;
-  const targetStem = backgroundTarget.replace(/\.(png|jpe?g|webp)$/i, '');
-  const imageAsset = targetExists ? backgroundTarget : null;
-  if (
-    card.imageAsset === imageAsset
-    && card.targetStem === targetStem
-    && !(metadata.deletedSceneCards ?? []).includes(id)
-  ) return ensured;
-  return {
-    ...ensured,
-    sceneCards: {
-      ...(ensured.sceneCards ?? {}),
-      [id]: {
-        ...card,
-        imageAsset,
-        targetStem,
       },
     },
   };

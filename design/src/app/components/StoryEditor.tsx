@@ -90,6 +90,10 @@ import { PerformanceTimeline } from './PerformanceTimeline';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
+// Fixed auto-save cadence (ms). Auto-save is toggled on/off from the top-bar
+// switch; there is no user-configurable interval.
+const AUTO_SAVE_INTERVAL_MS = 3_000;
+
 const EMPTY_PROJECT_METADATA: ProjectMetadata = {
   synopsis: '',
   description: '',
@@ -1578,6 +1582,10 @@ export function StoryEditor() {
   const [projectMetadata, setProjectMetadata] = useState<ProjectMetadata | null>(null);
   const [metadataSaving, setMetadataSaving] = useState(false);
   const [exportTask, setExportTask] = useState<ExportTaskState>(IDLE_EXPORT_TASK);
+  // Transient success toast for single-scene export, rendered by React so its
+  // dismissal timer is cleaned up on unmount (no stray DOM nodes).
+  const [exportToast, setExportToast] = useState<string | null>(null);
+  const exportToastTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const lastExportPayloadRef = useRef<{
     metadata: ProjectMetadata;
     outputDir: string;
@@ -1710,14 +1718,16 @@ export function StoryEditor() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
   const selectedIndexRef = useRef(0);
+  // Monotonic token guarding async scene loads (switch/open) against out-of-order
+  // completion — only the most recent load is allowed to commit to state.
+  const sceneLoadTokenRef = useRef(0);
 
-  // Auto-save wiring
-  const [autoSaveInterval, setAutoSaveInterval] = useState(30);
+  // Auto-save wiring. The cadence is fixed; users toggle it on/off from the
+  // top-bar switch (autoSaveEnabled). There is no separate interval setting.
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
 
   useEffect(() => {
     const settings = loadAppSettings();
-    setAutoSaveInterval(settings.autoSaveInterval);
     if (settings.runtimeTemplateDir) {
       setRuntimeTemplateDir(settings.runtimeTemplateDir).catch((e) => {
         console.warn('[runtime] failed to set template dir from app settings:', e);
@@ -2272,18 +2282,22 @@ export function StoryEditor() {
   useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
 
   useEffect(() => {
-    if (!autoSaveEnabled || autoSaveInterval <= 0 || !projectPath) return;
-    const interval = Math.min(autoSaveInterval, 3) * 1000;
+    if (!autoSaveEnabled || !projectPath) return;
     if (autoSaveRef.current) clearInterval(autoSaveRef.current);
     autoSaveRef.current = setInterval(() => {
       if (dirtyRef.current) {
         handleSaveRef.current();
       }
-    }, interval);
+    }, AUTO_SAVE_INTERVAL_MS);
     return () => {
       if (autoSaveRef.current) clearInterval(autoSaveRef.current);
     };
-  }, [autoSaveEnabled, autoSaveInterval, projectPath]);
+  }, [autoSaveEnabled, projectPath]);
+
+  // Clear the export-toast dismissal timer on unmount.
+  useEffect(() => () => {
+    if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Open project folder
@@ -2303,17 +2317,21 @@ export function StoryEditor() {
 
       // Load start.txt or first available scene
       const sceneName = chooseInitialScene(info.scenes, null);
+      const myToken = sceneLoadTokenRef.current + 1;
+      sceneLoadTokenRef.current = myToken;
       setCurrentSceneName(sceneName);
 
       const scenePath = await getScenePath(selected, sceneName);
       try {
         const loaded = await loadScene(scenePath);
-        setNodes(loaded);
         const text = await serializeScene(loaded);
+        if (sceneLoadTokenRef.current !== myToken) return;
+        setNodes(loaded);
         setScriptSource(text);
         setDirty(false);
       } catch {
         // empty scene
+        if (sceneLoadTokenRef.current !== myToken) return;
         setNodes([]);
         setScriptSource('');
       }
@@ -2347,26 +2365,33 @@ export function StoryEditor() {
       sceneDraftCache.current.delete(currentSceneName);
     }
 
+    // Guard against out-of-order async results: a fast A→B→A switch must not
+    // let B's (slower) load overwrite A's. Only the latest token may commit.
+    const myToken = sceneLoadTokenRef.current + 1;
+    sceneLoadTokenRef.current = myToken;
     setCurrentSceneName(sceneName);
     const scenePath = await getScenePath(projectPath, sceneName);
     try {
       // Prefer a cached draft over the saved file
       const draft = sceneDraftCache.current.get(sceneName);
       if (draft) {
-        setNodes(draft);
         const text = await serializeScene(draft);
+        if (sceneLoadTokenRef.current !== myToken) return;
+        setNodes(draft);
         setScriptSource(text);
         setSelectedNode(null);
         setDirty(true);
       } else {
         const loaded = await loadScene(scenePath);
-        setNodes(loaded);
         const text = await serializeScene(loaded);
+        if (sceneLoadTokenRef.current !== myToken) return;
+        setNodes(loaded);
         setScriptSource(text);
         setSelectedNode(null);
         setDirty(false);
       }
     } catch {
+      if (sceneLoadTokenRef.current !== myToken) return;
       setNodes([]);
       setScriptSource('');
     }
@@ -2529,29 +2554,10 @@ export function StoryEditor() {
 
       console.log('导出成功:', savePath);
 
-      // Show success notification
-      const notification = document.createElement('div');
-      notification.textContent = `✓ 已导出: ${filename}`;
-      notification.style.cssText = `
-        position: fixed;
-        top: 80px;
-        right: 20px;
-        background: rgba(34, 197, 94, 0.9);
-        color: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        z-index: 9999;
-        font-size: 14px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-      `;
-      document.body.appendChild(notification);
-
-      // Remove notification after 3 seconds
-      setTimeout(() => {
-        if (notification.parentNode) {
-          document.body.removeChild(notification);
-        }
-      }, 3000);
+      // Show success notification (React-rendered; timer cleared on unmount).
+      setExportToast(`✓ 已导出: ${filename}`);
+      if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
+      exportToastTimerRef.current = setTimeout(() => setExportToast(null), 3000);
     } catch (e) {
       console.error('导出场景失败:', e);
       alert(`导出场景失败: ${e}`);
@@ -2634,13 +2640,13 @@ export function StoryEditor() {
           failureCount: 0,
         });
       } else {
-        setExportTask({
+        setExportTask((prev) => ({
           status: 'failed',
           warnings: result.warnings ?? [],
           issues: result.issues ?? [],
           error: '导出校验未通过，请处理错误后重试。',
-          failureCount: failureCount + 1,
-        });
+          failureCount: prev.failureCount + 1,
+        }));
       }
     } catch (e) {
       setExportTask((prev) => ({
@@ -2648,7 +2654,7 @@ export function StoryEditor() {
         warnings: prev.warnings ?? [],
         issues: prev.issues ?? [],
         error: String(e),
-        failureCount: failureCount + 1,
+        failureCount: prev.failureCount + 1,
       }));
     }
   }, [projectPath, dirty, handleSave, exportTask.status, exportTask.failureCount]);
@@ -2867,6 +2873,15 @@ export function StoryEditor() {
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="h-full story-shell">
+        {exportToast && (
+          <div
+            role="status"
+            className="fixed top-20 right-5 z-[9999] rounded-lg px-5 py-3 text-sm text-white shadow-lg"
+            style={{ background: 'rgba(34, 197, 94, 0.9)' }}
+          >
+            {exportToast}
+          </div>
+        )}
         <StoryOsTopBar
           onUndo={undo}
           onRedo={redo}

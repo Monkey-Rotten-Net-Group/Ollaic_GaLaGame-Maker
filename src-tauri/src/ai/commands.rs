@@ -18,6 +18,16 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 1000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
+/// A reqwest client with the standard request timeout applied. Using this
+/// everywhere prevents media/TTS HTTP calls from hanging forever when a
+/// provider stalls. Falls back to a default client if the builder fails.
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
+        .build()
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ToolCallInput {
     pub id: String,
@@ -784,39 +794,21 @@ fn build_client(cfg: &AiConfig) -> Client {
                 model,
             } = service_target;
 
-            let (forced_kind, default_endpoint) = match provider.as_str() {
-                "openai" => (
-                    Some(AdapterKind::OpenAI),
-                    Some("https://api.openai.com/v1/"),
-                ),
-                "anthropic" => (
-                    Some(AdapterKind::Anthropic),
-                    Some("https://api.anthropic.com/v1/"),
-                ),
-                "gemini" => (
-                    Some(AdapterKind::Gemini),
-                    Some("https://generativelanguage.googleapis.com/v1beta/"),
-                ),
-                "deepseek" => (
-                    Some(AdapterKind::DeepSeek),
-                    Some("https://api.deepseek.com/v1/"),
-                ),
-                "groq" => (
-                    Some(AdapterKind::Groq),
-                    Some("https://api.groq.com/openai/v1/"),
-                ),
-                "xai" => (Some(AdapterKind::Xai), Some("https://api.x.ai/v1/")),
-                "ollama" => (
-                    Some(AdapterKind::Ollama),
-                    Some("http://localhost:11434/v1/"),
-                ),
-                "cohere" => (
-                    Some(AdapterKind::Cohere),
-                    Some("https://api.cohere.com/v2/"),
-                ),
-                "custom" => (Some(AdapterKind::OpenAI), None),
-                _ => (None, None),
+            let forced_kind = match provider.as_str() {
+                "openai" => Some(AdapterKind::OpenAI),
+                "anthropic" => Some(AdapterKind::Anthropic),
+                "gemini" => Some(AdapterKind::Gemini),
+                "deepseek" => Some(AdapterKind::DeepSeek),
+                "groq" => Some(AdapterKind::Groq),
+                "xai" => Some(AdapterKind::Xai),
+                "ollama" => Some(AdapterKind::Ollama),
+                "cohere" => Some(AdapterKind::Cohere),
+                // Custom OpenAI-compatible endpoints speak the OpenAI dialect but
+                // have no built-in default URL (caller must set base_url).
+                "custom" => Some(AdapterKind::OpenAI),
+                _ => None,
             };
+            let default_endpoint = default_chat_endpoint(provider.as_str());
 
             let model = if let Some(kind) = forced_kind {
                 ModelIden::new(kind, model.model_name)
@@ -864,22 +856,28 @@ fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// Default API endpoint for a chat provider. `None` means there is no built-in
+/// default (e.g. "custom", which requires an explicit base URL). Single source
+/// of truth shared by `build_client` and `effective_endpoint` so they can't drift.
+fn default_chat_endpoint(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("https://api.openai.com/v1/"),
+        "anthropic" => Some("https://api.anthropic.com/v1/"),
+        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta/"),
+        "deepseek" => Some("https://api.deepseek.com/v1/"),
+        "groq" => Some("https://api.groq.com/openai/v1/"),
+        "xai" => Some("https://api.x.ai/v1/"),
+        "ollama" => Some("http://localhost:11434/v1/"),
+        "cohere" => Some("https://api.cohere.com/v2/"),
+        _ => None,
+    }
+}
+
 fn effective_endpoint(cfg: &AiConfig) -> String {
     if !cfg.base_url.trim().is_empty() {
         return cfg.base_url.trim().to_string();
     }
-    match cfg.provider.as_str() {
-        "openai" => "https://api.openai.com/v1/".to_string(),
-        "anthropic" => "https://api.anthropic.com/v1/".to_string(),
-        "gemini" => "https://generativelanguage.googleapis.com/v1beta/".to_string(),
-        "deepseek" => "https://api.deepseek.com/v1/".to_string(),
-        "groq" => "https://api.groq.com/openai/v1/".to_string(),
-        "xai" => "https://api.x.ai/v1/".to_string(),
-        "ollama" => "http://localhost:11434/v1/".to_string(),
-        "cohere" => "https://api.cohere.com/v2/".to_string(),
-        "custom" => String::new(),
-        _ => String::new(),
-    }
+    default_chat_endpoint(cfg.provider.as_str()).unwrap_or("").to_string()
 }
 
 fn media_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
@@ -984,7 +982,7 @@ async fn generate_dashscope_image(
         }
     });
     let body = serde_json::to_string(&body).map_err(|e| format!("序列化阿里云图片生成请求失败: {e}"))?;
-    let client = reqwest::Client::new();
+    let client = http_client();
     let response = client
         .post(&endpoint)
         .bearer_auth(cfg.api_key.trim())
@@ -1131,7 +1129,7 @@ async fn generate_gemini_image(
         }]
     });
     let body = serde_json::to_string(&body).map_err(|e| format!("序列化 Gemini 图片生成请求失败: {e}"))?;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(&endpoint)
         .header("Content-Type", "application/json")
         .header("x-goog-api-key", cfg.api_key.trim())
@@ -1241,7 +1239,7 @@ async fn generate_elevenlabs_tts(
         "output_format": output_format
     });
     let body = serde_json::to_string(&body).map_err(|e| format!("序列化 ElevenLabs 请求失败: {e}"))?;
-    let response = reqwest::Client::new()
+    let response = http_client()
         .post(&endpoint)
         .header("Content-Type", "application/json")
         .header("xi-api-key", cfg.api_key.trim())
@@ -1322,6 +1320,23 @@ fn simple_task_id() -> String {
     format!("{nanos:016x}{seq:016x}")
 }
 
+/// 将用户填写的音色名自动对齐到模型版本要求：
+/// - cosyvoice-v1：去掉 _v2 后缀
+/// - cosyvoice-v2 及更新版本：补上 _v2 后缀（仅限纯字母/数字/下划线的标准音色名，
+///   自定义克隆音色 ID 通常含连字符，原样透传）
+fn normalize_cosyvoice_voice(voice: &str, lower_model: &str) -> String {
+    let is_v1 = lower_model.starts_with("cosyvoice-v1");
+    if is_v1 {
+        voice.trim_end_matches("_v2").to_string()
+    } else if !voice.ends_with("_v2")
+        && voice.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        format!("{}_v2", voice)
+    } else {
+        voice.to_string()
+    }
+}
+
 /// 阿里云 CosyVoice WebSocket 流式语音合成。
 /// 流程：连接 → run-task → 等 task-started → continue-task(文本) → finish-task →
 /// 持续接收（文本事件标识 + 二进制音频帧）→ task-finished 结束 → 拼接音频帧。
@@ -1352,15 +1367,17 @@ async fn generate_dashscope_cosyvoice_ws(
     };
     // 音色名与模型版本强相关：cosyvoice-v1 用无后缀音色（如 longxiaochun），
     // cosyvoice-v2 及以上用带 _v2 后缀的音色（如 longxiaochun_v2），混用会被引擎拒绝（418）。
-    // 用户填了音色就原样透传；未填时按模型版本给匹配的默认音色。
+    // 未填时给匹配的默认音色；填了则按模型版本自动纠正后缀，避免用户选错版本导致 418。
     let voice = {
         let trimmed = voice_prompt.trim();
-        if !trimmed.is_empty() {
-            trimmed.to_string()
-        } else if lower_model.starts_with("cosyvoice-v1") {
-            "longxiaochun".to_string()
+        if trimmed.is_empty() {
+            if lower_model.starts_with("cosyvoice-v1") {
+                "longxiaochun".to_string()
+            } else {
+                "longxiaochun_v2".to_string()
+            }
         } else {
-            "longxiaochun_v2".to_string()
+            normalize_cosyvoice_voice(trimmed, &lower_model)
         }
     };
     // CosyVoice 支持 pcm/wav/mp3；wav 便于直接播放，作为默认。
@@ -1437,7 +1454,12 @@ async fn generate_dashscope_cosyvoice_ws(
                     "task-started" => started = true,
                     "task-failed" => {
                         let msg = event.header.error_message.unwrap_or_default();
-                        let full = format!("CosyVoice 任务失败: {msg}");
+                        let hint = if msg.contains("418") {
+                            "（可能原因：音色 ID 与模型版本不匹配，或音色不存在。v2/v3 模型请用带 _v2 后缀的音色）"
+                        } else {
+                            ""
+                        };
+                        let full = format!("CosyVoice 任务失败: {msg}{hint}");
                         log_provider_event("tts_generate", cfg, model, &log_url, false, &full);
                         return Err(full);
                     }
@@ -1493,7 +1515,12 @@ async fn generate_dashscope_cosyvoice_ws(
                     "task-finished" => break,
                     "task-failed" => {
                         let msg = event.header.error_message.unwrap_or_default();
-                        let full = format!("CosyVoice 任务失败: {msg}");
+                        let hint = if msg.contains("418") {
+                            "（可能原因：音色 ID 与模型版本不匹配，或音色不存在。v2/v3 模型请用带 _v2 后缀的音色）"
+                        } else {
+                            ""
+                        };
+                        let full = format!("CosyVoice 任务失败: {msg}{hint}");
                         log_provider_event("tts_generate", cfg, model, &log_url, false, &full);
                         return Err(full);
                     }
@@ -1673,7 +1700,7 @@ async fn post_audio_bytes(
     action: &str,
 ) -> Result<GeneratedMedia, String> {
     let body = serde_json::to_string(&body).map_err(|e| format!("序列化音频生成请求失败: {e}"))?;
-    let mut request = reqwest::Client::new()
+    let mut request = http_client()
         .post(endpoint)
         .header("Content-Type", "application/json")
         .body(body);
@@ -2080,12 +2107,15 @@ pub async fn generate_batch_tts(
         match gen_result {
             Ok(media) => {
                 // Save the audio file to disk, preferring the card's friendly
-                // target stem and falling back to the id-based name.
+                // target stem and falling back to the id-based name. Use the
+                // extension reported by the provider (e.g. Qwen-TTS returns wav
+                // regardless of the requested response_format) so the file's
+                // contents and extension always match.
                 let stem = stem_map
                     .get(&item.voice_card_id)
                     .cloned()
                     .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
-                let filename = format!("{}.{}", stem, response_format);
+                let filename = format!("{}.{}", stem, media.extension);
                 let save = crate::assets::commands::save_generated_asset(
                     project_path.clone(),
                     "vocal".to_string(),
@@ -2179,6 +2209,27 @@ fn clear_ai_logs_at(path: &PathBuf) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
+        assert_eq!(normalize_cosyvoice_voice("longwanjun", "cosyvoice-v2"), "longwanjun_v2");
+        assert_eq!(normalize_cosyvoice_voice("longanrou", "cosyvoice-v3-flash"), "longanrou_v2");
+        // Already has _v2 — no double-append.
+        assert_eq!(normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v2"), "longxiaochun_v2");
+    }
+
+    #[test]
+    fn normalize_cosyvoice_voice_strips_v2_for_v1_model() {
+        assert_eq!(normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v1"), "longxiaochun");
+        assert_eq!(normalize_cosyvoice_voice("longwanjun", "cosyvoice-v1"), "longwanjun");
+    }
+
+    #[test]
+    fn normalize_cosyvoice_voice_passes_through_custom_clone_id() {
+        // Clone IDs contain hyphens; must not be mangled.
+        let clone_id = "speech-synthesizer-clone-v3-abc123-def456";
+        assert_eq!(normalize_cosyvoice_voice(clone_id, "cosyvoice-v2"), clone_id);
+    }
 
     #[test]
     fn ai_logs_can_list_and_clear_with_redaction() {

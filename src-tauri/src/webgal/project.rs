@@ -32,14 +32,6 @@ pub struct ProjectInfo {
     pub scenes: Vec<String>,
 }
 
-/// Information about a single scene file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SceneInfo {
-    pub name: String,
-    pub path: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMemory {

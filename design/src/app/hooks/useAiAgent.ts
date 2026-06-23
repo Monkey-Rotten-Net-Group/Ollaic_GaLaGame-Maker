@@ -185,6 +185,13 @@ export function useAiAgent(params: UseAiAgentParams) {
   const cancelledRef = useRef(false);
   const streamingIdRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
+  // Snapshot of `dirty` taken right before a preview forces it to true, so a
+  // revert can restore the canvas to its real pre-preview modified state.
+  const dirtyBeforePreviewRef = useRef(false);
+  // Monotonic token identifying the in-flight request. A scene switch (or a new
+  // prompt) bumps this; an old request's finally only touches shared UI state
+  // when its token still matches, so a stale request can't clobber a newer one.
+  const requestTokenRef = useRef(0);
 
   // Sessions are shared across scenes, and a pending change set is cross-scene
   // (each edit carries its own file + before/after snapshots). So switching
@@ -196,6 +203,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     cancelledRef.current = true;
     streamingIdRef.current = null;
     inFlightRef.current = false;
+    requestTokenRef.current += 1;
     setBusy(false);
     setStepLabel('');
   }, [currentSceneName]);
@@ -298,6 +306,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       setScriptSource(currentSceneEdit.afterContent);
       setSelectedNode(null);
       setShowScript(false);
+      dirtyBeforePreviewRef.current = dirty;
       setDirty(true);
       setSaveStatus('idle');
     }
@@ -306,7 +315,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStatus('pending');
     setError(null);
     return true;
-  }, [currentSceneName, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
+  }, [currentSceneName, dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
   const runAgentLoop = useCallback(async (text: string, assistantId: string) => {
@@ -425,14 +434,21 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (!finalizeChangeSet(edits, assistantId)) {
       // No change set: ensure a closing text is visible. If the loop produced
       // no terminal text at all, fall back to a short note (steps still shown).
+      // Read the latest messages via the functional updater — the assistant
+      // placeholder was added this turn, so the captured `messages` closure
+      // does not contain it and must not be used to test for steps.
       if (finalText) {
         setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: finalText } : m)));
-      } else if (!messages.find((m) => m.id === assistantId)?.steps?.length) {
-        replaceAssistantMessage(assistantId, '（无可执行的修改）');
+      } else {
+        setMessages((prev) => prev.map((m) => {
+          if (m.id !== assistantId) return m;
+          if (m.steps?.length) return m;
+          return { ...m, content: '（无可执行的修改）' };
+        }));
       }
       setStatus('idle');
     }
-  }, [buildAgentSystemContext, buildStagingContext, currentSceneName, sceneHeaders, finalizeChangeSet, messages, projectPath, replaceAssistantMessage, setMessages]);
+  }, [buildAgentSystemContext, buildStagingContext, currentSceneName, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- Legacy single-shot for providers without function calling ----------
   const runLegacyTurn = useCallback(async (text: string, assistantId: string) => {
@@ -479,6 +495,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
     inFlightRef.current = true;
     cancelledRef.current = false;
+    const myToken = requestTokenRef.current + 1;
+    requestTokenRef.current = myToken;
     setLastPrompt(text);
     setError(null);
     setPendingChangeSet(null);
@@ -507,19 +525,25 @@ export function useAiAgent(params: UseAiAgentParams) {
         replaceAssistantMessage(assistantId, `（错误：${classified.message}）`);
       }
     } finally {
-      inFlightRef.current = false;
-      streamingIdRef.current = null;
-      setBusy(false);
-      setStepLabel('');
+      // A newer request (or a scene switch) may have superseded us while we were
+      // awaiting. Only the current owner of the token resets the shared UI state.
+      if (requestTokenRef.current === myToken) {
+        inFlightRef.current = false;
+        streamingIdRef.current = null;
+        setBusy(false);
+        setStepLabel('');
+      }
     }
   }, [busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages]);
 
   const retry = useCallback(() => {
     if (!lastPrompt || busy || cooldown > 0) return;
-    if (error?.kind === 'timeout' && retryCount >= 2) return;
+    // Cap automatic retries for every retryable error class, not just timeouts,
+    // so a persistently-failing request can't be retried without bound.
+    if (retryCount >= 2) return;
     setRetryCount((value) => value + 1);
     void sendPrompt(lastPrompt);
-  }, [busy, cooldown, error?.kind, lastPrompt, retryCount, sendPrompt]);
+  }, [busy, cooldown, lastPrompt, retryCount, sendPrompt]);
 
   const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
     if (!projectPath) return;
@@ -639,13 +663,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       setNodes(currentSceneEdit.beforeNodes);
       setScriptSource(currentSceneEdit.beforeContent);
       setSelectedNode(null);
-      setDirty(dirty);
+      setDirty(dirtyBeforePreviewRef.current);
       setSaveStatus('idle');
     }
     replaceAssistantMessage(pendingChangeSet.sourceMessageId, `已拒绝：${summarizeChangeSet(pendingChangeSet, sceneHeaders)}`);
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('reverted');
-  }, [currentSceneName, sceneHeaders, dirty, pendingChangeSet, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
+  }, [currentSceneName, sceneHeaders, pendingChangeSet, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;

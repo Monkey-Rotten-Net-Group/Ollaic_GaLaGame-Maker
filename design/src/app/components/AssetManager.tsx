@@ -616,12 +616,12 @@ export function AssetManager() {
     return assetMetadataEntry(metadata.references, 'background', filename) ?? [];
   })();
 
-  const filteredAssets = assets.filter((a) => {
+  const filteredAssets = useMemo(() => assets.filter((a) => {
     const q = searchQuery.toLowerCase();
     return a.name.toLowerCase().includes(q) || aliasForAsset(a).toLowerCase().includes(q);
-  });
+  }), [assets, searchQuery, metadata]);
 
-  const sceneLibraryItems: SceneLibraryItem[] = (() => {
+  const sceneLibraryItems: SceneLibraryItem[] = useMemo(() => {
     const cards = Object.values(metadata.sceneCards ?? {});
     const assetByName = new Map(assets.map((asset) => [asset.name, asset]));
     const usedAssets = new Set<string>();
@@ -645,10 +645,10 @@ export function AssetManager() {
       }
       return item.asset.name.toLowerCase().includes(q) || aliasForAsset(item.asset).toLowerCase().includes(q);
     });
-  })();
+  }, [assets, searchQuery, metadata]);
 
   // CG 卡片流：与场景独立的卡片集合，只展示 cgCards（不混入背景散图，体现 CG ≠ 背景）。
-  const cgLibraryItems: SceneLibraryItem[] = (() => {
+  const cgLibraryItems: SceneLibraryItem[] = useMemo(() => {
     const cards = Object.values(metadata.cgCards ?? {});
     const assetByName = new Map(assets.map((asset) => [asset.name, asset]));
     const cardItems = cards.map((card) => {
@@ -663,9 +663,9 @@ export function AssetManager() {
         || (item.card.imageAsset ?? '').toLowerCase().includes(q)
         || (item.card.targetStem ?? '').toLowerCase().includes(q);
     });
-  })();
+  }, [assets, searchQuery, metadata]);
 
-  const voiceLibraryItems: VoiceLibraryItem[] = (() => {
+  const voiceLibraryItems: VoiceLibraryItem[] = useMemo(() => {
     const fileItems = assets
       .filter((asset) => asset.category === 'vocal')
       .map((asset) => ({ kind: 'asset' as const, asset }));
@@ -674,7 +674,7 @@ export function AssetManager() {
       if (!q) return true;
       return item.asset.name.toLowerCase().includes(q) || aliasForAsset(item.asset).toLowerCase().includes(q);
     });
-  })();
+  }, [assets, searchQuery, metadata]);
 
   // Tab counts from real files only. Planning cards such as scene cards and
   // dubbing tasks have their own workspace and should not inflate asset counts.

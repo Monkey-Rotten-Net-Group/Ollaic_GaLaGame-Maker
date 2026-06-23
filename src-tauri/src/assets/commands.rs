@@ -748,7 +748,8 @@ pub fn sync_scene_voice_cards(
             continue;
         }
         let character = node.character.as_deref().unwrap_or("旁白");
-        let id = voice_card_id(scene_stem, dialogue_index);
+        let this_index = dialogue_index;
+        let id = voice_card_id(scene_stem, this_index);
         dialogue_index += 1;
 
         if metadata.voice_cards.contains_key(&id) {
@@ -771,7 +772,7 @@ pub fn sync_scene_voice_cards(
             })
             .collect();
         let emotion = detect_emotion(&node.content, &flag_values);
-        let target_stem = format!("vo_{}_{}_{}", character, scene_stem, dialogue_index);
+        let target_stem = format!("vo_{}_{}_{}", character, scene_stem, this_index);
 
         let card = VoiceAssetCard {
             id: id.clone(),

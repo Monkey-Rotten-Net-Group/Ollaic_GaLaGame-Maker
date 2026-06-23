@@ -10,7 +10,13 @@ export function characterColor(index: number): string {
   return CHARACTER_COLORS[index % CHARACTER_COLORS.length];
 }
 
-export function createDraftCharacter(index: number, id = `tmp_${Date.now()}`): Character {
+function newDraftId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `tmp_${crypto.randomUUID()}`
+    : `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+export function createDraftCharacter(index: number, id = newDraftId()): Character {
   return {
     id,
     name: '',

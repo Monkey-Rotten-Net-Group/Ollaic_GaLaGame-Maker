@@ -42,7 +42,7 @@ const scriptCommands = new Set([
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseJsonCandidate(raw: string): unknown {
@@ -89,21 +89,6 @@ export function extractEditorResponse(raw: string): EditorResponse | null {
     return validateEditorResponse(parseJsonCandidate(raw));
   } catch {
     return null;
-  }
-}
-
-export function describeParseError(raw: string): string {
-  try {
-    const parsed = parseJsonCandidate(raw);
-    if (!isRecord(parsed)) return '顶层必须是 JSON object。';
-    if (parsed.type === 'chat') {
-      return typeof parsed.message === 'string' ? 'chat 响应看起来合法。' : 'chat 响应必须包含字符串 message。';
-    }
-    if (!Array.isArray(parsed.patches)) return '修改脚本时必须返回 {"patches":[...]}。';
-    const invalidIndex = parsed.patches.findIndex((patch) => !isEditorPatch(patch));
-    return invalidIndex >= 0 ? `patches[${invalidIndex}] 结构不合法。` : 'EditorResponse 结构无法识别。';
-  } catch (error) {
-    return `JSON 无法解析：${String(error)}`;
   }
 }
 

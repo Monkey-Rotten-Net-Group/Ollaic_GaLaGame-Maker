@@ -79,13 +79,6 @@ export function hasAssetContextTruncation(assets: AssetInfo[], limitPerCategory 
   return Array.from(grouped.values()).some((count) => count > limitPerCategory);
 }
 
-export function formatMissingAssetIssues(issues: MissingAssetIssue[]): string {
-  return issues.map((issue) => {
-    const category = categoryLabels[issue.expectedCategory] ?? issue.expectedCategory;
-    return `缺少${category}素材「${issue.file}」（命令：${issue.command}）`;
-  }).join('\n');
-}
-
 export function createLineDiff(beforeContent: string, afterContent: string): DiffLine[] {
   const beforeLines = beforeContent.split('\n');
   const afterLines = afterContent.split('\n');

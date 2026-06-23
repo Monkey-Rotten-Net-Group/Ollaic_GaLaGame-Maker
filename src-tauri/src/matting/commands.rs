@@ -144,32 +144,6 @@ fn detect_background_color(img: &RgbaImage) -> [u8; 3] {
     [rs[mid], gs[mid], bs[mid]]
 }
 
-/// 形态学腐蚀：3x3 窗口最小值，使 mask 边界向内收缩 radius 像素。
-fn erode_mask(mask: &GrayImage, radius: u32) -> GrayImage {
-    let (w, h) = mask.dimensions();
-    let mut out = GrayImage::new(w, h);
-    let r = radius as i32;
-    for y in 0..h {
-        for x in 0..w {
-            let mut min_val = 255u8;
-            for dy in -r..=r {
-                for dx in -r..=r {
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
-                    if nx >= 0 && nx < w as i32 && ny >= 0 && ny < h as i32 {
-                        let v = mask.get_pixel(nx as u32, ny as u32)[0];
-                        if v < min_val {
-                            min_val = v;
-                        }
-                    }
-                }
-            }
-            out.put_pixel(x, y, image::Luma([min_val]));
-        }
-    }
-    out
-}
-
 /// Guided filter (He et al. 2010)：用引导图 I 的边缘信息细化输入 p（mask），
 /// 让 mask 边界对齐图像的真实颜色边缘。O(N) 复杂度，通过 box filter 实现。
 fn guided_filter(guide: &GrayImage, input: &GrayImage, radius: u32, eps: f64) -> GrayImage {
@@ -286,6 +260,9 @@ fn run_inference(model_path: &Path, input: Array4<f32>) -> Result<Vec<u8>, Strin
         .run(ort::inputs![tensor])
         .map_err(|e| format!("抠图推理失败: {e}"))?;
 
+    if outputs.len() == 0 {
+        return Err("抠图推理未返回任何输出".to_string());
+    }
     let (_shape, data) = outputs[0]
         .try_extract_tensor::<f32>()
         .map_err(|e| format!("读取抠图输出失败: {e}"))?;

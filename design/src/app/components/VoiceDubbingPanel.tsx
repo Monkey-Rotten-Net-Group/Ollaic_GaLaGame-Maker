@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Music, Trash2, Wand2, Upload, Loader2,
   CheckSquare, Square, FolderOpen, ChevronDown, ChevronRight,
@@ -146,36 +146,40 @@ export function VoiceDubbingPanel({
   }, [projectPath]);
 
   // 角色名 → 音色 ID 映射。别名也一并映射，便于按别名命中。
-  const voiceByCharacter = new Map<string, string>();
-  for (const ch of characters) {
-    const timbre = ch.voiceTimbre?.trim();
-    if (!timbre) continue;
-    if (ch.name?.trim()) voiceByCharacter.set(ch.name.trim(), timbre);
-    for (const alias of ch.aliases ?? []) {
-      if (alias?.trim()) voiceByCharacter.set(alias.trim(), timbre);
+  const voiceByCharacter = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ch of characters) {
+      const timbre = ch.voiceTimbre?.trim();
+      if (!timbre) continue;
+      if (ch.name?.trim()) map.set(ch.name.trim(), timbre);
+      for (const alias of ch.aliases ?? []) {
+        if (alias?.trim()) map.set(alias.trim(), timbre);
+      }
     }
-  }
+    return map;
+  }, [characters]);
   const timbreForCard = (card: VoiceAssetCard): string =>
     voiceByCharacter.get((card.character ?? '').trim()) ?? '';
 
   // Filter cards
-  const filteredCards = voiceCards.filter((card) => {
+  const filteredCards = useMemo(() => voiceCards.filter((card) => {
     if (filterStatus === 'pending') return !isGenerated(card);
     if (filterStatus === 'done') return isGenerated(card);
     return true;
-  });
+  }), [voiceCards, filterStatus]);
 
-  // Group cards
-  const groups = new Map<string, VoiceAssetCard[]>();
-  for (const card of filteredCards) {
-    const keys = groupMode === 'scene' ? sceneKeysForCard(card) : [card.character || '旁白'];
-    for (const key of keys) {
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(card);
+  // Group cards, then sort groups by name.
+  const sortedGroups = useMemo(() => {
+    const groups = new Map<string, VoiceAssetCard[]>();
+    for (const card of filteredCards) {
+      const keys = groupMode === 'scene' ? sceneKeysForCard(card) : [card.character || '旁白'];
+      for (const key of keys) {
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(card);
+      }
     }
-  }
-  // Sort groups by name
-  const sortedGroups = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+    return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [filteredCards, groupMode]);
   const sortedGroupKeys = sortedGroups.map(([key]) => key).join('\u0000');
 
   // Auto-expand all groups
