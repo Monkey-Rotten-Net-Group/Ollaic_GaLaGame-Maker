@@ -582,6 +582,7 @@ const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, on
     const text = draft.trim();
     if (!text || pending) return;
     onSubmit(text);
+    setDraft('');
   };
 
   return (
