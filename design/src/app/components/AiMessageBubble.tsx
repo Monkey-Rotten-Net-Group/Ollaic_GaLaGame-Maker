@@ -1,8 +1,26 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronRight, FileEdit, Wrench, AlertCircle } from 'lucide-react';
+import {
+  ChevronRight, FileEdit, Wrench, AlertCircle,
+  List, FileText, Search, Users, UserRound, Brain,
+  PencilLine, UserCog, BookMarked, FilePlus,
+  type LucideIcon,
+} from 'lucide-react';
 import type { AssistantStep, ChatDiffLine } from '../hooks/useChatSession';
+
+const TOOL_ICONS: Record<string, LucideIcon> = {
+  list_scenes: List,
+  read_scene: FileText,
+  search_assets: Search,
+  list_characters: Users,
+  get_character: UserRound,
+  read_memory: Brain,
+  edit_scene: PencilLine,
+  edit_character: UserCog,
+  edit_memory: BookMarked,
+  create_scene: FilePlus,
+};
 
 interface AiMessageBubbleProps {
   role: 'user' | 'assistant';
@@ -108,21 +126,26 @@ function StepsView({ steps }: { steps: AssistantStep[] }) {
       {steps.map((step, si) => (
         <div key={si} className="space-y-1.5">
           {step.text?.trim() && <Markdown>{step.text.trim()}</Markdown>}
-          {step.toolCalls?.map((call, ci) => (
-            <div
-              key={ci}
-              className={`flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${
-                call.ok === false
-                  ? 'border-destructive/40 bg-destructive/10 text-destructive'
-                  : 'border-border/50 bg-background/35 text-muted-foreground'
-              }`}
-              title={call.error}
-            >
-              {call.ok === false ? <AlertCircle className="h-3.5 w-3.5 shrink-0" /> : <Wrench className="h-3.5 w-3.5 shrink-0 text-chart-2" />}
-              <span className="min-w-0 flex-1 truncate">{call.label}</span>
-              {call.ok === false && <span className="shrink-0">失败</span>}
-            </div>
-          ))}
+          {step.toolCalls?.map((call, ci) => {
+            const ToolIcon = TOOL_ICONS[call.name] ?? Wrench;
+            return (
+              <div
+                key={ci}
+                className={`flex items-center gap-2 rounded-md border px-2 py-1 text-[11px] ${
+                  call.ok === false
+                    ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                    : 'border-border/50 bg-background/35 text-muted-foreground'
+                }`}
+                title={call.error}
+              >
+                {call.ok === false
+                  ? <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  : <ToolIcon className="h-3.5 w-3.5 shrink-0 text-chart-2" />}
+                <span className="min-w-0 flex-1 truncate">{call.label}</span>
+                {call.ok === false && <span className="shrink-0">失败</span>}
+              </div>
+            );
+          })}
         </div>
       ))}
     </div>

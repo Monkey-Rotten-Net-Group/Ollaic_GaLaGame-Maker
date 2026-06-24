@@ -118,12 +118,27 @@ function classifyAiError(raw: string): AiErrorState {
   return { kind: 'other', retryable: true, message: `AI 服务出错：${raw}` };
 }
 
+const ASSET_CATEGORY_LABELS: Record<string, string> = {
+  background: '背景',
+  figure: '立绘',
+  bgm: 'BGM',
+  vocal: '语音 / 音效',
+  video: '视频',
+};
+
+function searchAssetsLabel(args: Record<string, unknown>): string {
+  const category = String(args.category ?? '').trim();
+  const query = String(args.query ?? '').trim();
+  const scope = category ? (ASSET_CATEGORY_LABELS[category] ?? category) : '全部素材';
+  return query ? `正在查询${scope}中的「${query}」…` : `正在查询素材库（${scope}）…`;
+}
+
 function stepLabelForTool(name: string, args: Record<string, unknown>, headers: Record<string, SceneHeader>): string {
   const sceneName = (file: unknown) => sceneDisplayName(String(file ?? ''), headers[String(file ?? '')]);
   switch (name) {
     case 'list_scenes': return '正在列出场景…';
     case 'read_scene': return `正在读取场景「${sceneName(args.name)}」…`;
-    case 'search_assets': return '正在查询素材库…';
+    case 'search_assets': return searchAssetsLabel(args);
     case 'list_characters': return '正在列出角色…';
     case 'get_character': return '正在读取角色设定…';
     case 'read_memory': return '正在读取项目记忆…';
