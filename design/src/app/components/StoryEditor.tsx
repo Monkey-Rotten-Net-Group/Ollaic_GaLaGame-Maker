@@ -1705,7 +1705,7 @@ export function StoryEditor() {
 
   // In-memory draft cache: sceneName -> nodes snapshot for unsaved scenes
   const sceneDraftCache = useRef<Map<string, WebGalNode[]>>(new Map());
-  const aiPendingPreviewRef = useRef(false);
+  const aiPreviewingCurrentSceneRef = useRef(false);
   // Keep a ref in sync so the close-requested handler always sees current dirty state
   const dirtyRef = useRef(dirty);
   useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
@@ -2360,9 +2360,9 @@ export function StoryEditor() {
     if (!projectPath) return;
 
     // Stash current unsaved nodes in the in-memory draft cache
-    if (dirty && !aiPendingPreviewRef.current) {
+    if (dirty && !aiPreviewingCurrentSceneRef.current) {
       sceneDraftCache.current.set(currentSceneName, nodes);
-    } else if (aiPendingPreviewRef.current) {
+    } else if (aiPreviewingCurrentSceneRef.current) {
       sceneDraftCache.current.delete(currentSceneName);
     }
 
@@ -2851,11 +2851,18 @@ export function StoryEditor() {
   }, [aiAgent.pendingChangeSet, currentSceneName]);
 
   useEffect(() => {
-    aiPendingPreviewRef.current = aiAgent.pendingChangeSet?.status === 'pending';
-    if (aiAgent.status === 'reverted' || aiAgent.status === 'accepted') {
+    aiPreviewingCurrentSceneRef.current = Boolean(aiPreviewEntries);
+    const set = aiAgent.pendingChangeSet;
+    if (set?.status === 'accepted') {
+      set.edits.forEach((edit) => {
+        if (edit.kind === 'scene') sceneDraftCache.current.delete(edit.file);
+      });
+      return;
+    }
+    if (set?.status === 'reverted' && set.edits.some((edit) => edit.kind === 'scene' && edit.file === currentSceneName)) {
       sceneDraftCache.current.delete(currentSceneName);
     }
-  }, [aiAgent.pendingChangeSet?.status, aiAgent.status, currentSceneName]);
+  }, [aiPreviewEntries, aiAgent.pendingChangeSet, currentSceneName]);
 
   const handleAiSend = useCallback((text: string) => { void aiAgent.sendPrompt(text); }, [aiAgent.sendPrompt]);
   // ---------------------------------------------------------------------------

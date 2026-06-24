@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
 import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
@@ -247,24 +247,20 @@ export function useAiAgent(params: UseAiAgentParams) {
   // Snapshot of `dirty` taken right before a preview forces it to true, so a
   // revert can restore the canvas to its real pre-preview modified state.
   const dirtyBeforePreviewRef = useRef(false);
-  // Monotonic token identifying the in-flight request. A scene switch (or a new
-  // prompt) bumps this; an old request's finally only touches shared UI state
-  // when its token still matches, so a stale request can't clobber a newer one.
+  // Monotonic token identifying the in-flight request. A new prompt bumps this;
+  // an old request's finally only touches shared UI state when its token still
+  // matches, so a stale request can't clobber a newer one.
   const requestTokenRef = useRef(0);
+  const currentSceneNameRef = useRef(currentSceneName);
 
   // Sessions are shared across scenes, and a pending change set is cross-scene
   // (each edit carries its own file + before/after snapshots). So switching
   // scenes must NOT reload the conversation nor drop the pending preview — the
-  // approval card stays usable. We only cancel any in-flight request. The live
-  // canvas no longer mirrors the pending edit once you switch away (buffer ops
-  // below key off the *current* scene), but the card's diff remains visible.
-  useEffect(() => {
-    cancelledRef.current = true;
-    streamingIdRef.current = null;
-    inFlightRef.current = false;
-    requestTokenRef.current += 1;
-    setBusy(false);
-    setStepLabel('');
+  // approval card stays usable. In-flight requests keep running against the
+  // scene snapshot they started with; this ref is only used to decide whether a
+  // finished preview should update the currently visible canvas.
+  useLayoutEffect(() => {
+    currentSceneNameRef.current = currentSceneName;
   }, [currentSceneName]);
 
   useEffect(() => {
@@ -363,7 +359,8 @@ export function useAiAgent(params: UseAiAgentParams) {
       status: 'pending',
       edits,
     };
-    const currentSceneEdit = edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
+    const liveSceneName = currentSceneNameRef.current;
+    const currentSceneEdit = edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === liveSceneName);
     if (currentSceneEdit) {
       setNodes(currentSceneEdit.afterNodes);
       setScriptSource(currentSceneEdit.afterContent);
@@ -378,7 +375,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStatus('pending');
     setError(null);
     return true;
-  }, [currentSceneName, dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
+  }, [dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
   const runAgentLoop = useCallback(async (text: string, assistantId: string) => {
@@ -675,8 +672,8 @@ export function useAiAgent(params: UseAiAgentParams) {
         replaceAssistantMessage(assistantId, `（错误：${classified.message}）`);
       }
     } finally {
-      // A newer request (or a scene switch) may have superseded us while we were
-      // awaiting. Only the current owner of the token resets the shared UI state.
+      // A newer request may have superseded us while we were awaiting. Only the
+      // current owner of the token resets the shared UI state.
       if (requestTokenRef.current === myToken) {
         inFlightRef.current = false;
         streamingIdRef.current = null;
@@ -771,6 +768,9 @@ export function useAiAgent(params: UseAiAgentParams) {
 
     if (currentSceneEdit) {
       pushHistory(currentSceneEdit.beforeNodes);
+      setNodes(currentSceneEdit.afterNodes);
+      setScriptSource(currentSceneEdit.afterContent);
+      setSelectedNode(null);
       setDirty(false);
       setSaveStatus('saved');
     }
@@ -788,17 +788,25 @@ export function useAiAgent(params: UseAiAgentParams) {
     pushHistory,
     replaceAssistantMessage,
     setDirty,
+    setNodes,
     setSaveStatus,
+    setScriptSource,
+    setSelectedNode,
     syncSceneBackgroundCard,
   ]);
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
-    // Conflict guard only applies when the edited scene is the one open now —
-    // its live buffer must still match our preview. If you've switched away,
-    // there's no live buffer to conflict with; accept writes straight to disk.
+    // Conflict guard only applies when the edited scene is the one open now.
+    // If the request finished while the user was on another scene, the buffer
+    // may still be the original content; accepting should still apply the
+    // preview. Anything else means the user changed the scene after staging.
     const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (currentSceneEdit && scriptSource !== currentSceneEdit.afterContent) {
+    if (
+      currentSceneEdit &&
+      scriptSource !== currentSceneEdit.afterContent &&
+      scriptSource !== currentSceneEdit.beforeContent
+    ) {
       setStatus('conflict');
       return;
     }
