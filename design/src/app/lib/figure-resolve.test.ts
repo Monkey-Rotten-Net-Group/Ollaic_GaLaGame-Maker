@@ -36,6 +36,11 @@ describe('resolveSpriteFile', () => {
     expect(resolveSpriteFile(SHIZUKA, SHIZUKA.sprites[1], assets)).toBe('char_shizuka/静香_生气_1700000000.png');
   });
 
+  it('resolves a legacy/manual variant filename by character token and emotion', () => {
+    const assets = [asset('char_shizuka/shizuka_生气.webp')];
+    expect(resolveSpriteFile(SHIZUKA, SHIZUKA.sprites[1], assets)).toBe('char_shizuka/shizuka_生气.webp');
+  });
+
   it('picks the newest variant image when several match the prefix', () => {
     const assets = [
       asset('char_shizuka/静香_生气_1700000000.png'),

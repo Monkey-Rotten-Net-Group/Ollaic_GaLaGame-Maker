@@ -179,6 +179,14 @@ export async function getAiLogPath(): Promise<string> {
   return invoke<string>('get_ai_log_path');
 }
 
+export async function getAiAgentTracePath(): Promise<string> {
+  return invoke<string>('get_ai_agent_trace_path');
+}
+
+export async function appendAiAgentTrace(payload: unknown): Promise<void> {
+  return invoke<void>('append_ai_agent_trace', { payload });
+}
+
 // ── Batch TTS ──────────────────────────────────
 
 export interface BatchTtsItem {

@@ -199,6 +199,8 @@ fn main() {
             ai::commands::list_ai_logs,
             ai::commands::clear_ai_logs,
             ai::commands::get_ai_log_path,
+            ai::commands::get_ai_agent_trace_path,
+            ai::commands::append_ai_agent_trace,
             ai::commands::generate_batch_tts,
             // Matting (background removal)
             matting::commands::remove_background,

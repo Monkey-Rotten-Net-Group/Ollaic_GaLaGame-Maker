@@ -8,6 +8,7 @@ const IMAGE_CONFIG_FILE: &str = "ai-image.json";
 const TTS_CONFIG_FILE: &str = "ai-tts.json";
 const MUSIC_CONFIG_FILE: &str = "ai-music.json";
 const LOG_FILE: &str = "ai-log.jsonl";
+const AGENT_TRACE_FILE: &str = "ai-agent-trace.jsonl";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -189,8 +190,19 @@ pub fn log_path() -> Result<PathBuf, String> {
         .join(LOG_FILE))
 }
 
+pub fn agent_trace_path() -> Result<PathBuf, String> {
+    Ok(dirs::config_dir()
+        .ok_or_else(|| "Unable to locate user config directory".to_string())?
+        .join(CONFIG_DIR)
+        .join(AGENT_TRACE_FILE))
+}
+
 pub fn append_log_line(line: &str) -> Result<(), String> {
     append_log_line_at(&log_path()?, line)
+}
+
+pub fn append_agent_trace_line(line: &str) -> Result<(), String> {
+    append_log_line_at(&agent_trace_path()?, line)
 }
 
 pub fn append_log_line_at(path: &PathBuf, line: &str) -> Result<(), String> {

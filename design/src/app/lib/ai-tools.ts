@@ -94,6 +94,15 @@ interface FigureMeta {
   emotion: string;
 }
 
+interface FigureSpriteSummary {
+  emotion: string;
+  file: string;
+  resolvedFile: string;
+  scriptFile: string;
+  available: boolean;
+  prompt?: string;
+}
+
 /** Map each figure asset (by basename) to its owning character + emotion. */
 function buildFigureMeta(characters: Character[], assets: AssetInfo[]): Map<string, FigureMeta> {
   const figures = assets.filter((a) => a.category === 'figure');
@@ -112,7 +121,15 @@ function summarizeAssets(assets: AssetInfo[], query?: string, figureMeta?: Map<s
   let list = assets;
   if (query) {
     const q = query.toLowerCase();
-    list = list.filter((a) => a.name.toLowerCase().includes(q));
+    list = list.filter((a) => {
+      const meta = a.category === 'figure' ? figureMeta?.get(figureFileTail(a.name)) : undefined;
+      return [
+        a.name,
+        a.category,
+        meta?.character ?? '',
+        meta?.emotion ?? '',
+      ].some((value) => value.toLowerCase().includes(q));
+    });
   }
   const truncated = list.length > ASSET_LIST_LIMIT;
   return {
@@ -123,6 +140,23 @@ function summarizeAssets(assets: AssetInfo[], query?: string, figureMeta?: Map<s
       return meta
         ? { name: a.name, category: a.category, character: meta.character, emotion: meta.emotion }
         : { name: a.name, category: a.category };
+    }),
+  };
+}
+
+function summarizeCharacterForAi(character: Character, figureAssets: AssetInfo[]): Character & { sprites: FigureSpriteSummary[] } {
+  return {
+    ...character,
+    sprites: character.sprites.map((sprite) => {
+      const resolvedFile = resolveSpriteFile(character, sprite, figureAssets);
+      return {
+        emotion: sprite.emotion,
+        file: sprite.file,
+        resolvedFile,
+        scriptFile: resolvedFile || sprite.file,
+        available: Boolean(resolvedFile || sprite.file),
+        prompt: sprite.prompt,
+      };
     }),
   };
 }
@@ -215,7 +249,7 @@ const readTools: AgentTool[] = [
   },
   {
     name: 'get_character',
-    description: '获取单个角色的完整设定（性格、对话风格、关系等），含 sprites 立绘列表（每项 emotion 表情 → file 文件）。插入该角色立绘前用它确定可用表情。',
+    description: '获取单个角色的完整设定（性格、对话风格、关系等），含 sprites 立绘列表。每个 sprite 都会给出 emotion、原始 file、resolvedFile/scriptFile（可写入脚本的真实文件）与 available；即使原始 file 为空，也可能通过角色素材库解析出可用 resolvedFile。',
     kind: 'read',
     schema: {
       type: 'object',
@@ -226,12 +260,13 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const id = asString(args.id);
       if (!id) throw new Error('get_character 需要角色 id 或名字。');
+      const figureAssets = await listAssets(projectPath, 'figure');
       // Tolerate the model passing a name/alias instead of the canonical id.
       try {
-        return await getCharacter(projectPath, id);
+        return summarizeCharacterForAi(await getCharacter(projectPath, id), figureAssets);
       } catch (err) {
         const match = findCharacter(await listCharacters(projectPath), id);
-        if (match) return match;
+        if (match) return summarizeCharacterForAi(match, figureAssets);
         throw err;
       }
     },

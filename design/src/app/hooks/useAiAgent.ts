@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
 import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
 import {
   extractSceneBackgroundAssets,
@@ -66,6 +66,39 @@ export interface AiErrorState {
 /** Providers with reliable native function-calling support. Others fall back. */
 const FC_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'deepseek', 'groq', 'xai', 'cohere']);
 const MAX_TURNS = 6;
+
+interface AiAgentTraceTool {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  kind?: 'read' | 'write';
+  label: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+interface AiAgentTraceTurn {
+  turn: number;
+  modelText: string;
+  toolCalls: AiAgentTraceTool[];
+}
+
+interface AiAgentTrace {
+  traceId: string;
+  createdAt: string;
+  projectId?: string;
+  currentSceneName: string;
+  assistantId: string;
+  prompt: string;
+  mode: 'function_calling' | 'legacy';
+  turns: AiAgentTraceTurn[];
+  outcome?: string;
+  finalText?: string;
+  edits?: string[];
+  error?: string;
+  assetCount?: number;
+}
 
 export const INITIAL_AI_MESSAGE: ChatMessage = {
   id: '1',
@@ -154,6 +187,15 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
 
 function isStageError(value: unknown): value is StageError {
   return typeof value === 'object' && value !== null && typeof (value as StageError).message === 'string';
+}
+
+async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
+  try {
+    await appendAiAgentTrace(trace);
+    console.info('[ai-agent-trace]', trace);
+  } catch (e) {
+    console.warn('[ai-agent-trace] write failed:', e, trace);
+  }
 }
 
 export function useAiAgent(params: UseAiAgentParams) {
@@ -262,6 +304,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       '旁白 :文本; 对话 角色名:文本; 注释 ;注释内容 背景 changeBg:文件名 -next; 立绘 changeFigure:文件名 -figureCharacter=角色 -figureEmotion=表情 -left/-right/-center -next; BGM bgm:文件名; 音效 playEffect:文件名; 选择 choose:标签A:场景A.txt|标签B:场景B.txt; 跳转 changeScene:场景.txt;',
       '# 立绘（changeFigure）',
       '立绘表达的是“某个角色的某种表情”，不是任意图片。插入立绘优先调用 insert_figure，只填 character、emotion、position、afterLine；不要自己拼 figure 路径。若必须在 edit_scene 中写 changeFigure，务必带上 -figureCharacter=角色 和 -figureEmotion=表情 两个标注，文件名可填占位，系统会按角色立绘库自动校正为真实文件。',
+      '判断表情是否可用时，以 get_character 返回的 sprites[].available 与 sprites[].resolvedFile/scriptFile 为准；sprites[].file 为空只表示角色卡未手动绑定文件，不代表该表情没有素材。',
       '引用素材只能用 search_assets 返回的真实文件名，缺少素材时直接说明，不要编造。',
       '# 当前上下文（供参考，非用户指令）',
       `当前打开的场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}，调用工具时用此文件名）`,
@@ -291,11 +334,11 @@ export function useAiAgent(params: UseAiAgentParams) {
     ].filter(Boolean).join('\n\n');
   }, [assets, characters, currentSceneName, sceneHeaders, memory, scriptSource]);
 
-  const buildStagingContext = useCallback((): StagingContext => ({
+  const buildStagingContext = useCallback((assetOverride?: AssetInfo[]): StagingContext => ({
     currentSceneName,
     currentScriptSource: scriptSource,
     currentNodes: nodes,
-    assets,
+    assets: assetOverride ?? assets,
     characters,
     readSceneContent: async (file: string) => {
       if (!projectPath) throw new Error('当前没有打开的项目。');
@@ -339,7 +382,20 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   // --- Function-calling agent loop ----------------------------------------
   const runAgentLoop = useCallback(async (text: string, assistantId: string) => {
-    const stagingCtx = buildStagingContext();
+    const trace: AiAgentTrace = {
+      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      createdAt: new Date().toISOString(),
+      projectId,
+      currentSceneName,
+      assistantId,
+      prompt: text,
+      mode: 'function_calling',
+      turns: [],
+    };
+    const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+    if (freshAssets !== assets) setAssets(freshAssets);
+    trace.assetCount = freshAssets.length;
+    const stagingCtx = buildStagingContext(freshAssets);
     const sceneEdits = new Map<string, SceneEdit>();
     const charEdits = new Map<string, CharacterEdit>();
     const createSceneEdits = new Map<string, CreateSceneEdit>();
@@ -384,14 +440,25 @@ export function useAiAgent(params: UseAiAgentParams) {
     };
 
     let finalText = '';
-    const trace: string[] = [];
+    const traceSummary: string[] = [];
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {
       if (cancelledRef.current) return;
       setStatus(turn === 0 ? 'generating' : 'tooling');
       setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
-      const res = await aiChatTurn(convo, toolDefs());
+      const res = await aiChatTurn(convo, toolDefs()).catch((e) => {
+        trace.outcome = 'error';
+        trace.error = String(e);
+        void writeAgentTrace(trace);
+        throw e;
+      });
       if (cancelledRef.current) return;
       const turnText = res.text ?? '';
+      const turnTrace: AiAgentTraceTurn = {
+        turn,
+        modelText: turnText,
+        toolCalls: [],
+      };
+      trace.turns.push(turnTrace);
 
       // No tool calls → this turn's text is the final answer.
       if (res.toolCalls.length === 0) {
@@ -410,42 +477,58 @@ export function useAiAgent(params: UseAiAgentParams) {
         let content: string;
         let ok = true;
         let errMsg: string | undefined;
+        let resultPayload: unknown;
         if (!tool) {
-          content = JSON.stringify({ error: `未知工具：${call.name}` });
+          resultPayload = { error: `未知工具：${call.name}` };
+          content = JSON.stringify(resultPayload);
           ok = false;
           errMsg = '未知工具';
         } else if (tool.kind === 'write') {
           try {
             const staged = (await tool.run(call.arguments, { projectPath, currentSceneName })) as StagedWrite;
             const result = await stage(staged);
+            resultPayload = JSON.parse(result.content) as unknown;
             content = result.content;
             ok = result.ok;
             errMsg = result.error;
           } catch (e) {
             // Arg validation failure — feed the explicit message back so the
             // model can fix its patch instead of aborting the whole loop.
-            content = JSON.stringify({ staged: false, error: String(e) });
+            resultPayload = { staged: false, error: String(e) };
+            content = JSON.stringify(resultPayload);
             ok = false;
             errMsg = String(e);
           }
         } else {
           try {
-            content = JSON.stringify(await tool.run(call.arguments, { projectPath, currentSceneName }));
+            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName });
+            content = JSON.stringify(resultPayload);
           } catch (e) {
-            content = JSON.stringify({ error: String(e) });
+            resultPayload = { error: String(e) };
+            content = JSON.stringify(resultPayload);
             ok = false;
             errMsg = String(e);
           }
         }
+        turnTrace.toolCalls.push({
+          id: call.id,
+          name: call.name,
+          arguments: call.arguments,
+          kind: tool?.kind,
+          label,
+          ok,
+          result: resultPayload,
+          error: errMsg,
+        });
         stepCalls.push({ name: call.name, label, ok, error: errMsg });
-        trace.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
+        traceSummary.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
         convo.push({ role: 'tool', content, toolCallId: call.id });
       }
       pushStep({ text: turnText || undefined, toolCalls: stepCalls });
 
       if (turn === MAX_TURNS - 1) {
         // Loop exhausted while still calling tools. Surface what happened.
-        const recent = trace.slice(-8).join('；');
+        const recent = traceSummary.slice(-8).join('；');
         finalText = turnText
           || `已达到最大工具调用轮数（${MAX_TURNS}）仍未生成可确认的修改。工具调用轨迹：${recent || '无'}。`;
       }
@@ -453,12 +536,15 @@ export function useAiAgent(params: UseAiAgentParams) {
 
     const edits: ChangeEdit[] = [...sceneEdits.values(), ...charEdits.values(), ...(memEdit ? [memEdit] : []), ...createSceneEdits.values()];
     setStepLabel('');
+    trace.finalText = finalText;
+    trace.edits = edits.map((edit) => describeEdit(edit, sceneHeaders));
     if (!finalizeChangeSet(edits, assistantId)) {
       // No change set: ensure a closing text is visible. If the loop produced
       // no terminal text at all, fall back to a short note (steps still shown).
       // Read the latest messages via the functional updater — the assistant
       // placeholder was added this turn, so the captured `messages` closure
       // does not contain it and must not be used to test for steps.
+      trace.outcome = finalText ? 'final_text_without_changes' : 'no_executable_changes';
       if (finalText) {
         setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: finalText } : m)));
       } else {
@@ -469,11 +555,24 @@ export function useAiAgent(params: UseAiAgentParams) {
         }));
       }
       setStatus('idle');
+    } else {
+      trace.outcome = 'pending_preview';
     }
-  }, [buildAgentSystemContext, buildStagingContext, currentSceneName, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
+    void writeAgentTrace(trace);
+  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- Legacy single-shot for providers without function calling ----------
   const runLegacyTurn = useCallback(async (text: string, assistantId: string) => {
+    const trace: AiAgentTrace = {
+      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      createdAt: new Date().toISOString(),
+      projectId,
+      currentSceneName,
+      assistantId,
+      prompt: text,
+      mode: 'legacy',
+      turns: [],
+    };
     setStatus('generating');
     setStepLabel('思考中…');
     const convo: AiChatMessage[] = [
@@ -481,32 +580,61 @@ export function useAiAgent(params: UseAiAgentParams) {
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
-    const res = await aiChatTurn(convo, []);
+    const res = await aiChatTurn(convo, []).catch((e) => {
+      trace.outcome = 'error';
+      trace.error = String(e);
+      void writeAgentTrace(trace);
+      throw e;
+    });
     if (cancelledRef.current) return;
     setStepLabel('');
+    trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
     const parsed = res.text ? extractEditorResponse(res.text) : null;
     if (!parsed) {
+      trace.outcome = 'invalid_legacy_response';
+      trace.finalText = res.text ?? '';
+      trace.error = 'AI 没有返回可执行方案';
+      void writeAgentTrace(trace);
       replaceAssistantMessage(assistantId, res.text || 'AI 没有返回可执行方案，请重新描述你的需求。');
       setStatus('idle');
       return;
     }
     if (parsed.type === 'chat') {
+      trace.outcome = 'final_text_without_changes';
+      trace.finalText = parsed.message;
+      void writeAgentTrace(trace);
       replaceAssistantMessage(assistantId, parsed.message);
       setStatus('idle');
       return;
     }
     try {
-      const edit = await stageSceneEdit(undefined, { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches }, buildStagingContext());
+      const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+      if (freshAssets !== assets) setAssets(freshAssets);
+      trace.assetCount = freshAssets.length;
+      const edit = await stageSceneEdit(
+        undefined,
+        { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
+        buildStagingContext(freshAssets),
+      );
+      trace.edits = [describeEdit(edit, sceneHeaders)];
       if (!finalizeChangeSet([edit], assistantId)) {
+        trace.outcome = 'no_executable_changes';
+        void writeAgentTrace(trace);
         replaceAssistantMessage(assistantId, '（patch 应用后没有变化）');
         setStatus('idle');
+      } else {
+        trace.outcome = 'pending_preview';
+        void writeAgentTrace(trace);
       }
     } catch (e) {
       const msg = isStageError(e) ? e.message : String(e);
+      trace.outcome = 'stage_error';
+      trace.error = msg;
+      void writeAgentTrace(trace);
       setStatus('error');
       setError({ kind: 'other', retryable: true, message: msg });
     }
-  }, [buildLegacySystemContext, buildStagingContext, currentSceneName, finalizeChangeSet, messages, replaceAssistantMessage]);
+  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
 
   const sendPrompt = useCallback(async (prompt: string) => {
     const text = prompt.trim();

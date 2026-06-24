@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 const MAX_LOG_LIMIT: usize = 500;
 const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 1000;
+const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
 /// A reqwest client with the standard request timeout applied. Using this
@@ -314,6 +315,18 @@ pub fn clear_ai_logs() -> Result<(), String> {
 #[tauri::command]
 pub fn get_ai_log_path() -> Result<String, String> {
     config::log_path().map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn get_ai_agent_trace_path() -> Result<String, String> {
+    config::agent_trace_path().map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn append_ai_agent_trace(payload: serde_json::Value) -> Result<(), String> {
+    let sanitized = sanitize_trace_value(payload);
+    let line = serde_json::to_string(&sanitized).map_err(|e| e.to_string())?;
+    config::append_agent_trace_line(&line)
 }
 
 #[tauri::command]
@@ -1947,6 +1960,40 @@ fn parse_ai_log_line(line: &str) -> Option<AiLogOutput> {
     })
 }
 
+fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) => serde_json::Value::String(sanitize_trace_field(&s)),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(sanitize_trace_value).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let sanitized = map
+                .into_iter()
+                .map(|(key, value)| {
+                    let key_lower = key.to_ascii_lowercase();
+                    let value = if key_lower.contains("apikey")
+                        || key_lower.contains("api_key")
+                        || key_lower == "key"
+                        || key_lower.contains("token")
+                        || key_lower.contains("authorization")
+                    {
+                        serde_json::Value::String("[REDACTED]".to_string())
+                    } else {
+                        sanitize_trace_value(value)
+                    };
+                    (sanitize_log_field(&key), value)
+                })
+                .collect();
+            serde_json::Value::Object(sanitized)
+        }
+        other => other,
+    }
+}
+
+fn sanitize_trace_field(value: &str) -> String {
+    truncate_trace_field(&redact_common_secrets(value))
+}
+
 fn sanitize_log_field(value: &str) -> String {
     truncate_log_field(&redact_common_secrets(value))
 }
@@ -2010,6 +2057,16 @@ fn redact_after_marker(value: &str, marker: &str) -> String {
 fn truncate_log_field(value: &str) -> String {
     let mut chars = value.chars();
     let truncated = chars.by_ref().take(MAX_LOG_FIELD_CHARS).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn truncate_trace_field(value: &str) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(MAX_TRACE_FIELD_CHARS).collect::<String>();
     if chars.next().is_some() {
         format!("{truncated}…")
     } else {
@@ -2276,6 +2333,24 @@ mod tests {
         assert_eq!(logs[0].timestamp_ms, 2);
         assert_eq!(logs[1].timestamp_ms, 3);
         let _ = fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn ai_agent_trace_sanitizes_secrets_without_log_truncation() {
+        let long_text = "x".repeat(MAX_LOG_FIELD_CHARS + 50);
+        let trace = serde_json::json!({
+            "apiKey": "secret-key",
+            "modelText": format!("response api_key=secret-token {long_text}"),
+            "nested": [{ "authorization": "Bearer secret-token" }],
+        });
+
+        let sanitized = sanitize_trace_value(trace);
+        assert_eq!(sanitized["apiKey"], "[REDACTED]");
+        assert_eq!(sanitized["nested"][0]["authorization"], "[REDACTED]");
+        let model_text = sanitized["modelText"].as_str().unwrap();
+        assert!(model_text.contains("api_key=[REDACTED]"));
+        assert!(!model_text.contains("secret-token"));
+        assert!(model_text.len() > MAX_LOG_FIELD_CHARS);
     }
 
     #[tokio::test]

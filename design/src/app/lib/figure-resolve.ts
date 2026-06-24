@@ -30,11 +30,30 @@ export function spritePrefix(character: Character, emotion: string): string {
   return `${characterPart}_${sanitizeFilenamePart(emotion, 'sprite')}_`;
 }
 
+function filenameToken(value: string): string {
+  return sanitizeFilenamePart(value, '').toLowerCase();
+}
+
 /** The basename of a (possibly subdir-qualified) figure path. */
 export function figureFileTail(file: string): string {
   if (!file) return '';
   const slash = file.lastIndexOf('/');
   return slash >= 0 ? file.slice(slash + 1) : file;
+}
+
+function assetMatchesSprite(character: Character, sprite: CharacterSprite, asset: AssetInfo): boolean {
+  const tail = figureFileTail(asset.name);
+  if (tail.startsWith(spritePrefix(character, sprite.emotion))) return true;
+  const stem = tail.replace(/\.[^.]+$/, '');
+  const normalizedStem = filenameToken(stem);
+  const emotion = filenameToken(sprite.emotion);
+  if (!emotion || !normalizedStem.includes(emotion)) return false;
+  const slash = asset.name.indexOf('/');
+  if (slash > 0 && asset.name.slice(0, slash) === character.id) return true;
+  const characterTokens = [character.id, character.name, ...(character.aliases ?? [])]
+    .map(filenameToken)
+    .filter(Boolean);
+  return characterTokens.some((token) => normalizedStem.includes(token));
 }
 
 /**
@@ -48,9 +67,8 @@ export function resolveSpriteFile(
   assets: AssetInfo[],
 ): string {
   if (sprite.file) return sprite.file;
-  const prefix = spritePrefix(character, sprite.emotion);
   const newest = assets
-    .filter((asset) => figureFileTail(asset.name).startsWith(prefix))
+    .filter((asset) => assetMatchesSprite(character, sprite, asset))
     .sort((a, b) => figureFileTail(b.name).localeCompare(figureFileTail(a.name)))[0];
   if (!newest) return '';
   return `${character.id}/${figureFileTail(newest.name)}`;
