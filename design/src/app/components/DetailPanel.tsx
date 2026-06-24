@@ -13,6 +13,7 @@ import {
 } from '../lib/asset-metadata';
 import { listScenes, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import { listAssets, type AssetInfo } from '../lib/assets-ipc';
+import { figureFileTail, spritePrefix, resolveSpriteFile } from '../lib/figure-resolve';
 import {
   Dialog,
   DialogContent,
@@ -872,33 +873,9 @@ function CharacterFigurePicker({
   );
 }
 
-// 与 CharacterPanel 的立绘命名规则保持一致：文件名为
-// `${characterPart}_${emotionPart}_${timestamp}.${ext}`，变体立绘只进素材库
-// （figure/<角色ID>/），sprite.file 留空。此处据此把空 file 的卡片解析回实际图片。
-function sanitizeFilenamePart(value: string, fallback: string): string {
-  const normalized = value
-    .trim()
-    .replace(/[\\/:*?"<>|]+/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return normalized || fallback;
-}
-
-function spritePrefix(character: Character, emotion: string): string {
-  const characterPart = sanitizeFilenamePart(character.name || character.id, 'character');
-  return `${characterPart}_${sanitizeFilenamePart(emotion, 'sprite')}_`;
-}
-
-function figureFileTail(file: string): string {
-  if (!file) return '';
-  const slash = file.lastIndexOf('/');
-  return slash >= 0 ? file.slice(slash + 1) : file;
-}
-
 // 把一个立绘卡片解析为「可写入脚本的限定文件名」与「可显示的图片源」。
-// - sprite.file 非空：直接使用（主体图 / 旧数据）。
-// - sprite.file 为空（变体）：按情绪前缀在素材库匹配最新生成图，回填限定路径。
+// 文件名解析复用 figure-resolve（与 CharacterPanel 的命名规则一致：
+// `${角色}_${情绪}_${timestamp}.${ext}`，变体立绘只进 figure/<角色ID>/、sprite.file 留空）。
 interface ResolvedSprite {
   file: string;          // 写入脚本的限定文件名，如 "<角色ID>/xxx.png"
   src: string | null;    // convertFileSrc 后的可显示地址
@@ -910,24 +887,15 @@ function resolveSpriteImage(
   assets: AssetInfo[],
   projectPath?: string,
 ): ResolvedSprite {
-  if (sprite.file) {
-    const match = assets.find((asset) => figureFileTail(asset.name) === figureFileTail(sprite.file));
-    return {
-      file: sprite.file,
-      src: match
-        ? convertFileSrc(match.path)
-        : projectPath
-          ? convertFileSrc(`${projectPath}/game/figure/${sprite.file}`)
-          : null,
-    };
-  }
-  const prefix = spritePrefix(character, sprite.emotion);
-  const matches = assets
-    .filter((asset) => figureFileTail(asset.name).startsWith(prefix))
-    .sort((a, b) => figureFileTail(b.name).localeCompare(figureFileTail(a.name)));
-  const newest = matches[0];
-  if (!newest) return { file: '', src: null };
-  return { file: `${character.id}/${figureFileTail(newest.name)}`, src: convertFileSrc(newest.path) };
+  const file = resolveSpriteFile(character, sprite, assets);
+  if (!file) return { file: '', src: null };
+  const match = assets.find((asset) => figureFileTail(asset.name) === figureFileTail(file));
+  const src = match
+    ? convertFileSrc(match.path)
+    : projectPath
+      ? convertFileSrc(`${projectPath}/game/figure/${file}`)
+      : null;
+  return { file, src };
 }
 
 function CharacterEmotionDialog({

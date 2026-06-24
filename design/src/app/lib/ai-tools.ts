@@ -14,10 +14,12 @@
 
 import type { ToolDef } from './ai-ipc';
 import { listAllAssets, listAssets, type AssetInfo } from './assets-ipc';
-import { getCharacter, listCharacterNames } from './character-ipc';
+import { getCharacter, listCharacterNames, listCharacters } from './character-ipc';
 import { readProjectMemory } from './project-memory';
 import { getScenePath, listScenes, readFileText, parseSceneHeader } from './webgal-ipc';
 import { isEditorPatch, type EditorPatch } from './editor-patch';
+import { figureFileTail, findCharacter, resolveSpriteFile } from './figure-resolve';
+import type { Character } from './character-types';
 
 export type ToolKind = 'read' | 'write';
 
@@ -51,6 +53,21 @@ function asInt(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
 
+function asBool(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function asAfterLine(value: unknown): number | 'end' | undefined {
+  if (value === 'end') return 'end';
+  const n = asInt(value);
+  return n && n > 0 ? n : undefined;
+}
+
+function asFigurePosition(value: unknown): 'left' | 'center' | 'right' | undefined {
+  if (value === 'left' || value === 'center' || value === 'right') return value;
+  return undefined;
+}
+
 function requireProject(ctx: ToolContext): string {
   if (!ctx.projectPath) throw new Error('当前没有打开的项目，无法读取项目数据。');
   return ctx.projectPath;
@@ -72,7 +89,26 @@ function numberScript(content: string, fromLine = 1, maxLines = SCENE_READ_MAX_L
   };
 }
 
-function summarizeAssets(assets: AssetInfo[], query?: string): unknown {
+interface FigureMeta {
+  character: string;
+  emotion: string;
+}
+
+/** Map each figure asset (by basename) to its owning character + emotion. */
+function buildFigureMeta(characters: Character[], assets: AssetInfo[]): Map<string, FigureMeta> {
+  const figures = assets.filter((a) => a.category === 'figure');
+  const byTail = new Map<string, FigureMeta>();
+  for (const character of characters) {
+    for (const sprite of character.sprites) {
+      const file = resolveSpriteFile(character, sprite, figures);
+      if (!file) continue;
+      byTail.set(figureFileTail(file), { character: character.name, emotion: sprite.emotion || '默认' });
+    }
+  }
+  return byTail;
+}
+
+function summarizeAssets(assets: AssetInfo[], query?: string, figureMeta?: Map<string, FigureMeta>): unknown {
   let list = assets;
   if (query) {
     const q = query.toLowerCase();
@@ -82,7 +118,12 @@ function summarizeAssets(assets: AssetInfo[], query?: string): unknown {
   return {
     total: list.length,
     truncated,
-    assets: list.slice(0, ASSET_LIST_LIMIT).map((a) => ({ name: a.name, category: a.category })),
+    assets: list.slice(0, ASSET_LIST_LIMIT).map((a) => {
+      const meta = a.category === 'figure' ? figureMeta?.get(figureFileTail(a.name)) : undefined;
+      return meta
+        ? { name: a.name, category: a.category, character: meta.character, emotion: meta.emotion }
+        : { name: a.name, category: a.category };
+    }),
   };
 }
 
@@ -138,7 +179,7 @@ const readTools: AgentTool[] = [
   {
     name: 'search_assets',
     description:
-      '查询素材库可用文件。可按 category（background/figure/bgm/vocal/video）筛选，按 query 子串匹配文件名。引用素材时只能使用这里返回的文件名。',
+      '查询素材库可用文件。可按 category（background/figure/bgm/vocal/video）筛选，按 query 子串匹配文件名。引用素材时只能使用这里返回的文件名。figure（立绘）会附带其所属 character（角色）与 emotion（表情）——立绘表达的是“某角色的某表情”，插入 changeFigure 时优先用 get_character 的 sprites 选定表情。',
     kind: 'read',
     schema: {
       type: 'object',
@@ -152,7 +193,13 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const category = asString(args.category);
       const assets = category ? await listAssets(projectPath, category) : await listAllAssets(projectPath);
-      return summarizeAssets(assets, asString(args.query));
+      // For figures, annotate each file with its owning character + emotion so
+      // the model picks expressions, not bare filenames.
+      const wantsFigures = !category || category === 'figure' || category.startsWith('figure');
+      const figureMeta = wantsFigures
+        ? buildFigureMeta(await listCharacters(projectPath), assets)
+        : undefined;
+      return summarizeAssets(assets, asString(args.query), figureMeta);
     },
   },
   {
@@ -168,18 +215,25 @@ const readTools: AgentTool[] = [
   },
   {
     name: 'get_character',
-    description: '获取单个角色的完整设定（性格、对话风格、关系等）。',
+    description: '获取单个角色的完整设定（性格、对话风格、关系等），含 sprites 立绘列表（每项 emotion 表情 → file 文件）。插入该角色立绘前用它确定可用表情。',
     kind: 'read',
     schema: {
       type: 'object',
-      properties: { id: { type: 'string', description: '角色 id' } },
+      properties: { id: { type: 'string', description: '角色 id（也接受角色名或别名）' } },
       required: ['id'],
     },
     run: async (args, ctx) => {
       const projectPath = requireProject(ctx);
       const id = asString(args.id);
-      if (!id) throw new Error('get_character 需要角色 id。');
-      return getCharacter(projectPath, id);
+      if (!id) throw new Error('get_character 需要角色 id 或名字。');
+      // Tolerate the model passing a name/alias instead of the canonical id.
+      try {
+        return await getCharacter(projectPath, id);
+      } catch (err) {
+        const match = findCharacter(await listCharacters(projectPath), id);
+        if (match) return match;
+        throw err;
+      }
     },
   },
   {
@@ -202,6 +256,17 @@ const readTools: AgentTool[] = [
 /** Staged write payloads, discriminated by the originating tool name. */
 export type StagedWrite =
   | { tool: 'edit_scene'; file: string; patches: EditorPatch[] }
+  | {
+      tool: 'insert_figure';
+      file: string;
+      afterLine: number | 'end';
+      anchorText?: string;
+      character: string;
+      emotion: string;
+      position?: 'left' | 'center' | 'right';
+      next?: boolean;
+      figureId?: string;
+    }
   | { tool: 'edit_character'; id: string; partial: Record<string, unknown> }
   | { tool: 'edit_memory'; partial: Record<string, unknown> }
   | { tool: 'create_scene'; name: string; chapter?: string; outline?: string };
@@ -263,6 +328,50 @@ const writeTools: AgentTool[] = [
         );
       }
       return { tool: 'edit_scene', file, patches: patches as EditorPatch[] } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'insert_figure',
+    description:
+      '插入角色立绘节点。优先使用这个工具，而不是手写 changeFigure 路径。' +
+      '你只需要提供角色 character、表情 emotion、位置 position 和插入位置 afterLine；系统会从角色立绘库解析真实文件名并生成 WebGAL changeFigure 行。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: '目标场景文件名' },
+        afterLine: {
+          description: '在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾',
+        },
+        anchorText: { type: 'string', description: 'afterLine 对应行原文，用于行号漂移兜底' },
+        character: { type: 'string', description: '角色名、角色 id 或别名' },
+        emotion: { type: 'string', description: '角色 sprites 中的表情名，如 默认、微笑、生气' },
+        position: { type: 'string', enum: ['left', 'center', 'right'], description: '立绘位置，默认 center' },
+        next: { type: 'boolean', description: '是否追加 -next，默认 true' },
+        figureId: { type: 'string', description: '可选：WebGAL figure id（对应 -id=xxx）' },
+      },
+      required: ['file', 'afterLine', 'character', 'emotion'],
+    },
+    run: async (args) => {
+      const file = asString(args.file);
+      if (!file) throw new Error('insert_figure 需要 file。');
+      const afterLine = asAfterLine(args.afterLine);
+      if (!afterLine) throw new Error('insert_figure 需要 afterLine（正整数或 "end"）。');
+      const character = asString(args.character);
+      if (!character) throw new Error('insert_figure 需要 character。');
+      const emotion = asString(args.emotion);
+      if (!emotion) throw new Error('insert_figure 需要 emotion。');
+      return {
+        tool: 'insert_figure',
+        file,
+        afterLine,
+        anchorText: asString(args.anchorText),
+        character,
+        emotion,
+        position: asFigurePosition(args.position),
+        next: asBool(args.next),
+        figureId: asString(args.figureId),
+      } satisfies StagedWrite;
     },
   },
   {

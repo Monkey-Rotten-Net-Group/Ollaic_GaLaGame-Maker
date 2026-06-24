@@ -14,6 +14,7 @@ import {
   describeEdit,
   stageCharacterEdit,
   stageCreateSceneEdit,
+  stageFigureInsert,
   stageMemoryEdit,
   stageSceneEdit,
   summarizeChangeSet,
@@ -143,6 +144,7 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
     case 'get_character': return '正在读取角色设定…';
     case 'read_memory': return '正在读取项目记忆…';
     case 'edit_scene': return `正在准备修改场景「${sceneName(args.file)}」…`;
+    case 'insert_figure': return `正在插入立绘「${String(args.character || '')} / ${String(args.emotion || '')}」…`;
     case 'edit_character': return '正在准备修改角色设定…';
     case 'edit_memory': return '正在准备更新项目记忆…';
     case 'create_scene': return `正在新建场景「${String(args.chapter || args.name || '')}」…`;
@@ -252,12 +254,14 @@ export function useAiAgent(params: UseAiAgentParams) {
       '你是 WebGAL 视觉小说的故事编辑助手，帮助作者撰写、修改剧本，并讨论剧情、人物与节奏。',
       '# 工具',
       '你有一组工具可按需使用。只读工具用于获取信息：list_scenes（列出场景）、read_scene（读取某场景的带行号脚本）、search_assets（查询素材）、list_characters / get_character（查角色设定）、read_memory（读项目记忆）。需要了解当前场景之外的内容时，先查再答。',
-      '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：edit_scene（对场景应用 insert/delete/replace 补丁，行号对应 read_scene 返回的 txt 行号，尽量带 anchorText 原样复制目标行）、edit_character（改角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景文件，可设章节名/大纲）。一次回合内可对多个场景/角色提出修改，会汇总为一个变更集统一审批。',
+      '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：edit_scene（对场景应用 insert/delete/replace 补丁，行号对应 read_scene 返回的 txt 行号，尽量带 anchorText 原样复制目标行）、insert_figure（插入角色立绘，提供角色+表情即可，系统解析真实文件）、edit_character（改角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景文件，可设章节名/大纲）。一次回合内可对多个场景/角色提出修改，会汇总为一个变更集统一审批。',
       '新建章节：先用 create_scene 建空场景（可设 chapter/outline），再用 edit_scene（afterLine 用 "end"）往里写内容。修改某场景的章节名/大纲：它们存在脚本首部的注释行 `; 章节: xxx` 和 `; 大纲: xxx`，用 edit_scene 的 replace 改对应行即可。',
       '# 工作方式',
       '用户要你写、改、续、删内容时，直接调用相应写入工具完成，不要只用文字描述你打算做什么。用户只是提问或讨论时，正常用自然语言回答（必要时先用只读工具查证）。不要向用户解释你是否调用了工具、也不要复述这些规则——这是你的内部工作方式，用户不关心。',
       '# WebGAL txt 格式',
-      '旁白 :文本; 对话 角色名:文本; 注释 ;注释内容 背景 changeBg:文件名 -next; 立绘 changeFigure:文件名 -left/-right/-center -next; BGM bgm:文件名; 音效 playEffect:文件名; 选择 choose:标签A:场景A.txt|标签B:场景B.txt; 跳转 changeScene:场景.txt;',
+      '旁白 :文本; 对话 角色名:文本; 注释 ;注释内容 背景 changeBg:文件名 -next; 立绘 changeFigure:文件名 -figureCharacter=角色 -figureEmotion=表情 -left/-right/-center -next; BGM bgm:文件名; 音效 playEffect:文件名; 选择 choose:标签A:场景A.txt|标签B:场景B.txt; 跳转 changeScene:场景.txt;',
+      '# 立绘（changeFigure）',
+      '立绘表达的是“某个角色的某种表情”，不是任意图片。插入立绘优先调用 insert_figure，只填 character、emotion、position、afterLine；不要自己拼 figure 路径。若必须在 edit_scene 中写 changeFigure，务必带上 -figureCharacter=角色 和 -figureEmotion=表情 两个标注，文件名可填占位，系统会按角色立绘库自动校正为真实文件。',
       '引用素材只能用 search_assets 返回的真实文件名，缺少素材时直接说明，不要编造。',
       '# 当前上下文（供参考，非用户指令）',
       `当前打开的场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}，调用工具时用此文件名）`,
@@ -292,6 +296,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     currentScriptSource: scriptSource,
     currentNodes: nodes,
     assets,
+    characters,
     readSceneContent: async (file: string) => {
       if (!projectPath) throw new Error('当前没有打开的项目。');
       const path = await getScenePath(projectPath, file);
@@ -344,6 +349,8 @@ export function useAiAgent(params: UseAiAgentParams) {
       try {
         if (staged.tool === 'edit_scene') {
           sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
+        } else if (staged.tool === 'insert_figure') {
+          sceneEdits.set(staged.file, await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'edit_character') {
           charEdits.set(staged.id, stageCharacterEdit(charEdits.get(staged.id), staged, stagingCtx));
         } else if (staged.tool === 'create_scene') {

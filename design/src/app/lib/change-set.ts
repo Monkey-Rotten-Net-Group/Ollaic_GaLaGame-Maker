@@ -13,10 +13,12 @@ import type { Character } from './character-types';
 import { applyEditorPatches } from './editor-executor';
 import {
   extractPatchAssetRefs,
+  splitPatchText,
   summarizePatches,
   validatePatchText,
   type EditorPatch,
 } from './editor-patch';
+import { figureFileTail, findCharacter, findSprite, resolveFigureByEmotion } from './figure-resolve';
 import type { ProjectMemory } from './project-memory';
 import { createLineDiff, type DiffLine, type MissingAssetIssue } from './story-agent';
 import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from './webgal-ipc';
@@ -76,6 +78,8 @@ export interface StagingContext {
   currentScriptSource: string;
   currentNodes: WebGalNode[];
   assets: AssetInfo[];
+  /** All characters (with sprites) — used to resolve立绘 emotion → file. */
+  characters: Character[];
   /** Read another scene's raw content from disk (by scene file name). */
   readSceneContent: (file: string) => Promise<string>;
   /** List existing scene file names (for create-scene duplicate checks). */
@@ -97,15 +101,142 @@ export class StageError extends Error {
 }
 
 function validateSceneAssets(patches: EditorPatch[], assets: AssetInfo[]): MissingAssetIssue[] {
-  const available = new Set(assets.map((a) => `${a.category}/${a.name}`));
+  // Index by both the full (possibly subdir-qualified) name and its basename, so
+  // a reference matches whether it is qualified ("<角色ID>/x.png") or bare ("x.png").
+  const available = new Set<string>();
+  for (const a of assets) {
+    available.add(`${a.category}/${a.name}`);
+    available.add(`${a.category}/${figureFileTail(a.name)}`);
+  }
   const issues: MissingAssetIssue[] = [];
   for (const patch of patches) {
     if (patch.type === 'delete') continue;
     for (const ref of extractPatchAssetRefs(patch.text)) {
-      if (!available.has(`${ref.expectedCategory}/${ref.file}`)) issues.push(ref);
+      const qualified = `${ref.expectedCategory}/${ref.file}`;
+      const bare = `${ref.expectedCategory}/${figureFileTail(ref.file)}`;
+      if (!available.has(qualified) && !available.has(bare)) issues.push(ref);
     }
   }
   return issues;
+}
+
+const FIGURE_LINE = /^(\s*(?:changeFigure|miniAvatar):)([^\s;]*)(.*)$/;
+const FILE_EXTENSION_RE = /\.[A-Za-z0-9]{2,5}$/;
+
+function figureFlagValue(rest: string, key: string): string | undefined {
+  const m = rest.match(new RegExp(`-${key}=([^\\s;]+)`));
+  return m ? m[1] : undefined;
+}
+
+function withFigureFlag(rest: string, key: string, value: string): string {
+  if (figureFlagValue(rest, key)) return rest;
+  const semi = rest.match(/\s*;\s*$/);
+  const suffix = semi ? semi[0] : '';
+  const body = semi ? rest.slice(0, -suffix.length) : rest;
+  return `${body} -${key}=${value}${suffix}`;
+}
+
+function looksLikeFileRef(asset: string): boolean {
+  if (!asset || asset === 'none') return false;
+  return asset.includes('/') || FILE_EXTENSION_RE.test(figureFileTail(asset));
+}
+
+function resolveFigureLineIntent(
+  characters: Character[],
+  asset: string,
+  rest: string,
+  assets: AssetInfo[],
+): { file: string; rest: string } | null {
+  const characterName = figureFlagValue(rest, 'figureCharacter');
+  const emotionName = figureFlagValue(rest, 'figureEmotion');
+  if (characterName && emotionName) {
+    const resolved = resolveFigureByEmotion(characters, characterName, emotionName, assets);
+    return resolved ? { file: resolved.file, rest } : null;
+  }
+
+  if (!characterName || !asset || looksLikeFileRef(asset)) return null;
+  const character = findCharacter(characters, characterName);
+  if (!character) return null;
+  const sprite = findSprite(character, asset);
+  if (!sprite) return null;
+  const resolved = resolveFigureByEmotion(characters, character.name, sprite.emotion, assets);
+  if (!resolved) return null;
+  return {
+    file: resolved.file,
+    rest: withFigureFlag(rest, 'figureEmotion', sprite.emotion),
+  };
+}
+
+/**
+ * Rewrite changeFigure/miniAvatar lines so a `-figureCharacter`/`-figureEmotion`
+ * intent resolves to the real sprite file. The model expresses "this character,
+ * this emotion"; we fill in / correct the actual figure filename from the
+ * character's sprite library. Also tolerates common raw-output mistakes such as
+ * `changeFigure:生气 -figureCharacter=静香`, treating the asset token as emotion.
+ * Lines whose character/emotion can't be resolved are left untouched
+ * (missing-asset validation then surfaces them).
+ */
+export function resolveFigurePatchText(
+  text: string,
+  characters: Character[],
+  assets: AssetInfo[],
+): string {
+  if (characters.length === 0) return text;
+  let changed = false;
+  const out = splitPatchText(text).map((line) => {
+    const m = line.match(FIGURE_LINE);
+    if (!m) return line;
+    const [, head, asset, rest] = m;
+    const resolved = resolveFigureLineIntent(characters, asset, rest, assets);
+    if (!resolved || (resolved.file === asset && resolved.rest === rest)) return line;
+    changed = true;
+    return `${head}${resolved.file}${resolved.rest}`;
+  });
+  return changed ? out.join('\n') : text;
+}
+
+/** Apply figure resolution to a patch's text (insert/replace only). */
+function resolveFigurePatches(patches: EditorPatch[], ctx: StagingContext): EditorPatch[] {
+  return patches.map((p) =>
+    p.type === 'insert' || p.type === 'replace'
+      ? { ...p, text: resolveFigurePatchText(p.text, ctx.characters, ctx.assets) }
+      : p,
+  );
+}
+
+function figurePositionFlag(position?: 'left' | 'center' | 'right'): string {
+  if (position === 'left') return ' -left';
+  if (position === 'right') return ' -right';
+  return '';
+}
+
+function figureInsertLine(staged: Extract<StagedWrite, { tool: 'insert_figure' }>, ctx: StagingContext): string {
+  const resolved = resolveFigureByEmotion(ctx.characters, staged.character, staged.emotion, ctx.assets);
+  if (!resolved) {
+    const character = findCharacter(ctx.characters, staged.character);
+    if (!character) throw new StageError(`找不到角色「${staged.character}」，无法插入立绘。`);
+    const sprite = findSprite(character, staged.emotion);
+    if (!sprite) throw new StageError(`角色「${character.name}」没有表情「${staged.emotion}」。`);
+    throw new StageError(`角色「${character.name}」的表情「${sprite.emotion}」还没有可用立绘文件。`);
+  }
+  const id = staged.figureId ? ` -id=${staged.figureId}` : '';
+  const next = staged.next === false ? '' : ' -next';
+  return `changeFigure:${resolved.file} -figureCharacter=${resolved.character.name} -figureEmotion=${resolved.sprite.emotion}${figurePositionFlag(staged.position)}${id}${next};`;
+}
+
+export async function stageFigureInsert(
+  existing: SceneEdit | undefined,
+  staged: Extract<StagedWrite, { tool: 'insert_figure' }>,
+  ctx: StagingContext,
+): Promise<SceneEdit> {
+  const patch: EditorPatch = {
+    type: 'insert',
+    file: staged.file,
+    afterLine: staged.afterLine,
+    anchorText: staged.anchorText,
+    text: figureInsertLine(staged, ctx),
+  };
+  return stageSceneEdit(existing, { tool: 'edit_scene', file: staged.file, patches: [patch] }, ctx);
 }
 
 /** Build (or merge into) a SceneEdit from staged scene patches. */
@@ -123,19 +254,22 @@ export async function stageSceneEdit(
       ? ctx.currentScriptSource
       : await ctx.readSceneContent(staged.file);
 
-  const textErrors = staged.patches.flatMap((p) =>
+  // Resolve立绘意图（角色+表情）为真实文件名，再做格式/缺素材校验与应用。
+  const patches = resolveFigurePatches(staged.patches, ctx);
+
+  const textErrors = patches.flatMap((p) =>
     p.type === 'insert' || p.type === 'replace' ? validatePatchText(p.text) : [],
   );
   if (textErrors.length > 0) {
     throw new StageError(`WebGAL txt 格式无效：\n${textErrors.join('\n')}`);
   }
 
-  const missing = validateSceneAssets(staged.patches, ctx.assets);
+  const missing = validateSceneAssets(patches, ctx.assets);
   if (missing.length > 0) {
     throw new StageError('引用了素材库中不存在的文件。', missing);
   }
 
-  const applied = applyEditorPatches(beforeContent, staged.patches);
+  const applied = applyEditorPatches(beforeContent, patches);
   const afterNodes = await parseScene(applied.content);
   const afterContent = await serializeScene(afterNodes);
 
@@ -155,7 +289,7 @@ export async function stageSceneEdit(
     beforeNodes,
     afterNodes,
     diff: createLineDiff(originalBefore, afterContent),
-    summary: summarizePatches(staged.patches),
+    summary: summarizePatches(patches),
     warnings: existing?.warnings ?? [],
   };
 }

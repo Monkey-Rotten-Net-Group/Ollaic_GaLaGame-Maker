@@ -22,6 +22,8 @@ fn serialize_flags(node: &WebGalNode) -> String {
         "left",
         "right",
         "id",
+        "figureCharacter",
+        "figureEmotion",
         "next",
         "when",
         "volume",
@@ -261,5 +263,22 @@ mod tests {
         let serialized_twice = serialize_script(&parse_script(&serialized_once));
         assert_eq!(serialized_twice.matches("-v1.wav").count(), 1);
         assert_eq!(serialized_twice.matches("-narrator_01.mp3").count(), 1);
+    }
+
+    #[test]
+    fn serializing_parsed_figure_metadata_does_not_duplicate_it() {
+        let nodes = parse_script(
+            "changeFigure:hero.png -figureCharacter=Alice -figureEmotion=smile -left -next;\n",
+        );
+        let serialized_once = serialize_script(&nodes);
+        assert!(serialized_once.contains(
+            "changeFigure:hero.png -left -figureCharacter=Alice -figureEmotion=smile -next;",
+        ));
+        assert_eq!(serialized_once.matches("-figureCharacter=Alice").count(), 1);
+        assert_eq!(serialized_once.matches("-figureEmotion=smile").count(), 1);
+
+        let serialized_twice = serialize_script(&parse_script(&serialized_once));
+        assert_eq!(serialized_twice.matches("-figureCharacter=Alice").count(), 1);
+        assert_eq!(serialized_twice.matches("-figureEmotion=smile").count(), 1);
     }
 }

@@ -92,7 +92,7 @@ export function extractEditorResponse(raw: string): EditorResponse | null {
   }
 }
 
-function splitPatchText(text: string): string[] {
+export function splitPatchText(text: string): string[] {
   const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   return normalized.length > 0 ? normalized.split('\n') : [];
 }
@@ -148,7 +148,10 @@ export function extractPatchAssetRefs(text: string): Array<{ command: string; fi
     if (!match) continue;
     const expectedCategory = categoryByCommand[match[1]];
     if (!expectedCategory) continue;
-    const file = match[2].replace(/\\/g, '/').split('/').pop() ?? match[2];
+    // Keep the qualified path (e.g. figure subdir "<角色ID>/x.png") so per-character
+    // sprite references validate against the subdir-qualified asset list, not just
+    // a basename. Flat categories have no slash, so this is a no-op for them.
+    const file = match[2].replace(/\\/g, '/').replace(/^\.?\//, '');
     if (file && file !== 'none') refs.push({ command: match[1], file, expectedCategory });
   }
   return refs;
