@@ -2277,4 +2277,268 @@ mod tests {
         assert_eq!(logs[1].timestamp_ms, 3);
         let _ = fs::remove_file(&tmp);
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_model_insert_figure_harness() {
+        let cfg = config::load_config();
+        eprintln!(
+            "[harness] provider={} model={} endpoint={}",
+            cfg.provider,
+            cfg.model,
+            effective_endpoint(&cfg),
+        );
+
+        let mut messages = vec![
+            AiMessageInput {
+                role: "system".to_string(),
+                content: real_model_harness_system_prompt(),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            AiMessageInput {
+                role: "user".to_string(),
+                content: "请在第 1 行后插入静香“生气”表情的左侧立绘，并让它立即执行下一条。请直接调用工具生成预览，不要只文字说明。".to_string(),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+
+        let mut preview: Option<String> = None;
+        let mut used_tools: Vec<String> = Vec::new();
+
+        for turn in 1..=6 {
+            eprintln!("\n[harness] === turn {turn} ===");
+            let response = ai_chat_turn(messages, real_model_harness_tools(), None)
+                .await
+                .expect("真实模型调用失败");
+            if let Some(text) = &response.text {
+                eprintln!("[assistant text]\n{text}");
+            }
+            if response.tool_calls.is_empty() {
+                eprintln!("[harness] no tool calls; stopping");
+                break;
+            }
+
+            let tool_inputs: Vec<ToolCallInput> = response
+                .tool_calls
+                .iter()
+                .map(|call| ToolCallInput {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                })
+                .collect();
+            messages = vec![AiMessageInput {
+                role: "assistant".to_string(),
+                content: response.text.clone().unwrap_or_default(),
+                tool_calls: Some(tool_inputs),
+                tool_call_id: None,
+            }];
+
+            for call in response.tool_calls {
+                used_tools.push(call.name.clone());
+                eprintln!(
+                    "[tool call] {} {}",
+                    call.name,
+                    serde_json::to_string_pretty(&call.arguments).unwrap()
+                );
+                let result = run_real_model_harness_tool(&call.name, &call.arguments, &mut preview);
+                eprintln!(
+                    "[tool result] {}",
+                    serde_json::to_string_pretty(&result).unwrap()
+                );
+                messages.push(AiMessageInput {
+                    role: "tool".to_string(),
+                    content: result.to_string(),
+                    tool_calls: None,
+                    tool_call_id: Some(call.id),
+                });
+            }
+        }
+
+        let preview = preview.expect("真实模型没有调用 insert_figure 生成预览");
+        eprintln!("\n[harness] tools: {}", used_tools.join(" -> "));
+        eprintln!("[harness] preview:\n{preview}");
+        assert!(
+            used_tools.iter().any(|name| name == "insert_figure"),
+            "真实模型没有选择 insert_figure；实际工具轨迹：{}",
+            used_tools.join(" -> ")
+        );
+        assert!(preview.contains("changeFigure:char_shizuka/静香_生气_1700000000.png"));
+        assert!(preview.contains("-figureCharacter=静香"));
+        assert!(preview.contains("-figureEmotion=生气"));
+        assert!(preview.contains("-left"));
+        assert!(preview.contains("-next"));
+    }
+
+    fn real_model_harness_tools() -> Vec<ToolDef> {
+        vec![
+            ToolDef {
+                name: "list_scenes".to_string(),
+                description: "列出项目场景。调用写入工具时用 file 字段里的文件名。".to_string(),
+                parameters: serde_json::json!({ "type": "object", "properties": {}, "required": [] }),
+            },
+            ToolDef {
+                name: "read_scene".to_string(),
+                description: "读取场景脚本，返回带行号 WebGAL txt。".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "场景文件名，如 start.txt" }
+                    },
+                    "required": ["name"]
+                }),
+            },
+            ToolDef {
+                name: "list_characters".to_string(),
+                description: "列出项目中的角色（id、名字、别名）。".to_string(),
+                parameters: serde_json::json!({ "type": "object", "properties": {}, "required": [] }),
+            },
+            ToolDef {
+                name: "get_character".to_string(),
+                description: "读取角色完整设定，含 sprites 表情列表。id 可传角色 id、名字或别名。".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "角色 id、名字或别名" }
+                    },
+                    "required": ["id"]
+                }),
+            },
+            ToolDef {
+                name: "search_assets".to_string(),
+                description: "查询素材库。figure 素材会带 character 与 emotion，引用素材不要编造文件名。".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "category": { "type": "string" },
+                        "query": { "type": "string" }
+                    },
+                    "required": []
+                }),
+            },
+            ToolDef {
+                name: "insert_figure".to_string(),
+                description: "插入角色立绘节点。优先用这个工具，不要手写 changeFigure 路径；只提供角色、表情、位置和插入行，系统会解析真实文件并生成预览。".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "目标场景文件名" },
+                        "afterLine": { "description": "在该 txt 行号后插入；正整数或字符串 end" },
+                        "anchorText": { "type": "string", "description": "afterLine 对应行原文" },
+                        "character": { "type": "string", "description": "角色名、id 或别名" },
+                        "emotion": { "type": "string", "description": "角色 sprites 中的表情名" },
+                        "position": { "type": "string", "enum": ["left", "center", "right"] },
+                        "next": { "type": "boolean" }
+                    },
+                    "required": ["file", "afterLine", "character", "emotion"]
+                }),
+            },
+        ]
+    }
+
+    fn real_model_harness_system_prompt() -> String {
+        [
+            "# 角色",
+            "你是 WebGAL 视觉小说的故事编辑助手。",
+            "# 工具",
+            "需要插入角色立绘时，优先调用 insert_figure。不要自己拼 figure 路径。",
+            "如果缺少角色或表情信息，先调用 list_characters / get_character / search_assets 查询。",
+            "当前场景文件名已经明确是 start.txt；调用 insert_figure 的 file 直接使用 start.txt，不要把场景当素材查询。",
+            "工具返回 staged=true 后，只简短说明预览已生成并等待用户在界面确认，不要说“告知我应用”或暗示你能直接落盘。",
+            "# WebGAL txt 格式",
+            "立绘最终应是 changeFigure:文件名 -figureCharacter=角色 -figureEmotion=表情 -left/-right/-center -next;",
+            "# 当前上下文",
+            "当前场景：start.txt",
+            "当前脚本（左侧数字是 txt 行号）：\n1: :静香站在门口，紧紧攥着袖口;\n2: 静香:我已经不会再退让了;",
+        ]
+        .join("\n\n")
+    }
+
+    fn run_real_model_harness_tool(
+        name: &str,
+        args: &serde_json::Value,
+        preview: &mut Option<String>,
+    ) -> serde_json::Value {
+        match name {
+            "list_scenes" => serde_json::json!({
+                "scenes": [
+                    { "file": "start.txt", "chapter": "测试章节", "outline": "静香在门口压抑怒意" }
+                ]
+            }),
+            "read_scene" => serde_json::json!({
+                "name": "start.txt",
+                "totalLines": 2,
+                "truncated": false,
+                "text": "1: :静香站在门口，紧紧攥着袖口;\n2: 静香:我已经不会再退让了;"
+            }),
+            "list_characters" => serde_json::json!({
+                "characters": [
+                    { "id": "char_shizuka", "name": "静香", "aliases": ["小静"] }
+                ]
+            }),
+            "get_character" => serde_json::json!({
+                "id": "char_shizuka",
+                "name": "静香",
+                "aliases": ["小静"],
+                "personality": "克制、敏感，但被逼到极限时会直接表达愤怒。",
+                "dialogueStyle": "句子短，情绪强时语气冷硬。",
+                "sprites": [
+                    { "emotion": "默认", "file": "shizuka_default.png" },
+                    { "emotion": "生气", "file": "char_shizuka/静香_生气_1700000000.png" }
+                ]
+            }),
+            "search_assets" => {
+                let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("figure");
+                if category != "figure" {
+                    return serde_json::json!({
+                        "error": format!("测试 harness 只有 figure 素材；场景请用 list_scenes/read_scene，不要用 search_assets 查询 {category}。")
+                    });
+                }
+                serde_json::json!({
+                    "total": 2,
+                    "truncated": false,
+                    "assets": [
+                        { "name": "shizuka_default.png", "category": "figure", "character": "静香", "emotion": "默认" },
+                        { "name": "char_shizuka/静香_生气_1700000000.png", "category": "figure", "character": "静香", "emotion": "生气" }
+                    ]
+                })
+            }
+            "insert_figure" => {
+                let character = args.get("character").and_then(|v| v.as_str()).unwrap_or("");
+                let emotion = args.get("emotion").and_then(|v| v.as_str()).unwrap_or("");
+                let position = args.get("position").and_then(|v| v.as_str()).unwrap_or("center");
+                if !["静香", "小静", "char_shizuka"].contains(&character) {
+                    return serde_json::json!({ "staged": false, "error": format!("找不到角色：{character}") });
+                }
+                if emotion != "生气" {
+                    return serde_json::json!({ "staged": false, "error": format!("角色静香没有表情：{emotion}") });
+                }
+                let position_flag = match position {
+                    "left" => " -left",
+                    "right" => " -right",
+                    _ => "",
+                };
+                let next = if args.get("next").and_then(|v| v.as_bool()) == Some(false) {
+                    ""
+                } else {
+                    " -next"
+                };
+                let line = format!(
+                    "changeFigure:char_shizuka/静香_生气_1700000000.png -figureCharacter=静香 -figureEmotion=生气{position_flag}{next};"
+                );
+                let after = format!(
+                    ":静香站在门口，紧紧攥着袖口;\n{line}\n静香:我已经不会再退让了;\n"
+                );
+                *preview = Some(after.clone());
+                serde_json::json!({
+                    "staged": true,
+                    "message": "已生成修改预览。",
+                    "preview": after,
+                })
+            }
+            other => serde_json::json!({ "error": format!("未知工具：{other}") }),
+        }
+    }
 }
