@@ -69,6 +69,27 @@ export function figureLabel(node: WebGalNode, characters: Character[] = []): str
   return filename || '未选择立绘';
 }
 
+function flagLabel(node: WebGalNode): string {
+  const parts: string[] = [];
+  if (node.figurePosition) parts.push(node.figurePosition);
+  if (node.figureId) parts.push(`id=${node.figureId}`);
+  if (node.next) parts.push('next');
+  if (node.when) parts.push(`when=${node.when}`);
+  return parts.length > 0 ? ` [${parts.join(', ')}]` : '';
+}
+
+function figureSummary(node: WebGalNode): string {
+  const file = node.asset || node.content || '未选择立绘';
+  const character = node.figureCharacter?.trim();
+  const emotion = node.figureEmotion?.trim();
+  const owner = character
+    ? `${character}${emotion ? `：${emotion}` : ''}`
+    : emotion
+      ? `表情：${emotion}`
+      : '';
+  return `${owner ? `${owner} · ` : ''}${file}${flagLabel(node)}`;
+}
+
 /** One-line human summary of a node's payload. */
 export function getNodeSummary(node: WebGalNode): string {
   switch (node.type) {
@@ -77,9 +98,10 @@ export function getNodeSummary(node: WebGalNode): string {
     case 'narrator':
       return node.content;
     case 'changeBg':
-    case 'changeFigure':
     case 'miniAvatar':
       return node.asset || node.content;
+    case 'changeFigure':
+      return figureSummary(node);
     case 'choose':
       return node.choices?.map(c => c.text).join(' / ') || node.content;
     case 'changeScene':

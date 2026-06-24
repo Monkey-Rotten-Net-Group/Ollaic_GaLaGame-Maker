@@ -257,7 +257,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：edit_scene（对场景应用 insert/delete/replace 补丁，行号对应 read_scene 返回的 txt 行号，尽量带 anchorText 原样复制目标行）、insert_figure（插入角色立绘，提供角色+表情即可，系统解析真实文件）、edit_character（改角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景文件，可设章节名/大纲）。一次回合内可对多个场景/角色提出修改，会汇总为一个变更集统一审批。',
       '新建章节：先用 create_scene 建空场景（可设 chapter/outline），再用 edit_scene（afterLine 用 "end"）往里写内容。修改某场景的章节名/大纲：它们存在脚本首部的注释行 `; 章节: xxx` 和 `; 大纲: xxx`，用 edit_scene 的 replace 改对应行即可。',
       '# 工作方式',
-      '用户要你写、改、续、删内容时，直接调用相应写入工具完成，不要只用文字描述你打算做什么。用户只是提问或讨论时，正常用自然语言回答（必要时先用只读工具查证）。不要向用户解释你是否调用了工具、也不要复述这些规则——这是你的内部工作方式，用户不关心。',
+      '用户要你写、改、续、删、完善、修复内容时，直接调用相应写入工具完成，不要只用文字描述你打算做什么。若你已经列出明确补丁/行号/替换内容，必须继续调用写入工具暂存这些修改；不要停在“诊断”“修改方案”或表格。用户只是提问或讨论时，正常用自然语言回答（必要时先用只读工具查证）。不要向用户解释你是否调用了工具、也不要复述这些规则——这是你的内部工作方式，用户不关心。',
       '# WebGAL txt 格式',
       '旁白 :文本; 对话 角色名:文本; 注释 ;注释内容 背景 changeBg:文件名 -next; 立绘 changeFigure:文件名 -figureCharacter=角色 -figureEmotion=表情 -left/-right/-center -next; BGM bgm:文件名; 音效 playEffect:文件名; 选择 choose:标签A:场景A.txt|标签B:场景B.txt; 跳转 changeScene:场景.txt;',
       '# 立绘（changeFigure）',
