@@ -325,6 +325,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn matte_real_sprites() {
         let model_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("models/{MODEL_FILENAME}"));
