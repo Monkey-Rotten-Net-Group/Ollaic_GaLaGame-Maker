@@ -108,6 +108,23 @@ trace 设计原则:
 - trace 字符串字段上限比普通日志大,用于保留较完整的模型输出和工具返回。
 - `runAgentLoop` 在 staging 前重新 `listAllAssets(projectPath)`,并用 fresh asset list 构建 staging context;trace 的 `assetCount` 用来辅助确认写工具是否拿到了最新素材库。
 
+## 真实模型 Harness
+
+后端有一个 ignored Rust test 可直接用 cargo 的测试 CLI 调真实聊天模型,用于检查模型是否会按提示选择工具。当前 harness 聚焦 `insert_figure` 场景:它提供内置的场景、角色和立绘素材 stub,要求真实模型调用 `insert_figure`,最后断言预览里包含正确的 `changeFigure` 行。
+
+运行方式:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml real_model_insert_figure_harness -- --ignored --nocapture
+```
+
+前提:
+
+- 先在应用 AI 设置里保存可用的 chat provider/model/API key/base URL;harness 读取同一份 `get_ai_config` 配置。
+- 这是真实网络调用,不会随普通 `cargo test` 自动运行。
+- 输出会打印每轮 assistant 文本、tool call 参数、tool result 和最终 preview,适合调工具提示词与 schema。
+- 源码入口:`src-tauri/src/ai/commands.rs` 的 `real_model_insert_figure_harness`。
+
 ## 相关源码
 - `design/src/app/hooks/useAiAgent.ts`(`runAgentLoop` / `runLegacyTurn` / `sendPrompt` / `stop` / `retry`)
 - `design/src/app/lib/ai-tools.ts`、`design/src/app/lib/story-agent.ts`
