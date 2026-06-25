@@ -26,6 +26,8 @@ import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from '
 import type { WebGalNode } from './webgal-types';
 import type { StagedWrite } from './ai-tools';
 
+type DialogueLineInput = Record<string, unknown>;
+
 export interface SceneEdit {
   kind: 'scene';
   file: string;
@@ -67,6 +69,8 @@ export interface CreateSceneEdit {
   file: string;          // filename with .txt suffix
   chapter?: string;
   outline?: string;
+  initialContent?: string;
+  initialNodes?: WebGalNode[];
 }
 
 export type ChangeEdit = SceneEdit | CharacterEdit | CreateCharacterEdit | MemoryEdit | CreateSceneEdit;
@@ -229,6 +233,231 @@ function figureInsertLine(staged: Extract<StagedWrite, { tool: 'insert_figure' }
   const id = staged.figureId ? ` -id=${staged.figureId}` : '';
   const next = staged.next === false ? '' : ' -next';
   return `changeFigure:${resolved.file} -figureCharacter=${resolved.character.name} -figureEmotion=${resolved.sprite.emotion}${figurePositionFlag(staged.position)}${id}${next};`;
+}
+
+function normalizeSceneFilename(value: string): string {
+  const base = value.trim().replace(/\\/g, '/').split('/').pop() ?? value.trim();
+  return base.toLowerCase().endsWith('.txt') ? base : `${base}.txt`;
+}
+
+function stringField(input: Record<string, unknown>, key: string): string {
+  const value = input[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function boolField(input: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = input[key];
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function linePositionFlag(input: Record<string, unknown>): string {
+  const position = stringField(input, 'position');
+  if (position === 'left') return ' -left';
+  if (position === 'right') return ' -right';
+  return '';
+}
+
+function nextFlag(input: Record<string, unknown>, fallback = true): string {
+  return boolField(input, 'next', fallback) ? ' -next' : '';
+}
+
+function escapeChoicePart(value: string): string {
+  return value.replace(/[|:;\n\r]/g, ' ').trim();
+}
+
+function sceneBlockLine(input: DialogueLineInput, ctx: StagingContext): string {
+  const type = stringField(input, 'type');
+  const text = stringField(input, 'text');
+  const asset = stringField(input, 'asset');
+  switch (type) {
+    case 'narrator':
+      if (!text) throw new StageError('insert_dialogue_block 的 narrator 行缺少 text。');
+      return `:${text};`;
+    case 'dialogue': {
+      const character = stringField(input, 'character');
+      if (!character || !text) throw new StageError('insert_dialogue_block 的 dialogue 行需要 character 和 text。');
+      return `${character}:${text};`;
+    }
+    case 'intro':
+      if (!text) throw new StageError('insert_dialogue_block 的 intro 行缺少 text。');
+      return `intro:${text.replace(/\n/g, '|')};`;
+    case 'background':
+      if (!asset) throw new StageError('insert_dialogue_block 的 background 行缺少 asset。');
+      return `changeBg:${asset}${nextFlag(input)};`;
+    case 'figure': {
+      const character = stringField(input, 'character');
+      const emotion = stringField(input, 'emotion');
+      if (asset) {
+        const flags = [
+          character ? ` -figureCharacter=${character}` : '',
+          emotion ? ` -figureEmotion=${emotion}` : '',
+          linePositionFlag(input),
+          nextFlag(input),
+        ].join('');
+        return `changeFigure:${asset}${flags};`;
+      }
+      if (!character || !emotion) throw new StageError('insert_dialogue_block 的 figure 行需要 asset，或 character + emotion。');
+      return figureInsertLine({
+        tool: 'insert_figure',
+        file: '',
+        afterLine: 'end',
+        character,
+        emotion,
+        position: stringField(input, 'position') as 'left' | 'center' | 'right' | undefined,
+        next: boolField(input, 'next', true),
+      }, ctx);
+    }
+    case 'bgm':
+      if (!asset) throw new StageError('insert_dialogue_block 的 bgm 行缺少 asset。');
+      return `bgm:${asset};`;
+    case 'effect':
+      if (!asset) throw new StageError('insert_dialogue_block 的 effect 行缺少 asset。');
+      return `playEffect:${asset};`;
+    case 'video':
+      if (!asset) throw new StageError('insert_dialogue_block 的 video 行缺少 asset。');
+      return `playVideo:${asset};`;
+    case 'jump': {
+      const target = stringField(input, 'target');
+      if (!target) throw new StageError('insert_dialogue_block 的 jump 行缺少 target。');
+      return `changeScene:${normalizeSceneFilename(target)};`;
+    }
+    case 'call': {
+      const target = stringField(input, 'target');
+      if (!target) throw new StageError('insert_dialogue_block 的 call 行缺少 target。');
+      return `callScene:${normalizeSceneFilename(target)};`;
+    }
+    case 'label': {
+      const label = stringField(input, 'label') || text;
+      if (!label) throw new StageError('insert_dialogue_block 的 label 行缺少 label。');
+      return `label:${label};`;
+    }
+    case 'end':
+      return 'end;';
+    case 'comment':
+      if (!text) throw new StageError('insert_dialogue_block 的 comment 行缺少 text。');
+      return `;${text}`;
+    default:
+      throw new StageError(`insert_dialogue_block 不支持的行类型：${type || '空'}`);
+  }
+}
+
+function sceneBlockText(lines: DialogueLineInput[], ctx: StagingContext): string {
+  return lines.map((line) => sceneBlockLine(line, ctx)).join('\n');
+}
+
+function headerPatches(
+  file: string,
+  content: string,
+  chapter?: string,
+  outline?: string,
+): EditorPatch[] {
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+  let hasChapter = false;
+  let hasOutline = false;
+  const next = lines.map((line) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('; 章节:') || trimmed.startsWith(';章节:')) {
+      hasChapter = true;
+      return chapter === undefined ? line : `; 章节: ${chapter}`;
+    }
+    if (trimmed.startsWith('; 大纲:') || trimmed.startsWith(';大纲:')) {
+      hasOutline = true;
+      return outline === undefined ? line : `; 大纲: ${outline}`;
+    }
+    return line;
+  });
+  const prefix = [
+    chapter !== undefined && !hasChapter ? `; 章节: ${chapter}` : undefined,
+    outline !== undefined && !hasOutline ? `; 大纲: ${outline}` : undefined,
+  ].filter((line): line is string => Boolean(line));
+  const nextText = [...prefix, ...next].join('\n');
+  if (nextText === normalized) return [];
+  return [{
+    type: 'replace',
+    file,
+    startLine: 1,
+    endLine: Math.max(1, lines.length),
+    anchorText: lines[0] ?? '',
+    text: nextText,
+  }];
+}
+
+export async function stageSceneHeaderEdit(
+  existing: SceneEdit | undefined,
+  staged: Extract<StagedWrite, { tool: 'set_scene_header' }>,
+  ctx: StagingContext,
+): Promise<SceneEdit> {
+  const isCurrent = staged.file === ctx.currentSceneName;
+  const content = existing?.afterContent ?? (isCurrent ? ctx.currentScriptSource : await ctx.readSceneContent(staged.file));
+  const patches = headerPatches(staged.file, content, staged.chapter, staged.outline);
+  if (patches.length === 0) throw new StageError('章节/大纲没有变化。');
+  return stageSceneEdit(existing, { tool: 'edit_scene', file: staged.file, patches }, ctx);
+}
+
+export async function stageDialogueBlockInsert(
+  existing: SceneEdit | undefined,
+  staged: Extract<StagedWrite, { tool: 'insert_dialogue_block' }>,
+  ctx: StagingContext,
+): Promise<SceneEdit> {
+  const patch: EditorPatch = {
+    type: 'insert',
+    file: staged.file,
+    afterLine: staged.afterLine,
+    anchorText: staged.anchorText,
+    text: sceneBlockText(staged.lines, ctx),
+  };
+  return stageSceneEdit(existing, { tool: 'edit_scene', file: staged.file, patches: [patch] }, ctx);
+}
+
+function choiceTarget(choice: Record<string, unknown>): string {
+  const target = stringField(choice, 'targetScene') || stringField(choice, 'target') || stringField(choice, 'file');
+  if (!target) throw new StageError('create_branch 的 choice 缺少 targetScene。');
+  return normalizeSceneFilename(target);
+}
+
+export async function stageBranchEdit(
+  existing: SceneEdit | undefined,
+  staged: Extract<StagedWrite, { tool: 'create_branch' }>,
+  ctx: StagingContext,
+): Promise<{ sourceEdit: SceneEdit; createSceneEdits: CreateSceneEdit[] }> {
+  const createSceneEdits: CreateSceneEdit[] = [];
+  const existingFiles = await ctx.listSceneFiles();
+  const choices = staged.choices.map((choice) => {
+    const text = stringField(choice, 'text');
+    if (!text) throw new StageError('create_branch 的 choice 缺少 text。');
+    const target = choiceTarget(choice);
+    if (existingFiles.some((file) => file.toLowerCase() === target.toLowerCase())) {
+      throw new StageError(`分支目标场景「${target}」已存在，create_branch 只负责创建新目标场景。`);
+    }
+    if (createSceneEdits.some((edit) => edit.file.toLowerCase() === target.toLowerCase())) {
+      throw new StageError(`create_branch 中重复的目标场景：${target}`);
+    }
+    const contentLines = Array.isArray(choice.contentLines)
+      ? choice.contentLines.filter((line): line is DialogueLineInput => typeof line === 'object' && line !== null && !Array.isArray(line))
+      : [];
+    createSceneEdits.push({
+      kind: 'create_scene',
+      file: target,
+      chapter: stringField(choice, 'chapter') || undefined,
+      outline: stringField(choice, 'outline') || undefined,
+      initialContent: contentLines.length > 0 ? sceneBlockText(contentLines, ctx) : undefined,
+    });
+    return `${escapeChoicePart(text)}:${target}`;
+  });
+  const patch: EditorPatch = {
+    type: 'insert',
+    file: staged.file,
+    afterLine: staged.afterLine,
+    anchorText: staged.anchorText,
+    text: `choose:${choices.join('|')};`,
+  };
+  const sourceEdit = await stageSceneEdit(existing, { tool: 'edit_scene', file: staged.file, patches: [patch] }, ctx);
+  const withNodes = await Promise.all(createSceneEdits.map(async (edit) => ({
+    ...edit,
+    initialNodes: edit.initialContent ? await parseScene(edit.initialContent) : undefined,
+  })));
+  return { sourceEdit, createSceneEdits: withNodes };
 }
 
 export async function stageFigureInsert(
@@ -421,6 +650,41 @@ export function stageCreateCharacterEdit(
   };
 }
 
+export function stageCharacterSpritesPlan(
+  existing: CharacterEdit | undefined,
+  staged: Extract<StagedWrite, { tool: 'plan_character_sprites' }>,
+  ctx: StagingContext,
+): CharacterEdit {
+  const character = findCharacter(ctx.characters, staged.character);
+  if (!character) throw new StageError(`找不到角色：${staged.character}`);
+  const before = existing?.before ?? character;
+  const baseAfter = existing?.after ?? before;
+  const sprites = [...baseAfter.sprites];
+  for (const input of staged.sprites) {
+    const emotion = stringField(input, 'emotion');
+    const prompt = stringField(input, 'prompt');
+    if (!emotion) continue;
+    const index = sprites.findIndex((sprite) => sprite.emotion.trim().toLowerCase() === emotion.toLowerCase());
+    if (index >= 0) {
+      sprites[index] = {
+        ...sprites[index],
+        prompt: prompt || sprites[index].prompt,
+      };
+    } else {
+      sprites.push({ emotion, file: '', prompt: prompt || undefined });
+    }
+  }
+  const after = { ...baseAfter, sprites } as Character;
+  return {
+    kind: 'character',
+    id: before.id,
+    name: before.name,
+    before,
+    after,
+    changedFields: diffObjectFields(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>),
+  };
+}
+
 /** Build (or merge into) a CharacterEdit from a staged partial update. */
 export function stageCharacterEdit(
   existing: CharacterEdit | undefined,
@@ -468,9 +732,8 @@ export async function stageCreateSceneEdit(
   staged: Extract<StagedWrite, { tool: 'create_scene' }>,
   ctx: StagingContext,
 ): Promise<CreateSceneEdit> {
-  const base = staged.name.trim().replace(/\\/g, '/').split('/').pop() ?? staged.name.trim();
-  if (!base) throw new StageError('create_scene 的场景名为空。');
-  const file = base.toLowerCase().endsWith('.txt') ? base : `${base}.txt`;
+  const file = normalizeSceneFilename(staged.name);
+  if (!file || file === '.txt') throw new StageError('create_scene 的场景名为空。');
   const existing = await ctx.listSceneFiles();
   if (existing.some((f) => f.toLowerCase() === file.toLowerCase())) {
     throw new StageError(`场景「${file}」已存在，换个名字，或用 edit_scene 修改它。`);

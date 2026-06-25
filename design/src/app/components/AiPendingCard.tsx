@@ -110,7 +110,7 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
       : edit.kind === 'create_character'
         ? `设定 ${edit.changedFields.join('、') || '基础字段'}`
       : edit.kind === 'create_scene'
-        ? `文件 ${edit.file}${edit.outline ? ` · 大纲：${edit.outline}` : ''}`
+        ? `文件 ${edit.file}${edit.outline ? ` · 大纲：${edit.outline}` : ''}${edit.initialContent ? ' · 含初始剧情' : ''}`
         : `修改 ${edit.changedFields.join('、') || '（无变化）'}`;
   return (
     <div className="mt-2 rounded-md border border-border bg-background/40 p-2">

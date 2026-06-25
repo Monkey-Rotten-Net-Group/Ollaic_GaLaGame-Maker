@@ -4,9 +4,13 @@ import {
   StageError,
   resolveFigurePatchText,
   stageCharacterEdit,
+  stageCharacterSpritesPlan,
+  stageBranchEdit,
   stageCreateCharacterEdit,
+  stageDialogueBlockInsert,
   stageFigureInsert,
   stageMemoryEdit,
+  stageSceneHeaderEdit,
   type StagingContext,
 } from './change-set';
 import type { Character } from './character-types';
@@ -18,8 +22,23 @@ const invokeMock = vi.mocked(invoke);
 beforeEach(() => {
   invokeMock.mockReset();
   invokeMock.mockImplementation(async (command, args) => {
-    if (command === 'parse_scene') return [];
-    if (command === 'serialize_scene') return String((args as { nodes?: unknown }).nodes ?? '');
+    if (command === 'parse_scene') {
+      return String((args as { source?: string }).source ?? '')
+        .split('\n')
+        .map((content, index) => ({
+          id: `n${index}`,
+          type: 'comment',
+          content,
+          flags: [],
+          position: { x: 0, y: 0 },
+          connections: [],
+        }));
+    }
+    if (command === 'serialize_scene') {
+      return ((args as { nodes?: Array<{ content?: string }> }).nodes ?? [])
+        .map((node) => node.content ?? '')
+        .join('\n');
+    }
     throw new Error(`unexpected invoke: ${command}`);
   });
 });
@@ -174,6 +193,63 @@ describe('stageFigureInsert', () => {
   });
 });
 
+describe('scene structure tools', () => {
+  it('sets scene header without requiring the model to patch comment lines', async () => {
+    const edit = await stageSceneHeaderEdit(
+      undefined,
+      { tool: 'set_scene_header', file: 'start.txt', chapter: '第一章', outline: '雨夜重逢' },
+      makeCtx({ currentScriptSource: ':开场;' }),
+    );
+
+    expect(edit.afterContent).toContain('; 章节: 第一章');
+    expect(edit.afterContent).toContain('; 大纲: 雨夜重逢');
+    expect(edit.afterContent).toContain(':开场;');
+  });
+
+  it('turns structured dialogue lines into WebGAL txt', async () => {
+    const edit = await stageDialogueBlockInsert(
+      undefined,
+      {
+        tool: 'insert_dialogue_block',
+        file: 'start.txt',
+        afterLine: 'end',
+        lines: [
+          { type: 'narrator', text: '雨停了。' },
+          { type: 'dialogue', character: '小明', text: '我们走吧。' },
+          { type: 'jump', target: 'next' },
+        ],
+      },
+      makeCtx({ currentScriptSource: '; 章节: 开端' }),
+    );
+
+    expect(edit.afterContent).toContain(':雨停了。;');
+    expect(edit.afterContent).toContain('小明:我们走吧。;');
+    expect(edit.afterContent).toContain('changeScene:next.txt;');
+  });
+
+  it('creates branch targets with optional initial content', async () => {
+    const result = await stageBranchEdit(
+      undefined,
+      {
+        tool: 'create_branch',
+        file: 'start.txt',
+        afterLine: 'end',
+        choices: [
+          { text: '追上去', targetScene: 'chase', chapter: '追逐', contentLines: [{ type: 'narrator', text: '他冲进雨幕。' }] },
+          { text: '留下来', targetScene: 'stay', outline: '选择等待' },
+        ],
+      },
+      makeCtx({ currentScriptSource: ':选择时刻;' }),
+    );
+
+    expect(result.sourceEdit.afterContent).toContain('choose:追上去:chase.txt|留下来:stay.txt;');
+    expect(result.createSceneEdits.map((edit) => edit.file)).toEqual(['chase.txt', 'stay.txt']);
+    expect(result.createSceneEdits[0].chapter).toBe('追逐');
+    expect(result.createSceneEdits[0].initialContent).toBe(':他冲进雨幕。;');
+    expect(result.createSceneEdits[0].initialNodes?.length).toBe(1);
+  });
+});
+
 describe('stageCharacterEdit', () => {
   it('throws a StageError when the character is missing', () => {
     expect(() =>
@@ -208,6 +284,29 @@ describe('stageCharacterEdit', () => {
     expect(edit.after.aliases).toEqual(['明明']); // wrong type ignored, base kept
     expect(edit.after.personality).toBe('开朗');  // number ignored, base kept
     expect(edit.changedFields).toEqual([]);
+  });
+});
+
+describe('stageCharacterSpritesPlan', () => {
+  it('adds and updates sprite prompts without binding files', () => {
+    const edit = stageCharacterSpritesPlan(
+      undefined,
+      {
+        tool: 'plan_character_sprites',
+        character: '小明',
+        sprites: [
+          { emotion: '默认', prompt: 'neutral standing pose' },
+          { emotion: '微笑', prompt: 'gentle smile' },
+        ],
+      },
+      makeCtx({ characters: [{ ...BASE_CHARACTER, sprites: [{ emotion: '默认', file: 'old.png' }] }] }),
+    );
+
+    expect(edit.after.sprites).toEqual([
+      { emotion: '默认', file: 'old.png', prompt: 'neutral standing pose' },
+      { emotion: '微笑', file: '', prompt: 'gentle smile' },
+    ]);
+    expect(edit.changedFields).toEqual(['sprites']);
   });
 });
 

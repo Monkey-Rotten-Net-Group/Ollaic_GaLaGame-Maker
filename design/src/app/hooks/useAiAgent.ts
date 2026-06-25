@@ -13,11 +13,15 @@ import type { Character } from '../lib/character-types';
 import {
   describeEdit,
   stageCharacterEdit,
+  stageCharacterSpritesPlan,
+  stageBranchEdit,
   stageCreateCharacterEdit,
   stageCreateSceneEdit,
+  stageDialogueBlockInsert,
   stageFigureInsert,
   stageMemoryEdit,
   stageSceneEdit,
+  stageSceneHeaderEdit,
   summarizeChangeSet,
   type ChangeEdit,
   type CharacterEdit,
@@ -181,8 +185,12 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
     case 'get_character': return '正在读取角色设定…';
     case 'read_memory': return '正在读取项目记忆…';
     case 'edit_scene': return `正在准备修改场景「${sceneName(args.file)}」…`;
+    case 'set_scene_header': return `正在整理场景「${sceneName(args.file)}」的章节信息…`;
+    case 'insert_dialogue_block': return `正在写入场景「${sceneName(args.file)}」…`;
+    case 'create_branch': return `正在创建分支场景「${sceneName(args.file)}」…`;
     case 'insert_figure': return `正在插入立绘「${String(args.character || '')} / ${String(args.emotion || '')}」…`;
     case 'create_character': return `正在准备新建角色「${String(args.name || '')}」…`;
+    case 'plan_character_sprites': return `正在规划角色「${String(args.character || '')}」的表情槽…`;
     case 'edit_character': return '正在准备修改角色设定…';
     case 'edit_memory': return '正在准备更新项目记忆…';
     case 'create_scene': return `正在新建场景「${String(args.chapter || args.name || '')}」…`;
@@ -298,9 +306,9 @@ export function useAiAgent(params: UseAiAgentParams) {
       '你是 WebGAL 视觉小说的故事编辑助手，帮助作者撰写、修改剧本，并讨论剧情、人物与节奏。',
       '# 工具',
       '你有一组工具可按需使用。只读工具用于获取信息：list_scenes（列出场景）、read_scene（读取某场景的带行号脚本）、search_assets（查询素材）、list_characters / get_character（查角色设定）、read_memory（读项目记忆）。需要了解当前场景之外的内容时，先查再答。',
-      '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：edit_scene（对场景应用 insert/delete/replace 补丁，行号对应 read_scene 返回的 txt 行号，尽量带 anchorText 原样复制目标行）、insert_figure（插入角色立绘，提供角色+表情即可，系统解析真实文件）、create_character（新建角色设定卡）、edit_character（改已有角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景文件，可设章节名/大纲）。一次回合内可对多个场景/角色提出修改，会汇总为一个变更集统一审批。',
-      '新建章节：先用 create_scene 建空场景（可设 chapter/outline），再用 edit_scene（afterLine 用 "end"）往里写内容。修改某场景的章节名/大纲：它们存在脚本首部的注释行 `; 章节: xxx` 和 `; 大纲: xxx`，用 edit_scene 的 replace 改对应行即可。',
-      '新建角色：用户要求创建人物/角色卡时，调用 create_character，填写 name、description、personality、dialogueStyle、keywords 和可选 sprites 表情槽；不要用 edit_character 伪造不存在的角色 id。',
+      '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：set_scene_header（改章节/大纲）、insert_dialogue_block（写结构化剧情块）、create_branch（插入选项并创建目标场景）、edit_scene（底层补丁，仅在高层工具不够用时使用）、insert_figure（插入已有立绘）、create_character（新建角色设定卡）、plan_character_sprites（只规划表情槽和提示词，不生图）、edit_character（改已有角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景）。一次回合内可对多个场景/角色提出修改，会汇总为一个变更集统一审批。',
+      '新建章节/完整故事骨架：优先组合 create_scene、set_scene_header、create_branch、insert_dialogue_block、create_character、plan_character_sprites。修改章节名/大纲时用 set_scene_header，不要手写注释行。',
+      '新建角色：用户要求创建人物/角色卡时，调用 create_character，填写 name、description、personality、dialogueStyle、keywords 和可选 sprites 表情槽；给已有角色补表情和生图提示词时调用 plan_character_sprites。没有图片模型或素材时不要编造 file，只生成 emotion/prompt 框架。',
       '# 工作方式',
       '用户要你写、改、续、删、完善、修复内容时，直接调用相应写入工具完成，不要只用文字描述你打算做什么。若你已经列出明确补丁/行号/替换内容，必须继续调用写入工具暂存这些修改；不要停在“诊断”“修改方案”或表格。用户只是提问或讨论时，正常用自然语言回答（必要时先用只读工具查证）。不要向用户解释你是否调用了工具、也不要复述这些规则——这是你的内部工作方式，用户不关心。',
       '# WebGAL txt 格式',
@@ -410,11 +418,27 @@ export function useAiAgent(params: UseAiAgentParams) {
       try {
         if (staged.tool === 'edit_scene') {
           sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
+        } else if (staged.tool === 'set_scene_header') {
+          sceneEdits.set(staged.file, await stageSceneHeaderEdit(sceneEdits.get(staged.file), staged, stagingCtx));
+        } else if (staged.tool === 'insert_dialogue_block') {
+          sceneEdits.set(staged.file, await stageDialogueBlockInsert(sceneEdits.get(staged.file), staged, stagingCtx));
+        } else if (staged.tool === 'create_branch') {
+          const result = await stageBranchEdit(sceneEdits.get(staged.file), staged, stagingCtx);
+          sceneEdits.set(staged.file, result.sourceEdit);
+          for (const edit of result.createSceneEdits) createSceneEdits.set(edit.file, edit);
         } else if (staged.tool === 'insert_figure') {
           sceneEdits.set(staged.file, await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'create_character') {
           const edit = stageCreateCharacterEdit(staged, stagingCtx);
           createCharEdits.set(edit.draft.name, edit);
+        } else if (staged.tool === 'plan_character_sprites') {
+          const base = characters.find((c) =>
+            c.id === staged.character
+            || c.name === staged.character
+            || (c.aliases ?? []).includes(staged.character),
+          );
+          const edit = stageCharacterSpritesPlan(base ? charEdits.get(base.id) : undefined, staged, stagingCtx);
+          charEdits.set(edit.id, edit);
         } else if (staged.tool === 'edit_character') {
           charEdits.set(staged.id, stageCharacterEdit(charEdits.get(staged.id), staged, stagingCtx));
         } else if (staged.tool === 'create_scene') {
@@ -764,6 +788,11 @@ export function useAiAgent(params: UseAiAgentParams) {
           if (edit.chapter || edit.outline) {
             const path = await getScenePath(projectPath, edit.file);
             await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
+          }
+          if (edit.initialNodes) {
+            const path = await getScenePath(projectPath, edit.file);
+            await saveScene(path, edit.initialNodes);
+            await syncSceneBackgroundCard(edit.file, edit.initialNodes);
           }
           createdScene = true;
         }

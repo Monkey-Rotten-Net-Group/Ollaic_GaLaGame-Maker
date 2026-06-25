@@ -73,6 +73,14 @@ function asStringArray(value: unknown): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+function asRecordArray(value: unknown): Record<string, unknown>[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.filter((item): item is Record<string, unknown> =>
+    typeof item === 'object' && item !== null && !Array.isArray(item),
+  );
+  return out.length > 0 ? out : undefined;
+}
+
 function asAfterLine(value: unknown): number | 'end' | undefined {
   if (value === 'end') return 'end';
   const n = asInt(value);
@@ -307,6 +315,9 @@ const readTools: AgentTool[] = [
 /** Staged write payloads, discriminated by the originating tool name. */
 export type StagedWrite =
   | { tool: 'edit_scene'; file: string; patches: EditorPatch[] }
+  | { tool: 'set_scene_header'; file: string; chapter?: string; outline?: string }
+  | { tool: 'insert_dialogue_block'; file: string; afterLine: number | 'end'; anchorText?: string; lines: Record<string, unknown>[] }
+  | { tool: 'create_branch'; file: string; afterLine: number | 'end'; anchorText?: string; choices: Record<string, unknown>[] }
   | {
       tool: 'insert_figure';
       file: string;
@@ -319,6 +330,7 @@ export type StagedWrite =
       figureId?: string;
     }
   | { tool: 'create_character'; draft: Record<string, unknown> }
+  | { tool: 'plan_character_sprites'; character: string; sprites: Record<string, unknown>[] }
   | { tool: 'edit_character'; id: string; partial: Record<string, unknown> }
   | { tool: 'edit_memory'; partial: Record<string, unknown> }
   | { tool: 'create_scene'; name: string; chapter?: string; outline?: string };
@@ -380,6 +392,110 @@ const writeTools: AgentTool[] = [
         );
       }
       return { tool: 'edit_scene', file, patches: patches as EditorPatch[] } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'set_scene_header',
+    description:
+      '设置某个场景的章节名和/或大纲。用于组织故事结构，不要再手写注释行改章节/大纲。修改先进入预览。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: '目标场景文件名' },
+        chapter: { type: 'string', description: '章节名；省略表示不改' },
+        outline: { type: 'string', description: '场景大纲/简述；省略表示不改' },
+      },
+      required: ['file'],
+    },
+    run: async (args) => {
+      const file = asString(args.file);
+      if (!file) throw new Error('set_scene_header 需要 file。');
+      const chapter = asString(args.chapter);
+      const outline = asString(args.outline);
+      if (!chapter && !outline) throw new Error('set_scene_header 至少需要 chapter 或 outline。');
+      return { tool: 'set_scene_header', file, chapter, outline } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'insert_dialogue_block',
+    description:
+      '向场景插入一段结构化剧情块。用于连续写入旁白、对白、背景、BGM、音效、跳转、结束等常见 WebGAL 内容，系统会生成合法 txt。需要真实素材时先用 search_assets 查询；没有素材就省略素材命令或写明待补。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: '目标场景文件名' },
+        afterLine: { description: '在该 txt 行号之后插入；可为正整数，或字符串 "end" 表示文件末尾' },
+        anchorText: { type: 'string', description: 'afterLine 对应行原文，用于行号漂移兜底' },
+        lines: {
+          type: 'array',
+          description: '剧情行数组',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['narrator', 'dialogue', 'intro', 'background', 'figure', 'bgm', 'effect', 'video', 'jump', 'call', 'label', 'end', 'comment'] },
+              text: { type: 'string', description: '旁白/对白/intro/注释文本' },
+              character: { type: 'string', description: 'dialogue/figure 专用角色名' },
+              emotion: { type: 'string', description: 'figure 专用表情名' },
+              position: { type: 'string', enum: ['left', 'center', 'right'] },
+              asset: { type: 'string', description: 'background/bgm/effect/video/figure 专用真实素材文件名；figure 可省略，由角色+表情解析' },
+              target: { type: 'string', description: 'jump/call 目标场景文件名' },
+              label: { type: 'string', description: 'label 名称' },
+              next: { type: 'boolean', description: '素材命令是否加 -next，默认 true' },
+            },
+            required: ['type'],
+          },
+        },
+      },
+      required: ['file', 'afterLine', 'lines'],
+    },
+    run: async (args) => {
+      const file = asString(args.file);
+      if (!file) throw new Error('insert_dialogue_block 需要 file。');
+      const afterLine = asAfterLine(args.afterLine);
+      if (!afterLine) throw new Error('insert_dialogue_block 需要 afterLine（正整数或 "end"）。');
+      const lines = asRecordArray(args.lines);
+      if (!lines) throw new Error('insert_dialogue_block 需要非空 lines。');
+      return { tool: 'insert_dialogue_block', file, afterLine, anchorText: asString(args.anchorText), lines } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'create_branch',
+    description:
+      '在当前/指定场景插入选项分支，并暂存创建每个目标场景。用于搭建多分支故事结构。choices 中每项包含 text、targetScene、可选 chapter/outline/contentLines。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: '插入 choose 的源场景文件名' },
+        afterLine: { description: '在该 txt 行号之后插入 choose；可为正整数，或字符串 "end" 表示文件末尾' },
+        anchorText: { type: 'string', description: 'afterLine 对应行原文，用于行号漂移兜底' },
+        choices: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: '选项显示文本' },
+              targetScene: { type: 'string', description: '目标场景文件名，可不含 .txt' },
+              chapter: { type: 'string', description: '目标场景章节名' },
+              outline: { type: 'string', description: '目标场景大纲' },
+              contentLines: { type: 'array', description: '可选：目标场景初始剧情行，格式同 insert_dialogue_block.lines', items: { type: 'object' } },
+            },
+            required: ['text', 'targetScene'],
+          },
+        },
+      },
+      required: ['file', 'afterLine', 'choices'],
+    },
+    run: async (args) => {
+      const file = asString(args.file);
+      if (!file) throw new Error('create_branch 需要 file。');
+      const afterLine = asAfterLine(args.afterLine);
+      if (!afterLine) throw new Error('create_branch 需要 afterLine（正整数或 "end"）。');
+      const choices = asRecordArray(args.choices);
+      if (!choices || choices.length < 2) throw new Error('create_branch 至少需要两个 choices。');
+      return { tool: 'create_branch', file, afterLine, anchorText: asString(args.anchorText), choices } satisfies StagedWrite;
     },
   },
   {
@@ -485,6 +601,37 @@ const writeTools: AgentTool[] = [
       if (keywords) draft.keywords = keywords;
       if (Array.isArray(args.sprites)) draft.sprites = args.sprites;
       return { tool: 'create_character', draft } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'plan_character_sprites',
+    description:
+      '给已有角色规划/追加表情槽与生图提示词，不调用生图模型、不绑定素材文件。用于先搭角色立绘框架，后续手动或生成素材再补 file。修改先进入预览。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        character: { type: 'string', description: '角色 id、名字或别名' },
+        sprites: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              emotion: { type: 'string', description: '表情名，如 默认、微笑、生气' },
+              prompt: { type: 'string', description: '该表情的生图提示词' },
+            },
+            required: ['emotion', 'prompt'],
+          },
+        },
+      },
+      required: ['character', 'sprites'],
+    },
+    run: async (args) => {
+      const character = asString(args.character);
+      if (!character) throw new Error('plan_character_sprites 需要 character。');
+      const sprites = asRecordArray(args.sprites);
+      if (!sprites) throw new Error('plan_character_sprites 需要非空 sprites。');
+      return { tool: 'plan_character_sprites', character, sprites } satisfies StagedWrite;
     },
   },
   {
