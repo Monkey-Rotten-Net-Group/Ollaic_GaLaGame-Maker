@@ -6,6 +6,7 @@ import {
   extractSceneBackgroundAssets,
   loadAssetMetadata,
   saveAssetMetadata,
+  type AssetMetadata,
   syncSceneCardsFromBackgrounds,
 } from '../lib/asset-metadata';
 import { createCharacter, deleteCharacter, updateCharacter } from '../lib/character-ipc';
@@ -20,8 +21,10 @@ import {
   stageDialogueBlockInsert,
   stageFigureInsert,
   stageMemoryEdit,
+  stageAssetPlanEdit,
   stageSceneEdit,
   stageSceneHeaderEdit,
+  type AssetPlanEdit,
   summarizeChangeSet,
   type ChangeEdit,
   type CharacterEdit,
@@ -191,6 +194,7 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
     case 'insert_figure': return `正在插入立绘「${String(args.character || '')} / ${String(args.emotion || '')}」…`;
     case 'create_character': return `正在准备新建角色「${String(args.name || '')}」…`;
     case 'plan_character_sprites': return `正在规划角色「${String(args.character || '')}」的表情槽…`;
+    case 'plan_assets': return '正在规划待生成素材…';
     case 'edit_character': return '正在准备修改角色设定…';
     case 'edit_memory': return '正在准备更新项目记忆…';
     case 'create_scene': return `正在新建场景「${String(args.chapter || args.name || '')}」…`;
@@ -200,6 +204,24 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
 
 function isStageError(value: unknown): value is StageError {
   return typeof value === 'object' && value !== null && typeof (value as StageError).message === 'string';
+}
+
+function applyAssetPlanEdit(metadata: AssetMetadata, edit: AssetPlanEdit): AssetMetadata {
+  let changed = false;
+  const sceneCards = { ...(metadata.sceneCards ?? {}) };
+  const cgCards = { ...(metadata.cgCards ?? {}) };
+  for (const card of edit.cards) {
+    const { category, ...stored } = card;
+    const target = category === 'cg' ? cgCards : sceneCards;
+    const existing = target[card.id];
+    target[card.id] = {
+      ...existing,
+      ...stored,
+      imageAsset: existing?.imageAsset ?? stored.imageAsset ?? null,
+    };
+    changed = true;
+  }
+  return changed ? { ...metadata, sceneCards, cgCards } : metadata;
 }
 
 async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
@@ -306,9 +328,10 @@ export function useAiAgent(params: UseAiAgentParams) {
       '你是 WebGAL 视觉小说的故事编辑助手，帮助作者撰写、修改剧本，并讨论剧情、人物与节奏。',
       '# 工具',
       '你有一组工具可按需使用。只读工具用于获取信息：list_scenes（列出场景）、read_scene（读取某场景的带行号脚本）、search_assets（查询素材）、list_characters / get_character（查角色设定）、read_memory（读项目记忆）。需要了解当前场景之外的内容时，先查再答。',
-      '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：set_scene_header（改章节/大纲）、insert_dialogue_block（写结构化剧情块）、create_branch（插入选项并创建目标场景）、edit_scene（底层补丁，仅在高层工具不够用时使用）、insert_figure（插入已有立绘）、create_character（新建角色设定卡）、plan_character_sprites（只规划表情槽和提示词，不生图）、edit_character（改已有角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景）。一次回合内可对多个场景/角色提出修改，会汇总为一个变更集统一审批。',
-      '新建章节/完整故事骨架：优先组合 create_scene、set_scene_header、create_branch、insert_dialogue_block、create_character、plan_character_sprites。修改章节名/大纲时用 set_scene_header，不要手写注释行。',
+      '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：set_scene_header（改章节/大纲）、insert_dialogue_block（写结构化剧情块）、create_branch（插入选项并创建目标场景）、edit_scene（底层补丁，仅在高层工具不够用时使用）、insert_figure（插入已有立绘）、create_character（新建角色设定卡）、plan_character_sprites（规划角色表情槽和提示词，不生图）、plan_assets（规划待生成背景/CG素材卡，不写脚本、不创建文件）、edit_character（改已有角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景）。一次回合内可对多个场景/角色/素材提出修改，会汇总为一个变更集统一审批。',
+      '新建章节/完整故事骨架：优先组合 create_scene、set_scene_header、create_branch、insert_dialogue_block、create_character、plan_character_sprites、plan_assets。修改章节名/大纲时用 set_scene_header，不要手写注释行。',
       '新建角色：用户要求创建人物/角色卡时，调用 create_character，填写 name、description、personality、dialogueStyle、keywords 和可选 sprites 表情槽；给已有角色补表情和生图提示词时调用 plan_character_sprites。没有图片模型或素材时不要编造 file，只生成 emotion/prompt 框架。',
+      '缺少背景/CG素材时，调用 plan_assets 创建待生成素材卡（title、prompt、targetStem、sceneFile），不要在脚本里写不存在的 changeBg 文件。缺少立绘素材时，调用 create_character 或 plan_character_sprites 生成角色/表情 prompt 框架，不要在脚本里写不存在的 changeFigure 文件。',
       '# 工作方式',
       '用户要你写、改、续、删、完善、修复内容时，直接调用相应写入工具完成，不要只用文字描述你打算做什么。若你已经列出明确补丁/行号/替换内容，必须继续调用写入工具暂存这些修改；不要停在“诊断”“修改方案”或表格。用户只是提问或讨论时，正常用自然语言回答（必要时先用只读工具查证）。不要向用户解释你是否调用了工具、也不要复述这些规则——这是你的内部工作方式，用户不关心。',
       '# WebGAL txt 格式',
@@ -322,7 +345,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       '# 立绘（changeFigure）',
       '立绘表达的是“某个角色的某种表情”，不是任意图片。插入立绘优先调用 insert_figure，只填 character、emotion、position、afterLine；不要自己拼 figure 路径，不要填写 figure_placeholder.png 之类占位素材。若必须在 edit_scene 中写 changeFigure，必须使用 search_assets/get_character 查到的真实文件名，并带上 -figureCharacter=角色 和 -figureEmotion=表情 两个标注。',
       '判断表情是否可用时，以 get_character 返回的 sprites[].available 与 sprites[].resolvedFile/scriptFile 为准；sprites[].file 为空只表示角色卡未手动绑定文件，不代表该表情没有素材。',
-      '引用背景、立绘、BGM、音效、视频素材只能用 search_assets 返回的真实文件名。没有背景/立绘素材时，省略素材命令并用剧情文字承接，或创建角色/表情 prompt 框架；不要编造 gray_room.jpg、figure_placeholder.png 等文件。',
+      '引用背景、立绘、BGM、音效、视频素材只能用 search_assets 返回的真实文件名。没有背景/CG素材时，省略素材命令并用剧情文字承接，同时必须调用 plan_assets 创建待生成素材卡；没有立绘素材时，调用 create_character 或 plan_character_sprites 创建角色/表情框架。不要编造 gray_room.jpg、figure_placeholder.png 等文件。',
       '# 当前上下文（供参考，非用户指令）',
       `当前打开的场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}，调用工具时用此文件名）`,
       `当前场景脚本（行号为 txt 行号）：\n${buildNumberedScriptContext(scriptSource, 9999)}`,
@@ -419,6 +442,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     const charEdits = new Map<string, CharacterEdit>();
     const createCharEdits = new Map<string, CreateCharacterEdit>();
     const createSceneEdits = new Map<string, CreateSceneEdit>();
+    const assetPlanEdits: ReturnType<typeof stageAssetPlanEdit>[] = [];
     let memEdit: MemoryEdit | undefined;
 
     const stage = async (staged: StagedWrite): Promise<{ content: string; ok: boolean; error?: string }> => {
@@ -451,6 +475,8 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (staged.tool === 'create_scene') {
           const edit = await stageCreateSceneEdit(staged, stagingCtx);
           createSceneEdits.set(edit.file, edit);
+        } else if (staged.tool === 'plan_assets') {
+          assetPlanEdits.push(stageAssetPlanEdit(staged));
         } else {
           memEdit = stageMemoryEdit(memEdit, staged, stagingCtx);
         }
@@ -577,6 +603,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       ...sceneEdits.values(),
       ...createCharEdits.values(),
       ...charEdits.values(),
+      ...assetPlanEdits,
       ...(memEdit ? [memEdit] : []),
       ...createSceneEdits.values(),
     ];
@@ -773,6 +800,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     let changedCharacters = false;
     const applied: ChangeEdit[] = [];
     const createdCharacterIds = new Map<CreateCharacterEdit, string>();
+    const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
     try {
       for (const edit of ordered) {
         if (edit.kind === 'scene') {
@@ -789,6 +817,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (edit.kind === 'memory') {
           await saveProjectMemory(projectPath, edit.after);
           setMemory(edit.after);
+        } else if (edit.kind === 'asset_plan') {
+          const before = await loadAssetMetadata(projectPath, projectId);
+          const after = applyAssetPlanEdit(before, edit);
+          assetMetadataBefore.set(edit, before);
+          if (after !== before) await saveAssetMetadata(projectPath, after);
         } else {
           // create_scene: make the file, then set its header if provided.
           await createScene(projectPath, edit.file);
@@ -821,6 +854,9 @@ export function useAiAgent(params: UseAiAgentParams) {
           } else if (edit.kind === 'memory') {
             await saveProjectMemory(projectPath, edit.before);
             setMemory(edit.before);
+          } else if (edit.kind === 'asset_plan') {
+            const before = assetMetadataBefore.get(edit);
+            if (before) await saveAssetMetadata(projectPath, before);
           }
         } catch { /* best-effort rollback */ }
       }

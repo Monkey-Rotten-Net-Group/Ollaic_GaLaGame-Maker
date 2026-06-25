@@ -5,7 +5,7 @@ import {
   ChevronRight, FileEdit, Wrench, AlertCircle,
   List, FileText, Search, Users, UserRound, Brain,
   PencilLine, UserCog, BookMarked, FilePlus,
-  UserPlus,
+  UserPlus, ImageIcon,
   type LucideIcon,
 } from 'lucide-react';
 import type { AssistantStep, ChatDiffLine } from '../hooks/useChatSession';
@@ -24,6 +24,7 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   insert_figure: UserPlus,
   create_character: UserPlus,
   plan_character_sprites: UserCog,
+  plan_assets: ImageIcon,
   edit_character: UserCog,
   edit_memory: BookMarked,
   create_scene: FilePlus,

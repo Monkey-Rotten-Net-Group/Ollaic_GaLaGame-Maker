@@ -331,6 +331,7 @@ export type StagedWrite =
     }
   | { tool: 'create_character'; draft: Record<string, unknown> }
   | { tool: 'plan_character_sprites'; character: string; sprites: Record<string, unknown>[] }
+  | { tool: 'plan_assets'; assets: Record<string, unknown>[] }
   | { tool: 'edit_character'; id: string; partial: Record<string, unknown> }
   | { tool: 'edit_memory'; partial: Record<string, unknown> }
   | { tool: 'create_scene'; name: string; chapter?: string; outline?: string };
@@ -652,6 +653,39 @@ const writeTools: AgentTool[] = [
       if (!id) throw new Error('edit_character 需要角色 id。');
       const partial = (args.partial && typeof args.partial === 'object' ? args.partial : {}) as Record<string, unknown>;
       return { tool: 'edit_character', id, partial } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'plan_assets',
+    description:
+      '规划缺失的待生成图片素材卡，不写入脚本、不创建真实文件。用于缺少背景/CG素材时先搭素材框架：填写 category(background 或 cg)、title、prompt、targetStem、可选 sceneFile/style/negativePrompt。立绘不要用此工具，改用 plan_character_sprites。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        assets: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              category: { type: 'string', enum: ['background', 'cg'], description: '素材类型；背景用 background，剧情画用 cg' },
+              title: { type: 'string', description: '素材卡标题/用途名' },
+              sceneFile: { type: 'string', description: '可选：关联场景文件名，如 start.txt' },
+              targetStem: { type: 'string', description: '可选：建议生成文件名 stem，不含扩展名' },
+              prompt: { type: 'string', description: '图片生成提示词，包含地点/时间/天气/氛围/镜头/主体' },
+              style: { type: 'string', description: '可选：画风约束' },
+              negativePrompt: { type: 'string', description: '可选：负面提示词' },
+            },
+            required: ['category', 'title', 'prompt'],
+          },
+        },
+      },
+      required: ['assets'],
+    },
+    run: async (args) => {
+      const assets = asRecordArray(args.assets);
+      if (!assets) throw new Error('plan_assets 需要非空 assets。');
+      return { tool: 'plan_assets', assets } satisfies StagedWrite;
     },
   },
   {

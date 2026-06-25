@@ -289,7 +289,13 @@ function hasEntries(metadata: AssetMetadata): boolean {
   return Object.keys(metadata.aliases).length > 0
     || Object.keys(metadata.descriptions).length > 0
     || Object.keys(metadata.tags).length > 0
-    || Object.keys(metadata.references).length > 0;
+    || Object.keys(metadata.references).length > 0
+    || Object.keys(metadata.sceneCards ?? {}).length > 0
+    || Object.keys(metadata.cgCards ?? {}).length > 0
+    || Object.keys(metadata.voiceCards ?? {}).length > 0
+    || (metadata.deletedSceneCards ?? []).length > 0
+    || (metadata.deletedCgCards ?? []).length > 0
+    || (metadata.deletedVoiceCards ?? []).length > 0;
 }
 
 function loadLegacyMetadata(projectId: string): AssetMetadata {

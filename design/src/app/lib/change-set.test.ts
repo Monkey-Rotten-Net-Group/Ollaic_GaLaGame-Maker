@@ -10,6 +10,7 @@ import {
   stageDialogueBlockInsert,
   stageFigureInsert,
   stageMemoryEdit,
+  stageAssetPlanEdit,
   stageSceneHeaderEdit,
   type StagingContext,
 } from './change-set';
@@ -307,6 +308,62 @@ describe('stageCharacterSpritesPlan', () => {
       { emotion: '微笑', file: '', prompt: 'gentle smile' },
     ]);
     expect(edit.changedFields).toEqual(['sprites']);
+  });
+});
+
+describe('stageAssetPlanEdit', () => {
+  it('creates pending background and CG cards without script assets', () => {
+    const edit = stageAssetPlanEdit({
+      tool: 'plan_assets',
+      assets: [
+        {
+          category: 'background',
+          title: '灰色房间信件',
+          sceneFile: 'letter_room',
+          targetStem: 'gray_room_letter',
+          prompt: '灰色房间, 桌上一封信, 阴天冷光, 视觉小说背景',
+        },
+        {
+          category: 'cg',
+          title: '信件特写',
+          prompt: '手指按住泛黄信纸的特写, 浅景深',
+        },
+      ],
+    });
+
+    expect(edit.kind).toBe('asset_plan');
+    expect(edit.cards).toHaveLength(2);
+    expect(edit.cards[0]).toMatchObject({
+      category: 'background',
+      title: '灰色房间信件',
+      sceneFile: 'letter_room.txt',
+      imageAsset: null,
+      targetStem: 'gray_room_letter',
+    });
+    expect(edit.cards[1].category).toBe('cg');
+    expect(edit.cards[1].prompt).toContain('信纸');
+  });
+
+  it('rejects figure asset planning because sprites own that flow', () => {
+    expect(() =>
+      stageAssetPlanEdit({
+        tool: 'plan_assets',
+        assets: [{ category: 'figure', title: '静香微笑', prompt: 'smile' }],
+      }),
+    ).toThrow('plan_character_sprites');
+  });
+
+  it('keeps duplicate asset plan titles as distinct cards', () => {
+    const edit = stageAssetPlanEdit({
+      tool: 'plan_assets',
+      assets: [
+        { category: 'background', title: '教室', prompt: 'classroom at noon' },
+        { category: 'background', title: '教室', prompt: 'classroom at night' },
+      ],
+    });
+
+    expect(new Set(edit.cards.map((card) => card.id)).size).toBe(2);
+    expect(edit.cards.map((card) => card.targetStem)).toEqual(['ai_asset_01', 'ai_asset_02']);
   });
 });
 

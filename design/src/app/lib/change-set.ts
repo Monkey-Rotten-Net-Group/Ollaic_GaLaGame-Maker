@@ -9,6 +9,7 @@
  */
 
 import type { AssetInfo } from './assets-ipc';
+import type { SceneAssetCard } from './assets-ipc';
 import type { Character } from './character-types';
 import { applyEditorPatches } from './editor-executor';
 import {
@@ -73,7 +74,12 @@ export interface CreateSceneEdit {
   initialNodes?: WebGalNode[];
 }
 
-export type ChangeEdit = SceneEdit | CharacterEdit | CreateCharacterEdit | MemoryEdit | CreateSceneEdit;
+export interface AssetPlanEdit {
+  kind: 'asset_plan';
+  cards: Array<SceneAssetCard & { category: 'background' | 'cg' }>;
+}
+
+export type ChangeEdit = SceneEdit | CharacterEdit | CreateCharacterEdit | MemoryEdit | CreateSceneEdit | AssetPlanEdit;
 
 export interface PendingChangeSet {
   id: string;
@@ -554,6 +560,7 @@ const CREATE_CHARACTER_STRING_FIELDS = [
 const CREATE_CHARACTER_STRING_ARRAY_FIELDS = ['aliases', 'keywords'] as const;
 const MEMORY_STRING_FIELDS = ['worldSetting', 'writingStyle', 'userPreferences'] as const;
 const CHARACTER_SPRITE_FIELDS = ['emotion', 'prompt'] as const;
+const ASSET_PLAN_STRING_FIELDS = ['category', 'title', 'sceneFile', 'targetStem', 'prompt', 'style', 'negativePrompt'] as const;
 
 /** Keep only known fields with the expected type from a model-supplied partial. */
 function sanitizePartial(
@@ -685,6 +692,69 @@ export function stageCharacterSpritesPlan(
   };
 }
 
+function sanitizeAssetStem(value: string): string {
+  return value
+    .trim()
+    .replace(/\.(png|jpe?g|webp|gif)$/i, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+    .slice(0, 48);
+}
+
+function uniqueAssetValue(base: string, fallback: string, used: Set<string>): string {
+  const root = base || fallback;
+  let candidate = root;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${root}_${suffix}`;
+    suffix += 1;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+export function stageAssetPlanEdit(staged: Extract<StagedWrite, { tool: 'plan_assets' }>): AssetPlanEdit {
+  const cards: AssetPlanEdit['cards'] = [];
+  const usedIds = new Set<string>();
+  const usedTargetStems = new Set<string>();
+  staged.assets.forEach((input, index) => {
+    const safe = sanitizePartial(input, ASSET_PLAN_STRING_FIELDS);
+    const category = safe.category === 'cg' ? 'cg' : safe.category === 'background' ? 'background' : undefined;
+    if (!category) throw new StageError('plan_assets 的 category 只能是 background 或 cg。立绘请使用 plan_character_sprites。');
+    const title = typeof safe.title === 'string' ? safe.title.trim() : '';
+    const prompt = typeof safe.prompt === 'string' ? safe.prompt.trim() : '';
+    if (!title) throw new StageError('plan_assets 需要 title。');
+    if (!prompt) throw new StageError('plan_assets 需要 prompt。');
+    const targetStemBase = sanitizeAssetStem(
+      typeof safe.targetStem === 'string' && safe.targetStem.trim() ? safe.targetStem : title,
+    );
+    const targetStem = uniqueAssetValue(
+      targetStemBase,
+      `ai_asset_${String(index + 1).padStart(2, '0')}`,
+      usedTargetStems,
+    );
+    const id = uniqueAssetValue(
+      `ai:${category}:${targetStem}`,
+      `ai:${category}:asset_${index + 1}`,
+      usedIds,
+    );
+    cards.push({
+      id,
+      category,
+      title,
+      sceneFile: typeof safe.sceneFile === 'string' ? normalizeSceneFilename(safe.sceneFile) : undefined,
+      imageAsset: null,
+      targetStem,
+      prompt,
+      style: typeof safe.style === 'string' ? safe.style.trim() : '',
+      negativePrompt: typeof safe.negativePrompt === 'string' ? safe.negativePrompt.trim() : '',
+    });
+  });
+  if (cards.length === 0) throw new StageError('plan_assets 需要至少一个素材规划。');
+  return { kind: 'asset_plan', cards };
+}
+
 /** Build (or merge into) a CharacterEdit from a staged partial update. */
 export function stageCharacterEdit(
   existing: CharacterEdit | undefined,
@@ -747,6 +817,7 @@ export function describeEdit(edit: ChangeEdit, sceneHeaders?: Record<string, Sce
   if (edit.kind === 'create_character') return `新建角色 ${edit.draft.name}`;
   if (edit.kind === 'character') return `角色 ${edit.name}：修改 ${edit.changedFields.join('、') || '（无变化）'}`;
   if (edit.kind === 'create_scene') return `新建场景「${edit.chapter || edit.file}」`;
+  if (edit.kind === 'asset_plan') return `规划待生成素材 ${edit.cards.length} 个`;
   return `项目记忆：修改 ${edit.changedFields.join('、') || '（无变化）'}`;
 }
 

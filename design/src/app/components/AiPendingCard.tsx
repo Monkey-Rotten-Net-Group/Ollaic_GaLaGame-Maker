@@ -89,6 +89,7 @@ function SceneNodeDiff({ edit }: { edit: SceneEdit }) {
 }
 
 function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Record<string, SceneHeader> }) {
+  const assetCategoryLabel = (category: string) => category === 'cg' ? 'CG' : '背景';
   const renderValue = (value: unknown): string => {
     if (Array.isArray(value)) return value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('、');
     if (value && typeof value === 'object') return JSON.stringify(value);
@@ -103,6 +104,8 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
         ? `角色 ${edit.name}`
         : edit.kind === 'create_scene'
           ? `新建场景「${edit.chapter || edit.file}」`
+        : edit.kind === 'asset_plan'
+          ? `待生成素材 ${edit.cards.length} 个`
           : '项目记忆';
   const detail =
     edit.kind === 'scene'
@@ -111,6 +114,8 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
         ? `设定 ${edit.changedFields.join('、') || '基础字段'}`
       : edit.kind === 'create_scene'
         ? `文件 ${edit.file}${edit.outline ? ` · 大纲：${edit.outline}` : ''}${edit.initialContent ? ' · 含初始剧情' : ''}`
+      : edit.kind === 'asset_plan'
+        ? edit.cards.map((card) => `${assetCategoryLabel(card.category)}：${card.title}`).join('、')
         : `修改 ${edit.changedFields.join('、') || '（无变化）'}`;
   return (
     <div className="mt-2 rounded-md border border-border bg-background/40 p-2">
@@ -120,6 +125,21 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
       </div>
       <div className="mt-1 text-muted-foreground">{detail}</div>
       {edit.kind === 'scene' && <SceneNodeDiff edit={edit} />}
+      {edit.kind === 'asset_plan' && (
+        <div className="mt-2 space-y-1 font-mono-family text-[11px]">
+          {edit.cards.map((card) => (
+            <div key={`${card.category}-${card.id}`} className="rounded bg-background/60 p-1">
+              <div className="text-foreground">
+                {assetCategoryLabel(card.category)} · {card.title}
+              </div>
+              <div className="mt-0.5 text-muted-foreground">
+                目标：{card.targetStem}.png{card.sceneFile ? ` · 场景：${card.sceneFile}` : ''}
+              </div>
+              <div className="mt-0.5 text-muted-foreground">{card.prompt}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {(edit.kind === 'character' || edit.kind === 'create_character' || edit.kind === 'memory') && (
         <div className="mt-2 space-y-1 font-mono-family text-[11px]">
           {edit.changedFields.map((field) => (
