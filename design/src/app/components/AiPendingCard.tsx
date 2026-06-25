@@ -89,9 +89,16 @@ function SceneNodeDiff({ edit }: { edit: SceneEdit }) {
 }
 
 function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Record<string, SceneHeader> }) {
+  const renderValue = (value: unknown): string => {
+    if (Array.isArray(value)) return value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('、');
+    if (value && typeof value === 'object') return JSON.stringify(value);
+    return String(value ?? '');
+  };
   const label =
     edit.kind === 'scene'
       ? `场景「${sceneDisplayName(edit.file, sceneHeaders?.[edit.file])}」${edit.isCurrent ? '（当前）' : ''}`
+      : edit.kind === 'create_character'
+        ? `新建角色 ${edit.draft.name}`
       : edit.kind === 'character'
         ? `角色 ${edit.name}`
         : edit.kind === 'create_scene'
@@ -100,6 +107,8 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
   const detail =
     edit.kind === 'scene'
       ? edit.summary
+      : edit.kind === 'create_character'
+        ? `设定 ${edit.changedFields.join('、') || '基础字段'}`
       : edit.kind === 'create_scene'
         ? `文件 ${edit.file}${edit.outline ? ` · 大纲：${edit.outline}` : ''}`
         : `修改 ${edit.changedFields.join('、') || '（无变化）'}`;
@@ -111,12 +120,14 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
       </div>
       <div className="mt-1 text-muted-foreground">{detail}</div>
       {edit.kind === 'scene' && <SceneNodeDiff edit={edit} />}
-      {(edit.kind === 'character' || edit.kind === 'memory') && (
+      {(edit.kind === 'character' || edit.kind === 'create_character' || edit.kind === 'memory') && (
         <div className="mt-2 space-y-1 font-mono-family text-[11px]">
           {edit.changedFields.map((field) => (
             <div key={field} className="rounded bg-background/60 p-1">
               <span className="text-muted-foreground">{field}: </span>
-              <span className="text-foreground">{String((edit.after as unknown as Record<string, unknown>)[field] ?? '')}</span>
+              <span className="text-foreground">
+                {renderValue(((edit.kind === 'create_character' ? edit.draft : edit.after) as unknown as Record<string, unknown>)[field])}
+              </span>
             </div>
           ))}
         </div>

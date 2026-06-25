@@ -18,8 +18,9 @@ import {
   validatePatchText,
   type EditorPatch,
 } from './editor-patch';
+import { characterColor } from './character-editing';
 import { figureFileTail, findCharacter, findSprite, resolveFigureByEmotion } from './figure-resolve';
-import type { ProjectMemory } from './project-memory';
+import { emptyProjectMemory, type ProjectMemory } from './project-memory';
 import { createLineDiff, type DiffLine, type MissingAssetIssue } from './story-agent';
 import { parseScene, serializeScene, sceneDisplayName, type SceneHeader } from './webgal-ipc';
 import type { WebGalNode } from './webgal-types';
@@ -48,6 +49,12 @@ export interface CharacterEdit {
   changedFields: string[];
 }
 
+export interface CreateCharacterEdit {
+  kind: 'create_character';
+  draft: Character;
+  changedFields: string[];
+}
+
 export interface MemoryEdit {
   kind: 'memory';
   before: ProjectMemory;
@@ -62,7 +69,7 @@ export interface CreateSceneEdit {
   outline?: string;
 }
 
-export type ChangeEdit = SceneEdit | CharacterEdit | MemoryEdit | CreateSceneEdit;
+export type ChangeEdit = SceneEdit | CharacterEdit | CreateCharacterEdit | MemoryEdit | CreateSceneEdit;
 
 export interface PendingChangeSet {
   id: string;
@@ -311,7 +318,13 @@ const CHARACTER_STRING_FIELDS = [
   'gender', 'age', 'defaultVoice', 'voiceTimbre', 'colorTheme', 'notes',
 ] as const;
 const CHARACTER_STRING_ARRAY_FIELDS = ['aliases', 'keywords', 'referenceImages'] as const;
+const CREATE_CHARACTER_STRING_FIELDS = [
+  'name', 'description', 'personality', 'stance', 'dialogueStyle',
+  'gender', 'age', 'voiceTimbre', 'colorTheme', 'notes',
+] as const;
+const CREATE_CHARACTER_STRING_ARRAY_FIELDS = ['aliases', 'keywords'] as const;
 const MEMORY_STRING_FIELDS = ['worldSetting', 'writingStyle', 'userPreferences'] as const;
+const CHARACTER_SPRITE_FIELDS = ['emotion', 'prompt'] as const;
 
 /** Keep only known fields with the expected type from a model-supplied partial. */
 function sanitizePartial(
@@ -328,6 +341,84 @@ function sanitizePartial(
     if (Array.isArray(value) && value.every((v) => typeof v === 'string')) out[key] = value;
   }
   return out;
+}
+
+function sanitizeSprites(value: unknown): Character['sprites'] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const sprites: Character['sprites'] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const input = item as Record<string, unknown>;
+    const emotion = typeof input.emotion === 'string' ? input.emotion.trim() : '';
+    if (!emotion || seen.has(emotion)) continue;
+    seen.add(emotion);
+    const sprite: Character['sprites'][number] = { emotion, file: '' };
+    for (const key of CHARACTER_SPRITE_FIELDS) {
+      if (key === 'emotion') continue;
+      const field = input[key];
+      if (typeof field === 'string' && field.trim()) sprite[key] = field.trim();
+    }
+    sprites.push(sprite);
+  }
+  return sprites;
+}
+
+function makeDraftCharacter(draft: Record<string, unknown>, index: number): Character {
+  const safe = sanitizePartial(draft, CREATE_CHARACTER_STRING_FIELDS, CREATE_CHARACTER_STRING_ARRAY_FIELDS);
+  const name = typeof safe.name === 'string' ? safe.name.trim() : '';
+  if (!name) throw new StageError('create_character 需要角色名称。');
+  const character: Character = {
+    id: `tmp_ai_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    name,
+    aliases: [],
+    description: '',
+    personality: '',
+    stance: '',
+    keywords: [],
+    dialogueStyle: '',
+    gender: '',
+    age: '',
+    sprites: sanitizeSprites(draft.sprites),
+    defaultVoice: undefined,
+    voiceTimbre: undefined,
+    referenceImages: [],
+    relations: [],
+    colorTheme: characterColor(index),
+    notes: '',
+    ...safe,
+  };
+  if (!character.colorTheme) character.colorTheme = characterColor(index);
+  if (!character.sprites.some((sprite) => sprite.emotion === '默认' || sprite.emotion === 'default')) {
+    character.sprites = [{ emotion: '默认', file: '' }, ...character.sprites];
+  }
+  return character;
+}
+
+/** Build a CreateCharacterEdit from a staged character draft. */
+export function stageCreateCharacterEdit(
+  staged: Extract<StagedWrite, { tool: 'create_character' }>,
+  ctx: StagingContext,
+): CreateCharacterEdit {
+  const draft = makeDraftCharacter(staged.draft, ctx.characters.length);
+  const duplicate = ctx.characters.some((character) =>
+    character.name.trim().toLowerCase() === draft.name.trim().toLowerCase()
+    || character.id === draft.id,
+  );
+  if (duplicate) throw new StageError(`角色「${draft.name}」已存在，使用 edit_character 修改它。`);
+  const baseline = {
+    ...makeDraftCharacter({ name: draft.name }, ctx.characters.length),
+    id: draft.id,
+    colorTheme: draft.colorTheme,
+  };
+  return {
+    kind: 'create_character',
+    draft,
+    changedFields: diffObjectFields(
+      baseline as unknown as Record<string, unknown>,
+      draft as unknown as Record<string, unknown>,
+    ),
+  };
 }
 
 /** Build (or merge into) a CharacterEdit from a staged partial update. */
@@ -357,7 +448,7 @@ export function stageMemoryEdit(
   staged: Extract<StagedWrite, { tool: 'edit_memory' }>,
   ctx: StagingContext,
 ): MemoryEdit {
-  const before = existing?.before ?? ctx.memory;
+  const before = existing?.before ?? ctx.memory ?? emptyProjectMemory();
   const baseAfter = existing?.after ?? before;
   const safePartial = sanitizePartial(staged.partial, MEMORY_STRING_FIELDS);
   const after = { ...baseAfter, ...safePartial, updatedAt: new Date().toISOString() } as ProjectMemory;
@@ -390,6 +481,7 @@ export async function stageCreateSceneEdit(
 /** Human-readable one-line summary for an edit (approval list rows). */
 export function describeEdit(edit: ChangeEdit, sceneHeaders?: Record<string, SceneHeader>): string {
   if (edit.kind === 'scene') return `场景「${sceneDisplayName(edit.file, sceneHeaders?.[edit.file])}」：${edit.summary}`;
+  if (edit.kind === 'create_character') return `新建角色 ${edit.draft.name}`;
   if (edit.kind === 'character') return `角色 ${edit.name}：修改 ${edit.changedFields.join('、') || '（无变化）'}`;
   if (edit.kind === 'create_scene') return `新建场景「${edit.chapter || edit.file}」`;
   return `项目记忆：修改 ${edit.changedFields.join('、') || '（无变化）'}`;

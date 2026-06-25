@@ -57,6 +57,22 @@ function asBool(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const out = value
+      .map((item) => asString(item))
+      .filter((item): item is string => Boolean(item));
+    return out.length > 0 ? out : undefined;
+  }
+  const single = asString(value);
+  if (!single) return undefined;
+  const out = single
+    .split(/[,，、]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return out.length > 0 ? out : undefined;
+}
+
 function asAfterLine(value: unknown): number | 'end' | undefined {
   if (value === 'end') return 'end';
   const n = asInt(value);
@@ -302,6 +318,7 @@ export type StagedWrite =
       next?: boolean;
       figureId?: string;
     }
+  | { tool: 'create_character'; draft: Record<string, unknown> }
   | { tool: 'edit_character'; id: string; partial: Record<string, unknown> }
   | { tool: 'edit_memory'; partial: Record<string, unknown> }
   | { tool: 'create_scene'; name: string; chapter?: string; outline?: string };
@@ -407,6 +424,67 @@ const writeTools: AgentTool[] = [
         next: asBool(args.next),
         figureId: asString(args.figureId),
       } satisfies StagedWrite;
+    },
+  },
+  {
+    name: 'create_character',
+    description:
+      '新建一个角色设定卡。用于用户要求“创建/新增角色”时。只填写基础设定与可选表情槽（sprites 只写 emotion/prompt，不绑定素材文件）；创建先进入预览，用户确认后才落盘。',
+    kind: 'write',
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '角色主名称，会用于脚本对白' },
+        aliases: { type: 'array', items: { type: 'string' }, description: '别名/昵称' },
+        description: { type: 'string', description: '外观、身份或背景简述' },
+        personality: { type: 'string', description: '性格特征' },
+        stance: { type: 'string', description: '立场/阵营/道德倾向' },
+        keywords: { type: 'array', items: { type: 'string' }, description: '标签关键词' },
+        dialogueStyle: { type: 'string', description: '说话方式/口癖/语气指南' },
+        gender: { type: 'string', description: '性别或性别表达' },
+        age: { type: 'string', description: '年龄或年龄段' },
+        voiceTimbre: { type: 'string', description: '可选 TTS 音色 id' },
+        colorTheme: { type: 'string', description: '可选 CSS 颜色' },
+        notes: { type: 'string', description: '补充备注' },
+        sprites: {
+          type: 'array',
+          description: '可选表情槽，先不绑定 file；后续由素材生成/绑定流程补齐',
+          items: {
+            type: 'object',
+            properties: {
+              emotion: { type: 'string', description: '表情名，如 默认、微笑、生气' },
+              prompt: { type: 'string', description: '该表情的生成提示词' },
+            },
+            required: ['emotion'],
+          },
+        },
+      },
+      required: ['name'],
+    },
+    run: async (args) => {
+      const name = asString(args.name);
+      if (!name) throw new Error('create_character 需要 name。');
+      const draft: Record<string, unknown> = { name };
+      for (const key of [
+        'description',
+        'personality',
+        'stance',
+        'dialogueStyle',
+        'gender',
+        'age',
+        'voiceTimbre',
+        'colorTheme',
+        'notes',
+      ]) {
+        const value = asString(args[key]);
+        if (value) draft[key] = value;
+      }
+      const aliases = asStringArray(args.aliases);
+      if (aliases) draft.aliases = aliases;
+      const keywords = asStringArray(args.keywords);
+      if (keywords) draft.keywords = keywords;
+      if (Array.isArray(args.sprites)) draft.sprites = args.sprites;
+      return { tool: 'create_character', draft } satisfies StagedWrite;
     },
   },
   {

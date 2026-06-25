@@ -1676,6 +1676,17 @@ export function StoryEditor() {
     }
   }, []);
 
+  const refreshCharactersForAi = useCallback(async () => {
+    if (!projectPath) return;
+    try {
+      const chars = await listCharacters(projectPath);
+      setCharactersForAi(chars);
+    } catch {
+      setCharactersForAi([]);
+    }
+    void loadCharacterColors(projectPath);
+  }, [loadCharacterColors, projectPath]);
+
   const handleHeaderUpdated = useCallback((name: string, header: SceneHeader) => {
     setSceneHeaders((prev) => ({ ...prev, [name]: header }));
   }, []);
@@ -2835,6 +2846,7 @@ export function StoryEditor() {
       // jump/choose nodes (the current scene stays live via the nodes effect).
       void loadSceneLinkMap(projectPath, info.scenes);
     },
+    onCharactersChanged: refreshCharactersForAi,
   });
 
   // While an AI change set is pending, if it edits the currently-open scene,

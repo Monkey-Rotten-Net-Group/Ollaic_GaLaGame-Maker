@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { StageError, resolveFigurePatchText, stageCharacterEdit, stageFigureInsert, stageMemoryEdit, type StagingContext } from './change-set';
+import {
+  StageError,
+  resolveFigurePatchText,
+  stageCharacterEdit,
+  stageCreateCharacterEdit,
+  stageFigureInsert,
+  stageMemoryEdit,
+  type StagingContext,
+} from './change-set';
 import type { Character } from './character-types';
 import type { AssetInfo } from './assets-ipc';
 import { emptyProjectMemory } from './project-memory';
@@ -200,6 +208,57 @@ describe('stageCharacterEdit', () => {
     expect(edit.after.aliases).toEqual(['明明']); // wrong type ignored, base kept
     expect(edit.after.personality).toBe('开朗');  // number ignored, base kept
     expect(edit.changedFields).toEqual([]);
+  });
+});
+
+describe('stageCreateCharacterEdit', () => {
+  it('creates a sanitized draft with a default sprite slot', () => {
+    const edit = stageCreateCharacterEdit(
+      {
+        tool: 'create_character',
+        draft: {
+          id: 'model_id',
+          name: '小红',
+          personality: '冷静',
+          keywords: ['学生', '侦探'],
+          aliases: ['红'],
+          referenceImages: ['fake.png'],
+          defaultVoice: 'fake.wav',
+          sprites: [
+            { emotion: '微笑', prompt: 'gentle smile', file: 'should-not-pass.png' },
+            { emotion: '', prompt: 'ignored' },
+            { emotion: '微笑', prompt: 'duplicate' },
+          ],
+          relations: [{ targetId: 'x', relationType: '朋友', description: '' }],
+          unknown: 'drop',
+        },
+      },
+      makeCtx(),
+    );
+
+    expect(edit.kind).toBe('create_character');
+    expect(edit.draft.id).not.toBe('model_id');
+    expect(edit.draft.name).toBe('小红');
+    expect(edit.draft.personality).toBe('冷静');
+    expect(edit.draft.keywords).toEqual(['学生', '侦探']);
+    expect(edit.draft.aliases).toEqual(['红']);
+    expect(edit.draft.sprites).toEqual([
+      { emotion: '默认', file: '' },
+      { emotion: '微笑', file: '', prompt: 'gentle smile' },
+    ]);
+    expect(edit.draft.relations).toEqual([]);
+    expect(edit.draft.referenceImages).toEqual([]);
+    expect(edit.draft.defaultVoice).toBeUndefined();
+    expect((edit.draft as unknown as Record<string, unknown>).unknown).toBeUndefined();
+  });
+
+  it('throws when the character name already exists', () => {
+    expect(() =>
+      stageCreateCharacterEdit(
+        { tool: 'create_character', draft: { name: '小明' } },
+        makeCtx(),
+      ),
+    ).toThrow(StageError);
   });
 });
 

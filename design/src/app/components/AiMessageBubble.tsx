@@ -19,6 +19,7 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   read_memory: Brain,
   edit_scene: PencilLine,
   insert_figure: UserPlus,
+  create_character: UserPlus,
   edit_character: UserCog,
   edit_memory: BookMarked,
   create_scene: FilePlus,
