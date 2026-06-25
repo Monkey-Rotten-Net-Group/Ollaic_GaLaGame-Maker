@@ -28,9 +28,16 @@ interface NodePos {
   w: number;
 }
 
+interface SceneGraphEdge {
+  from: string;
+  to: string;
+  isChoice: boolean;
+  labels: string[];
+}
+
 interface SceneGraphLayout {
   positions: Map<string, NodePos>;
-  edges: { from: string; to: string }[];
+  edges: SceneGraphEdge[];
   width: number;
   height: number;
 }
@@ -46,7 +53,7 @@ function computeSceneGraphLayout(
   graphWidth: number,
 ): SceneGraphLayout {
   const positions = new Map<string, NodePos>();
-  const edges: { from: string; to: string }[] = [];
+  const edges: SceneGraphEdge[] = [];
 
   if (scenes.length === 0) {
     return { positions, edges, width: graphWidth, height: TOP_PAD + BOTTOM_PAD };
@@ -93,17 +100,28 @@ function computeSceneGraphLayout(
     });
   });
 
-  const seen = new Set<string>();
+  const edgeByKey = new Map<string, SceneGraphEdge>();
   for (const [from, ls] of Object.entries(linksByScene)) {
     if (!positions.has(from)) continue;
     for (const link of ls) {
       if (!positions.has(link.target)) continue;
       const key = `${from}→${link.target}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      edges.push({ from, to: link.target });
+      const label = link.kind === 'choose' ? link.label?.trim() : '';
+      const existing = edgeByKey.get(key);
+      if (existing) {
+        existing.isChoice = existing.isChoice || link.kind === 'choose';
+        if (label && !existing.labels.includes(label)) existing.labels.push(label);
+      } else {
+        edgeByKey.set(key, {
+          from,
+          to: link.target,
+          isChoice: link.kind === 'choose',
+          labels: label ? [label] : [],
+        });
+      }
     }
   }
+  edges.push(...edgeByKey.values());
 
   const height = byDepth.length > 0
     ? TOP_PAD + CARD_H + (byDepth.length - 1) * ROW_H + BOTTOM_PAD
@@ -135,6 +153,21 @@ function buildOrthogonalPath(from: NodePos, to: NodePos, contentWidth: number): 
   const enterY = to.y - halfH - 6;
   const sideX = from.x <= to.x ? contentWidth - 4 : 4;
   return `M ${from.x},${startY} V ${exitY} H ${sideX} V ${enterY} H ${to.x} V ${endY}`;
+}
+
+function edgeMarkerPosition(from: NodePos, to: NodePos, contentWidth: number): { x: number; y: number } {
+  const halfH = CARD_H / 2;
+  const startY = from.y + halfH + 1;
+  const endY = to.y - halfH - 2;
+
+  if (endY > startY + 4) {
+    return { x: to.x, y: Math.max(startY + 12, endY - 14) };
+  }
+
+  const exitY = from.y + halfH + 6;
+  const enterY = to.y - halfH - 6;
+  const sideX = from.x <= to.x ? contentWidth - 18 : 18;
+  return { x: sideX, y: (exitY + enterY) / 2 };
 }
 
 interface SceneGraphProps {
@@ -231,6 +264,45 @@ export const SceneGraph = memo(function SceneGraph({
             );
           })}
         </svg>
+
+        {layout.edges.filter((edge) => edge.isChoice).map((edge, i) => {
+          const from = layout.positions.get(edge.from)!;
+          const to = layout.positions.get(edge.to)!;
+          const marker = edgeMarkerPosition(from, to, width);
+          const labels = edge.labels.length > 0 ? edge.labels : ['选项分支'];
+          const title = labels.join('\n');
+
+          return (
+            <div
+              key={`${edge.from}->${edge.to}-label-${i}`}
+              title={title}
+              aria-label={title}
+              style={{
+                left: `${(marker.x / width) * 100}%`,
+                top: `${(marker.y / height) * 100}%`,
+              }}
+              className="group pointer-events-auto absolute z-20 -translate-x-1/2 -translate-y-1/2"
+            >
+              <div className="flex h-5 min-w-5 items-center justify-center gap-1 rounded-full border border-primary/50 bg-surface-container-high px-1.5 text-primary shadow-sm">
+                <Split className="h-3 w-3" />
+                {labels.length > 1 && (
+                  <span className="font-mono text-[9px] font-semibold leading-none">
+                    {labels.length}
+                  </span>
+                )}
+              </div>
+              <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden -translate-x-1/2 rounded-md border border-outline-variant/40 bg-surface-container-high px-2 py-1 text-[10px] font-medium text-foreground shadow-lg group-hover:block">
+                <div className="max-w-[180px] space-y-0.5">
+                  {labels.map((label) => (
+                    <div key={label} className="truncate whitespace-nowrap">
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
 
         {/* Nodes — HTML cards laid over the edges, positioned in viewBox %. */}
         {[...layout.positions.entries()].map(([name, pos]) => {
