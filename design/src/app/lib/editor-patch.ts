@@ -40,6 +40,8 @@ const scriptCommands = new Set([
   'unlockBgm',
   'callScene',
 ]);
+const SCRIPT_COMMAND_PATTERN = Array.from(scriptCommands).join('|');
+const COMMAND_WITH_PREFIX_RE = new RegExp(`^(.*?)\\s+(${SCRIPT_COMMAND_PATTERN}):`);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -118,6 +120,15 @@ export function validatePatchText(text: string): string[] {
       errors.push(`第 ${lineNo} 行不是有效 WebGAL 行：${line}`);
       return;
     }
+    const commandWithPrefix = body.match(COMMAND_WITH_PREFIX_RE);
+    if (commandWithPrefix && commandWithPrefix[1].trim()) {
+      errors.push(
+        `第 ${lineNo} 行的 WebGAL 命令前不能加说明文字：${line}。请直接写 ${commandWithPrefix[2]}:...;`,
+      );
+      return;
+    }
+    const prefix = body.slice(0, colonIndex);
+    if (scriptCommands.has(prefix)) return;
     // Unknown prefixes are treated as dialogue speaker names. Asset references are validated separately.
   });
   return errors;

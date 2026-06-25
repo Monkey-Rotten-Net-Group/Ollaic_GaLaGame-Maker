@@ -76,6 +76,16 @@ describe('validatePatchText', () => {
   it('flags a line that is neither narration nor speaker:text', () => {
     expect(validatePatchText('没有冒号的行;')).toHaveLength(1);
   });
+
+  it('rejects command lines prefixed with descriptive labels', () => {
+    expect(validatePatchText('背景 changeBg:gray_room_letter.jpg -next;')[0]).toContain('命令前不能加说明文字');
+    expect(validatePatchText('立绘 changeFigure:figure_placeholder.png -next;')[0]).toContain('命令前不能加说明文字');
+  });
+
+  it('accepts bare WebGAL asset commands', () => {
+    expect(validatePatchText('changeBg:room.webp -next;')).toEqual([]);
+    expect(validatePatchText('changeFigure:hero.webp -figureCharacter=静香 -figureEmotion=默认 -left -next;')).toEqual([]);
+  });
 });
 
 describe('extractPatchAssetRefs', () => {
