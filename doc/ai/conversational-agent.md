@@ -110,12 +110,16 @@ trace 设计原则:
 
 ## 真实模型 Harness
 
-后端有一个 ignored Rust test 可直接用 cargo 的测试 CLI 调真实聊天模型,用于检查模型是否会按提示选择工具。当前 harness 聚焦 `insert_figure` 场景:它提供内置的场景、角色和立绘素材 stub,要求真实模型调用 `insert_figure`,最后断言预览里包含正确的 `changeFigure` 行。
+后端有 ignored Rust test 可直接用 cargo 的测试 CLI 调真实聊天模型,用于检查模型是否会按提示选择工具。harness 使用内置场景、角色和素材 stub,不会写项目文件。
+
+- `real_model_insert_figure_harness`:聚焦 `insert_figure`,要求真实模型调用立绘工具,最后断言预览里包含正确的 `changeFigure` 行。
+- `real_model_structured_story_tools_harness`:聚焦完整故事骨架,要求真实模型依次产出新角色、章节/大纲、剧情块、分支场景、已有角色表情槽提示词。它会断言无生图模型时 `create_character` / `plan_character_sprites` 只生成 `emotion` + `prompt`,不编造 `file`。
 
 运行方式:
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml real_model_insert_figure_harness -- --ignored --nocapture
+cargo test --manifest-path src-tauri/Cargo.toml real_model_structured_story_tools_harness -- --ignored --nocapture
 ```
 
 前提:
@@ -123,7 +127,7 @@ cargo test --manifest-path src-tauri/Cargo.toml real_model_insert_figure_harness
 - 先在应用 AI 设置里保存可用的 chat provider/model/API key/base URL;harness 读取同一份 `get_ai_config` 配置。
 - 这是真实网络调用,不会随普通 `cargo test` 自动运行。
 - 输出会打印每轮 assistant 文本、tool call 参数、tool result 和最终 preview,适合调工具提示词与 schema。
-- 源码入口:`src-tauri/src/ai/commands.rs` 的 `real_model_insert_figure_harness`。
+- 源码入口:`src-tauri/src/ai/commands.rs` 的 `real_model_insert_figure_harness` / `real_model_structured_story_tools_harness`。
 
 ## 相关源码
 - `design/src/app/hooks/useAiAgent.ts`(`runAgentLoop` / `runLegacyTurn` / `sendPrompt` / `stop` / `retry`)
