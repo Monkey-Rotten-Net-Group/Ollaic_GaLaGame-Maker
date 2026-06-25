@@ -11,6 +11,7 @@ import {
   stageFigureInsert,
   stageMemoryEdit,
   stageAssetPlanEdit,
+  stageSceneEdit,
   stageSceneHeaderEdit,
   type StagingContext,
 } from './change-set';
@@ -228,6 +229,40 @@ describe('scene structure tools', () => {
     expect(edit.afterContent).toContain('changeScene:next.txt;');
   });
 
+  it('allows script background refs backed by a same-turn asset plan', async () => {
+    const edit = await stageDialogueBlockInsert(
+      undefined,
+      {
+        tool: 'insert_dialogue_block',
+        file: 'start.txt',
+        afterLine: 'end',
+        lines: [
+          { type: 'background', asset: 'gray_room_letter.png' },
+          { type: 'narrator', text: '信纸边缘泛起冷光。' },
+        ],
+      },
+      makeCtx({
+        currentScriptSource: ':开场;',
+        plannedAssetKeys: new Set(['background/gray_room_letter.png']),
+      }),
+    );
+
+    expect(edit.afterContent).toContain('changeBg:gray_room_letter.png -next;');
+    expect(edit.afterContent).toContain(':信纸边缘泛起冷光。;');
+  });
+
+  it('rejects missing background refs without an asset plan', async () => {
+    await expect(stageSceneEdit(
+      undefined,
+      {
+        tool: 'edit_scene',
+        file: 'start.txt',
+        patches: [{ type: 'insert', file: 'start.txt', afterLine: 'end', text: 'changeBg:fake_room.png -next;' }],
+      },
+      makeCtx({ currentScriptSource: ':开场;' }),
+    )).rejects.toThrow('plan_assets');
+  });
+
   it('creates branch targets with optional initial content', async () => {
     const result = await stageBranchEdit(
       undefined,
@@ -334,6 +369,7 @@ describe('stageAssetPlanEdit', () => {
     expect(edit.kind).toBe('asset_plan');
     expect(edit.cards).toHaveLength(2);
     expect(edit.cards[0]).toMatchObject({
+      id: 'bg:gray_room_letter.png',
       category: 'background',
       title: '灰色房间信件',
       sceneFile: 'letter_room.txt',

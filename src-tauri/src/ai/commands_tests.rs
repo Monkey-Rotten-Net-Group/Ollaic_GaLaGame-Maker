@@ -1,5 +1,5 @@
 use super::*;
-use std::fs;
+use std::{collections::BTreeSet, fs};
 
 #[test]
 fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
@@ -221,7 +221,8 @@ async fn real_model_structured_story_tools_harness() {
             role: "user".to_string(),
             content: [
                 "请直接调用工具搭建一个可预览的完整故事骨架,不要只文字说明。",
-                "需要完成:新建角色陆岚;整理 start.txt 的章节和大纲;在 start.txt 末尾插入一段开场剧情;",
+                "需要完成:新建角色陆岚;为 start.txt 规划一个缺失的雨夜教室背景并在开场剧情里切换到它;",
+                "整理 start.txt 的章节和大纲;在 start.txt 末尾插入一段开场剧情;",
                 "再创建两个分支目标场景;最后给已有角色静香规划“微笑”和“惊讶”两个表情槽提示词。",
             ]
             .join(""),
@@ -291,6 +292,7 @@ async fn real_model_structured_story_tools_harness() {
     eprintln!("\n[harness] tools: {}", used_tools.join(" -> "));
     for required in [
         "create_character",
+        "plan_assets",
         "set_scene_header",
         "insert_dialogue_block",
         "create_branch",
@@ -322,6 +324,15 @@ async fn real_model_structured_story_tools_harness() {
     let dialogue = state
         .dialogue_preview
         .expect("真实模型没有暂存 insert_dialogue_block");
+    let planned_background = state
+        .planned_background_assets
+        .iter()
+        .next()
+        .expect("真实模型没有规划背景 targetStem.png");
+    assert!(
+        dialogue.contains(&format!("changeBg:{planned_background}")),
+        "剧情块应引用 plan_assets 规划出的背景 {planned_background}: {dialogue}"
+    );
     assert!(dialogue.contains("静香:") || dialogue.contains("陆岚:"));
     assert!(
         dialogue.contains(':') && dialogue.contains(';'),
@@ -344,11 +355,22 @@ async fn real_model_structured_story_tools_harness() {
         !sprites.contains("\"file\""),
         "plan_character_sprites 不应该为未生成的立绘绑定 file: {sprites}"
     );
+
+    let asset_plan = state
+        .asset_plan_preview
+        .expect("真实模型没有暂存 plan_assets");
+    assert!(asset_plan.contains("background"));
+    assert!(
+        !asset_plan.contains("\"file\""),
+        "plan_assets 不应该绑定真实 file: {asset_plan}"
+    );
 }
 
 #[derive(Default)]
 struct StructuredStoryHarnessState {
     created_character_preview: Option<String>,
+    asset_plan_preview: Option<String>,
+    planned_background_assets: BTreeSet<String>,
     scene_header_preview: Option<String>,
     dialogue_preview: Option<String>,
     branch_preview: Option<String>,
@@ -478,7 +500,7 @@ fn real_model_structured_harness_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "search_assets".to_string(),
-            description: "查询素材库。没有查到真实素材时，不要编造 asset 或 file。".to_string(),
+            description: "查询素材库。没有查到真实素材时，不要编造 asset 或 file；缺背景请用 plan_assets。".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -486,6 +508,32 @@ fn real_model_structured_harness_tools() -> Vec<ToolDef> {
                     "query": { "type": "string" }
                 },
                 "required": []
+            }),
+        },
+        ToolDef {
+            name: "plan_assets".to_string(),
+            description: "规划缺失的待生成背景/CG素材卡，不创建真实文件。背景需要进入脚本时，先调用本工具，再在 insert_dialogue_block 的 background.asset 使用 <targetStem>.png。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "assets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "category": { "type": "string", "enum": ["background", "cg"] },
+                                "title": { "type": "string" },
+                                "sceneFile": { "type": "string" },
+                                "targetStem": { "type": "string", "description": "不含扩展名；脚本引用时使用 <targetStem>.png" },
+                                "prompt": { "type": "string" },
+                                "style": { "type": "string" },
+                                "negativePrompt": { "type": "string" }
+                            },
+                            "required": ["category", "title", "prompt", "targetStem"]
+                        }
+                    }
+                },
+                "required": ["assets"]
             }),
         },
         ToolDef {
@@ -536,7 +584,7 @@ fn real_model_structured_harness_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "insert_dialogue_block".to_string(),
-            description: "向场景插入一段结构化剧情块，由系统生成合法 WebGAL txt。没有素材时省略素材命令，不要编造 asset。".to_string(),
+            description: "向场景插入一段结构化剧情块，由系统生成合法 WebGAL txt。背景缺失时必须先 plan_assets，再在 background.asset 使用返回的 <targetStem>.png；不要用注释代替背景标记。".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -640,13 +688,17 @@ fn real_model_structured_harness_system_prompt() -> String {
         "# 角色",
         "你是 WebGAL 视觉小说的故事编辑助手。",
         "# Harness 目标",
-        "这是一个真实模型工具选择测试。你必须调用以下写工具各一次: create_character、set_scene_header、insert_dialogue_block、create_branch、plan_character_sprites。",
+        "这是一个真实模型工具选择测试。你必须调用以下写工具各一次: create_character、plan_assets、set_scene_header、insert_dialogue_block、create_branch、plan_character_sprites。",
         "不要只用文字说明完成结果;不要调用不存在的工具;不要用底层 patch 代替高层工具。",
-        "所有写工具只生成预览/staged 结果,不会直接落盘。工具返回 staged=true 后继续完成剩余工具,直到五个写工具都调用完成。",
+        "所有写工具只生成预览/staged 结果,不会直接落盘。工具返回 staged=true 后继续完成剩余工具,直到六个写工具都调用完成。",
         "# 角色与素材约束",
         "如果用户要求新角色,调用 create_character,参数是顶层字段 name/personality/dialogueStyle 等,不要包在 draft 里。",
         "当前没有可用生图模型。create_character 的 sprites 和 plan_character_sprites 的 sprites 只能包含 emotion 与 prompt,绝对不要填写 file/asset。",
         "给已有角色补表情槽时调用 plan_character_sprites,不要编造真实立绘文件。",
+        "# 缺背景流程",
+        "当前没有任何真实背景素材。需要先调用 plan_assets 规划 start.txt 的雨夜教室背景,包含 category=background、targetStem、prompt、sceneFile=start.txt。",
+        "plan_assets 返回 staged=true 后,在 insert_dialogue_block 中插入 background 行,asset 必须使用同一 targetStem 加 .png,例如 targetStem 为 rainy_classroom_night 时写 rainy_classroom_night.png。",
+        "不要把缺失背景写成注释,也不要直接编造未规划的 changeBg 文件。",
         "# 故事结构工具",
         "章节/大纲用 set_scene_header。连续剧情用 insert_dialogue_block。选项分支和目标场景用 create_branch。",
         "当前场景文件名是 start.txt。插入到末尾时 afterLine 使用 end。",
@@ -798,8 +850,46 @@ fn run_real_model_structured_harness_tool(
             "assets": [
                 { "name": "shizuka_default.png", "category": "figure", "character": "静香", "emotion": "默认" }
             ],
-            "note": "没有陆岚素材，也没有静香的微笑/惊讶立绘；需要用 plan_character_sprites 只生成 emotion/prompt 框架。"
+            "note": "没有背景素材、陆岚素材，也没有静香的微笑/惊讶立绘；背景需要用 plan_assets，立绘需要用 plan_character_sprites。"
         }),
+        "plan_assets" => {
+            let Some(assets) = args.get("assets").and_then(|v| v.as_array()) else {
+                return serde_json::json!({ "staged": false, "error": "plan_assets 需要非空 assets。" });
+            };
+            if assets.is_empty() {
+                return serde_json::json!({ "staged": false, "error": "plan_assets 需要非空 assets。" });
+            }
+            let mut planned = Vec::new();
+            for asset in assets {
+                let category = string_arg(asset, "category").unwrap_or("");
+                let title = string_arg(asset, "title").unwrap_or("");
+                let prompt = string_arg(asset, "prompt").unwrap_or("");
+                let target_stem = string_arg(asset, "targetStem").unwrap_or("");
+                if category != "background" {
+                    return serde_json::json!({ "staged": false, "error": format!("本 harness 要求规划 background,收到：{category}") });
+                }
+                if title.is_empty() || prompt.is_empty() || target_stem.is_empty() {
+                    return serde_json::json!({ "staged": false, "error": "plan_assets 需要 title、prompt、targetStem。" });
+                }
+                let script_asset = format!("{target_stem}.png");
+                state.planned_background_assets.insert(script_asset.clone());
+                planned.push(serde_json::json!({
+                    "category": category,
+                    "title": title,
+                    "targetStem": target_stem,
+                    "sceneFile": string_arg(asset, "sceneFile").unwrap_or("start.txt"),
+                    "scriptAsset": script_asset
+                }));
+            }
+            let preview = serde_json::to_string_pretty(args).unwrap();
+            state.asset_plan_preview = Some(preview.clone());
+            serde_json::json!({
+                "staged": true,
+                "message": "已暂存素材规划。需要把背景放进脚本时，使用 plannedAssets[].scriptAsset 写 background.asset。",
+                "plannedAssets": planned,
+                "preview": preview
+            })
+        }
         "create_character" => {
             let Some(name) = string_arg(args, "name") else {
                 return serde_json::json!({
@@ -857,6 +947,14 @@ fn run_real_model_structured_harness_tool(
             }
             match structured_dialogue_text(lines) {
                 Ok(text) => {
+                    for asset in extract_change_bg_assets(&text) {
+                        if !state.planned_background_assets.contains(&asset) {
+                            return serde_json::json!({
+                                "staged": false,
+                                "error": format!("背景 {asset} 未由 plan_assets 规划。请先 plan_assets，再用 plannedAssets[].scriptAsset 写 background.asset。")
+                            });
+                        }
+                    }
                     state.dialogue_preview = Some(text.clone());
                     serde_json::json!({
                         "staged": true,
@@ -931,6 +1029,20 @@ fn is_shizuka(value: &str) -> bool {
 fn structured_dialogue_text(lines: &[serde_json::Value]) -> Result<String, String> {
     let rendered: Result<Vec<_>, _> = lines.iter().map(structured_dialogue_line).collect();
     rendered.map(|lines| lines.join("\n"))
+}
+
+fn extract_change_bg_assets(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("changeBg:")?;
+            let asset = rest.split([' ', ';']).next().unwrap_or("").trim();
+            if asset.is_empty() {
+                None
+            } else {
+                Some(asset.to_string())
+            }
+        })
+        .collect()
 }
 
 fn structured_dialogue_line(line: &serde_json::Value) -> Result<String, String> {

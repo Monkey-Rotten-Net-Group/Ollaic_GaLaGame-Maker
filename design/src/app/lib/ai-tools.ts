@@ -345,7 +345,8 @@ const writeTools: AgentTool[] = [
       'delete 用 startLine + endLine；' +
       'replace 用 startLine + endLine + text。' +
       '行号对应该场景 read_scene 返回的 txt 行号（从 1 开始的整数，不能省略、不能为 null）。' +
-      '尽量提供 anchorText（原样复制目标行）以兜底行号漂移。text 为 WebGAL txt，多行用 \\n 分隔。修改先生成预览供用户确认。',
+      '尽量提供 anchorText（原样复制目标行）以兜底行号漂移。text 为 WebGAL txt，多行用 \\n 分隔。' +
+      '背景素材可用真实文件名；缺少背景时先调用 plan_assets，再引用同一 targetStem 的 .png 文件名。修改先生成预览供用户确认。',
     kind: 'write',
     schema: {
       type: 'object',
@@ -421,7 +422,7 @@ const writeTools: AgentTool[] = [
   {
     name: 'insert_dialogue_block',
     description:
-      '向场景插入一段结构化剧情块。用于连续写入旁白、对白、背景、BGM、音效、跳转、结束等常见 WebGAL 内容，系统会生成合法 txt。需要真实素材时先用 search_assets 查询；没有素材就省略素材命令或写明待补。',
+      '向场景插入一段结构化剧情块。用于连续写入旁白、对白、背景、BGM、音效、跳转、结束等常见 WebGAL 内容，系统会生成合法 txt。真实素材先用 search_assets 查询；缺少背景时先调用 plan_assets，再在 background.asset 填同一 targetStem 的 .png 文件名。',
     kind: 'write',
     schema: {
       type: 'object',
@@ -440,7 +441,7 @@ const writeTools: AgentTool[] = [
               character: { type: 'string', description: 'dialogue/figure 专用角色名' },
               emotion: { type: 'string', description: 'figure 专用表情名' },
               position: { type: 'string', enum: ['left', 'center', 'right'] },
-              asset: { type: 'string', description: 'background/bgm/effect/video/figure 专用真实素材文件名；figure 可省略，由角色+表情解析' },
+              asset: { type: 'string', description: 'background/bgm/effect/video/figure 专用素材文件名；background 可用真实文件名，或同一轮 plan_assets 返回的 scriptAsset；figure 可省略，由角色+表情解析' },
               target: { type: 'string', description: 'jump/call 目标场景文件名' },
               label: { type: 'string', description: 'label 名称' },
               next: { type: 'boolean', description: '素材命令是否加 -next，默认 true' },
@@ -658,7 +659,7 @@ const writeTools: AgentTool[] = [
   {
     name: 'plan_assets',
     description:
-      '规划缺失的待生成图片素材卡，不写入脚本、不创建真实文件。用于缺少背景/CG素材时先搭素材框架：填写 category(background 或 cg)、title、prompt、targetStem、可选 sceneFile/style/negativePrompt。立绘不要用此工具，改用 plan_character_sprites。',
+      '规划缺失的待生成图片素材卡，不创建真实文件。用于缺少背景/CG素材时先搭素材框架：填写 category(background 或 cg)、title、prompt、targetStem、可选 sceneFile/style/negativePrompt。若背景需要出现在脚本中，后续写 changeBg:<targetStem>.png -next; 或在 insert_dialogue_block 的 background.asset 使用 <targetStem>.png。立绘不要用此工具，改用 plan_character_sprites。',
     kind: 'write',
     schema: {
       type: 'object',
@@ -671,7 +672,7 @@ const writeTools: AgentTool[] = [
               category: { type: 'string', enum: ['background', 'cg'], description: '素材类型；背景用 background，剧情画用 cg' },
               title: { type: 'string', description: '素材卡标题/用途名' },
               sceneFile: { type: 'string', description: '可选：关联场景文件名，如 start.txt' },
-              targetStem: { type: 'string', description: '可选：建议生成文件名 stem，不含扩展名' },
+              targetStem: { type: 'string', description: '可选：建议生成文件名 stem，不含扩展名；脚本引用时使用 <targetStem>.png' },
               prompt: { type: 'string', description: '图片生成提示词，包含地点/时间/天气/氛围/镜头/主体' },
               style: { type: 'string', description: '可选：画风约束' },
               negativePrompt: { type: 'string', description: '可选：负面提示词' },

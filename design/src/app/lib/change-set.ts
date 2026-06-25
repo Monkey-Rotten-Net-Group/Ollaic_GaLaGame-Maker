@@ -20,6 +20,7 @@ import {
   type EditorPatch,
 } from './editor-patch';
 import { characterColor } from './character-editing';
+import { backgroundCardId } from './asset-metadata';
 import { figureFileTail, findCharacter, findSprite, resolveFigureByEmotion } from './figure-resolve';
 import { emptyProjectMemory, type ProjectMemory } from './project-memory';
 import { createLineDiff, type DiffLine, type MissingAssetIssue } from './story-agent';
@@ -105,6 +106,8 @@ export interface StagingContext {
   getCharacter: (id: string) => Character | undefined;
   /** Current project memory (or a blank one). */
   memory: ProjectMemory;
+  /** Asset refs planned in the same AI turn and therefore allowed in script patches. */
+  plannedAssetKeys?: Set<string>;
 }
 
 /** A staging failure with a user-facing message (and optional missing-asset detail). */
@@ -117,21 +120,27 @@ export class StageError extends Error {
   }
 }
 
-function validateSceneAssets(patches: EditorPatch[], assets: AssetInfo[]): MissingAssetIssue[] {
+function assetRefKeys(category: string, file: string): string[] {
+  return [`${category}/${file}`, `${category}/${figureFileTail(file)}`];
+}
+
+function validateSceneAssets(
+  patches: EditorPatch[],
+  assets: AssetInfo[],
+  plannedAssetKeys = new Set<string>(),
+): MissingAssetIssue[] {
   // Index by both the full (possibly subdir-qualified) name and its basename, so
   // a reference matches whether it is qualified ("<角色ID>/x.png") or bare ("x.png").
   const available = new Set<string>();
   for (const a of assets) {
-    available.add(`${a.category}/${a.name}`);
-    available.add(`${a.category}/${figureFileTail(a.name)}`);
+    for (const key of assetRefKeys(a.category, a.name)) available.add(key);
   }
   const issues: MissingAssetIssue[] = [];
   for (const patch of patches) {
     if (patch.type === 'delete') continue;
     for (const ref of extractPatchAssetRefs(patch.text)) {
-      const qualified = `${ref.expectedCategory}/${ref.file}`;
-      const bare = `${ref.expectedCategory}/${figureFileTail(ref.file)}`;
-      if (!available.has(qualified) && !available.has(bare)) issues.push(ref);
+      const keys = assetRefKeys(ref.expectedCategory, ref.file);
+      if (!keys.some((key) => available.has(key) || plannedAssetKeys.has(key))) issues.push(ref);
     }
   }
   return issues;
@@ -506,9 +515,12 @@ export async function stageSceneEdit(
     throw new StageError(`WebGAL txt 格式无效：\n${textErrors.join('\n')}`);
   }
 
-  const missing = validateSceneAssets(patches, ctx.assets);
+  const missing = validateSceneAssets(patches, ctx.assets, ctx.plannedAssetKeys);
   if (missing.length > 0) {
-    throw new StageError('引用了素材库中不存在的文件。', missing);
+    throw new StageError(
+      '引用了素材库中不存在的文件。缺少背景/CG 时请先调用 plan_assets，并在脚本中引用同一 targetStem 的 .png 文件。',
+      missing,
+    );
   }
 
   const applied = applyEditorPatches(beforeContent, patches);
@@ -734,11 +746,8 @@ export function stageAssetPlanEdit(staged: Extract<StagedWrite, { tool: 'plan_as
       `ai_asset_${String(index + 1).padStart(2, '0')}`,
       usedTargetStems,
     );
-    const id = uniqueAssetValue(
-      `ai:${category}:${targetStem}`,
-      `ai:${category}:asset_${index + 1}`,
-      usedIds,
-    );
+    const idBase = category === 'background' ? backgroundCardId(`${targetStem}.png`) : `ai:${category}:${targetStem}`;
+    const id = uniqueAssetValue(idBase, `ai:${category}:asset_${index + 1}`, usedIds);
     cards.push({
       id,
       category,
