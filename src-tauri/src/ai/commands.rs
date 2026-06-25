@@ -3,7 +3,8 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    ChatMessage, ChatRequest, ChatStreamEvent, StreamChunk, Tool, ToolCall, ToolResponse,
+    ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, StreamChunk, Tool, ToolCall,
+    ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
@@ -15,7 +16,7 @@ use tauri::{AppHandle, Emitter};
 
 const MAX_LOG_LIMIT: usize = 500;
 const DEFAULT_LOG_LIMIT: usize = 100;
-const MAX_LOG_FIELD_CHARS: usize = 1000;
+const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
@@ -638,7 +639,11 @@ pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, 
     let request = ChatRequest::new(vec![ChatMessage::user("Reply with exactly OK.")]);
     let client = build_client(&config);
 
-    match client.exec_chat(&config.model, request, None).await {
+    let options = chat_debug_options();
+    match client
+        .exec_chat(&config.model, request, Some(&options))
+        .await
+    {
         Ok(response) => {
             let message = response
                 .first_text()
@@ -706,7 +711,11 @@ pub async fn ai_chat_stream(
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let _ = app_handle.emit(&event_name, AiStreamEvent::Start);
-        match client.exec_chat_stream(&model, request, None).await {
+        let options = chat_debug_options();
+        match client
+            .exec_chat_stream(&model, request, Some(&options))
+            .await
+        {
             Ok(chat_res) => {
                 let mut stream = chat_res.stream;
                 while let Some(event) = stream.next().await {
@@ -809,7 +818,8 @@ pub async fn ai_chat_turn(
     let client = build_client(&cfg);
     let endpoint = effective_endpoint(&cfg);
 
-    match client.exec_chat(&cfg.model, request, None).await {
+    let options = chat_debug_options();
+    match client.exec_chat(&cfg.model, request, Some(&options)).await {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
             let tool_calls = response
@@ -888,6 +898,10 @@ fn build_client(cfg: &AiConfig) -> Client {
     Client::builder()
         .with_service_target_resolver(resolver)
         .build()
+}
+
+fn chat_debug_options() -> ChatOptions {
+    ChatOptions::default().with_capture_raw_body(true)
 }
 
 fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {

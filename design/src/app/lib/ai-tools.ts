@@ -465,7 +465,7 @@ const writeTools: AgentTool[] = [
   {
     name: 'create_branch',
     description:
-      '在当前/指定场景插入选项分支，并暂存创建每个目标场景。用于搭建多分支故事结构。choices 中每项包含 text、targetScene、可选 chapter/outline/contentLines。',
+      '在当前/指定场景插入选项分支，并暂存创建每个目标场景。只用于目标场景尚不存在的分支。若目标场景已存在，用 edit_scene 插入 choose，再用 insert_dialogue_block 填写已有场景。choices 中每项包含 text、targetScene、可选 chapter/outline/contentLines。',
     kind: 'write',
     schema: {
       type: 'object',
