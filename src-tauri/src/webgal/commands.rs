@@ -44,8 +44,7 @@ pub fn save_scene(path: String, nodes: Vec<WebGalNode>) -> Result<(), String> {
 #[tauri::command]
 pub fn read_file_text(path: String) -> Result<String, String> {
     let path = PathBuf::from(&path);
-    fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))
+    fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))
 }
 
 /// Write raw text content to a file (used to persist scene header comment edits).
@@ -53,11 +52,9 @@ pub fn read_file_text(path: String) -> Result<String, String> {
 pub fn write_file_text(path: String, content: String) -> Result<(), String> {
     let path = PathBuf::from(&path);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
     }
-    fs::write(&path, content)
-        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+    fs::write(&path, content).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
 
 /// List all .txt scene files in a directory.
@@ -92,8 +89,7 @@ pub fn delete_scene(path: String) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("Scene file not found: {}", path.display()));
     }
-    fs::remove_file(&path)
-        .map_err(|e| format!("Failed to delete {}: {}", path.display(), e))
+    fs::remove_file(&path).map_err(|e| format!("Failed to delete {}: {}", path.display(), e))
 }
 
 /// Rename a scene file.
@@ -105,7 +101,13 @@ pub fn rename_scene(path: String, new_name: String) -> Result<String, String> {
     }
     let parent = path.parent().ok_or("Invalid scene path")?;
     let new_path = parent.join(&new_name);
-    fs::rename(&path, &new_path)
-        .map_err(|e| format!("Failed to rename {} -> {}: {}", path.display(), new_path.display(), e))?;
+    fs::rename(&path, &new_path).map_err(|e| {
+        format!(
+            "Failed to rename {} -> {}: {}",
+            path.display(),
+            new_path.display(),
+            e
+        )
+    })?;
     Ok(new_path.to_string_lossy().to_string())
 }

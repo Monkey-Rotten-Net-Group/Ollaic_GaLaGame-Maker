@@ -58,10 +58,11 @@ fn ensure_matting_model() -> Result<(), String> {
         let _ = std::fs::remove_file(&model_path);
     }
 
-    std::fs::create_dir_all(&models_dir)
-        .map_err(|e| format!("创建 models 目录失败: {e}"))?;
+    std::fs::create_dir_all(&models_dir).map_err(|e| format!("创建 models 目录失败: {e}"))?;
 
-    println!("cargo:warning=正在下载抠图模型 {MODEL_FILENAME}（约 115MB，首次构建需要一些时间）...");
+    println!(
+        "cargo:warning=正在下载抠图模型 {MODEL_FILENAME}（约 115MB，首次构建需要一些时间）..."
+    );
 
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(600)))
@@ -89,10 +90,8 @@ fn ensure_matting_model() -> Result<(), String> {
 
     // 先写临时文件再原子重命名，避免构建中断留下半截文件。
     let tmp_path = models_dir.join(format!("{MODEL_FILENAME}.part"));
-    std::fs::write(&tmp_path, &bytes)
-        .map_err(|e| format!("写入临时模型文件失败: {e}"))?;
-    std::fs::rename(&tmp_path, &model_path)
-        .map_err(|e| format!("重命名模型文件失败: {e}"))?;
+    std::fs::write(&tmp_path, &bytes).map_err(|e| format!("写入临时模型文件失败: {e}"))?;
+    std::fs::rename(&tmp_path, &model_path).map_err(|e| format!("重命名模型文件失败: {e}"))?;
 
     println!("cargo:warning=抠图模型下载完成：{}", model_path.display());
     Ok(())

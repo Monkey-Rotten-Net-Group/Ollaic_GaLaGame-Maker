@@ -278,7 +278,10 @@ mod tests {
         assert_eq!(serialized_once.matches("-figureEmotion=smile").count(), 1);
 
         let serialized_twice = serialize_script(&parse_script(&serialized_once));
-        assert_eq!(serialized_twice.matches("-figureCharacter=Alice").count(), 1);
+        assert_eq!(
+            serialized_twice.matches("-figureCharacter=Alice").count(),
+            1
+        );
         assert_eq!(serialized_twice.matches("-figureEmotion=smile").count(), 1);
     }
 }

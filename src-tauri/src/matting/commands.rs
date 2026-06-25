@@ -37,11 +37,14 @@ fn resolve_model_path(app: &AppHandle) -> Result<PathBuf, String> {
             return Ok(candidate);
         }
     }
-    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("models/{MODEL_FILENAME}"));
+    let dev_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("models/{MODEL_FILENAME}"));
     if dev_path.is_file() {
         return Ok(dev_path);
     }
-    Err(format!("未找到抠图模型 {MODEL_FILENAME}，请确认随安装包内置或设置 MATTING_MODEL_PATH。"))
+    Err(format!(
+        "未找到抠图模型 {MODEL_FILENAME}，请确认随安装包内置或设置 MATTING_MODEL_PATH。"
+    ))
 }
 
 #[tauri::command]
@@ -113,8 +116,11 @@ fn matte_image(model_path: &Path, image_bytes: &[u8]) -> Result<Vec<u8>, String>
     }
 
     let mut png_bytes: Vec<u8> = Vec::new();
-    out.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-        .map_err(|e| format!("编码透明 PNG 失败: {e}"))?;
+    out.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| format!("编码透明 PNG 失败: {e}"))?;
     Ok(png_bytes)
 }
 
@@ -127,7 +133,12 @@ fn detect_background_color(img: &RgbaImage) -> [u8; 3] {
     let mut gs = Vec::new();
     let mut bs = Vec::new();
     // 四角各采样 margin×margin 区域
-    for &(x0, y0) in &[(0, 0), (w - margin, 0), (0, h - margin), (w - margin, h - margin)] {
+    for &(x0, y0) in &[
+        (0, 0),
+        (w - margin, 0),
+        (0, h - margin),
+        (w - margin, h - margin),
+    ] {
         for dy in 0..margin {
             for dx in 0..margin {
                 let p = img.get_pixel(x0 + dx, y0 + dy);
@@ -308,8 +319,11 @@ mod tests {
             }
         }
         let mut src_png: Vec<u8> = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut src_png), image::ImageFormat::Png)
-            .unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut src_png),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
 
         let out_png = matte_image(&model_path, &src_png).expect("抠图应成功");
         let out = image::load_from_memory(&out_png).expect("输出应为合法图像");
@@ -334,7 +348,8 @@ mod tests {
             return;
         }
         let raw_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap()
+            .parent()
+            .unwrap()
             .join("不敗終焉與世界之花/game/figure/char_18acd2da47372ddf/_raw");
         if !raw_dir.is_dir() {
             eprintln!("跳过：未找到测试图片目录 {}", raw_dir.display());
@@ -345,7 +360,9 @@ mod tests {
 
         for entry in std::fs::read_dir(&raw_dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().map_or(true, |e| e != "png") { continue; }
+            if path.extension().map_or(true, |e| e != "png") {
+                continue;
+            }
             let name = path.file_stem().unwrap().to_str().unwrap().to_string();
             eprintln!("处理: {name}");
 
@@ -362,19 +379,23 @@ mod tests {
             let (w, h) = out_img.dimensions();
             let transparent_count = out_img.pixels().filter(|p| p[3] == 0).count();
             let total = (w * h) as usize;
-            eprintln!("  尺寸: {w}x{h}, 透明像素: {transparent_count}/{total} ({:.1}%)",
-                transparent_count as f64 / total as f64 * 100.0);
+            eprintln!(
+                "  尺寸: {w}x{h}, 透明像素: {transparent_count}/{total} ({:.1}%)",
+                transparent_count as f64 / total as f64 * 100.0
+            );
         }
     }
 
     #[test]
     fn guided_filter_preserves_shape() {
-        let g = GrayImage::from_raw(4, 4, vec![
-            0, 0, 255, 255,
-            0, 0, 255, 255,
-            255, 255, 0, 0,
-            255, 255, 0, 0,
-        ]).unwrap();
+        let g = GrayImage::from_raw(
+            4,
+            4,
+            vec![
+                0, 0, 255, 255, 0, 0, 255, 255, 255, 255, 0, 0, 255, 255, 0, 0,
+            ],
+        )
+        .unwrap();
         let p = g.clone();
         let out = guided_filter(&g, &p, 1, 0.01);
         assert_eq!(out.dimensions(), (4, 4));

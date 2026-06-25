@@ -317,7 +317,8 @@ pub fn create_project_snapshot(
     let kind = normalize_snapshot_kind(kind);
     let description = normalize_snapshot_description(description);
     let id_label = snapshot_id_label(&label);
-    let (id, snapshot_dir) = unique_snapshot_dir(&project_path, &format!("{created_at}-{id_label}"));
+    let (id, snapshot_dir) =
+        unique_snapshot_dir(&project_path, &format!("{created_at}-{id_label}"));
     fs::create_dir_all(&snapshot_dir)
         .map_err(|e| format!("Failed to create snapshot directory: {e}"))?;
 
@@ -947,7 +948,10 @@ fn should_skip_editor_state_entry(name: &str) -> bool {
 }
 
 fn normalize_snapshot_label(label: Option<String>) -> String {
-    let label = label.unwrap_or_else(|| "snapshot".to_string()).trim().to_string();
+    let label = label
+        .unwrap_or_else(|| "snapshot".to_string())
+        .trim()
+        .to_string();
     if label.is_empty() {
         "snapshot".to_string()
     } else {
@@ -960,7 +964,10 @@ fn default_snapshot_kind() -> String {
 }
 
 fn normalize_snapshot_kind(kind: Option<String>) -> String {
-    let kind = kind.unwrap_or_else(default_snapshot_kind).trim().to_string();
+    let kind = kind
+        .unwrap_or_else(default_snapshot_kind)
+        .trim()
+        .to_string();
     match kind.as_str() {
         "manual" | "beforeRestore" | "exportCandidate" | "auto" => kind,
         _ => default_snapshot_kind(),
@@ -1041,8 +1048,7 @@ fn validate_staged_restore(
         return Err("Snapshot game directory was not staged".to_string());
     }
     let staged_metadata = staging_dir.join("project-metadata.json");
-    if manifest.and_then(|info| info.metadata_included) == Some(true)
-        && !staged_metadata.is_file()
+    if manifest.and_then(|info| info.metadata_included) == Some(true) && !staged_metadata.is_file()
     {
         return Err("Snapshot manifest says metadata exists, but it is missing".to_string());
     }
@@ -1108,7 +1114,10 @@ fn restore_staged_metadata(
 ) -> Result<(), String> {
     let staged_metadata = staging_dir.join("project-metadata.json");
     let current = project_root.join("project-metadata.json");
-    match (manifest.and_then(|info| info.metadata_included), staged_metadata.exists()) {
+    match (
+        manifest.and_then(|info| info.metadata_included),
+        staged_metadata.exists(),
+    ) {
         (Some(true), false) => {
             return Err("Snapshot manifest says metadata exists, but it is missing".to_string())
         }
@@ -1138,9 +1147,7 @@ fn backup_current_metadata(
     manifest: Option<&SnapshotInfo>,
 ) -> Result<Option<MetadataBackup>, String> {
     let should_touch = staging_dir.join("project-metadata.json").exists()
-        || manifest
-            .and_then(|info| info.metadata_included)
-            .is_some();
+        || manifest.and_then(|info| info.metadata_included).is_some();
     if !should_touch {
         return Ok(None);
     }
@@ -1193,10 +1200,8 @@ fn restore_staged_editor_state(
     manifest: Option<&SnapshotInfo>,
 ) -> Result<(), String> {
     let staged_editor = staging_dir.join(".webgal-editor");
-    let should_replace = staged_editor.is_dir()
-        || manifest
-            .and_then(|info| info.metadata_included)
-            .is_some();
+    let should_replace =
+        staged_editor.is_dir() || manifest.and_then(|info| info.metadata_included).is_some();
     if !should_replace {
         return Ok(());
     }
@@ -1415,7 +1420,10 @@ mod tests {
     #[test]
     fn default_config_enables_appreciation_gallery() {
         let config = default_project_config("Gallery Test");
-        assert_eq!(config.get("Game_name").map(String::as_str), Some("Gallery Test"));
+        assert_eq!(
+            config.get("Game_name").map(String::as_str),
+            Some("Gallery Test")
+        );
         assert_eq!(
             config.get("Enable_Appreciation").map(String::as_str),
             Some("true")
@@ -1460,7 +1468,11 @@ mod tests {
         )
         .unwrap();
         fs::write(tmp.join("game").join("bgm").join("music.mp3"), "fake-audio").unwrap();
-        fs::write(tmp.join("game").join("vocal").join("click.wav"), "fake-vocal").unwrap();
+        fs::write(
+            tmp.join("game").join("vocal").join("click.wav"),
+            "fake-vocal",
+        )
+        .unwrap();
 
         let out = tmp.join("exported");
 
@@ -1790,9 +1802,11 @@ mod tests {
         assert!(fs::read_to_string(tmp.join("project-metadata.json"))
             .unwrap()
             .contains(r#""version":"1.0.0""#));
-        assert!(fs::read_to_string(tmp.join(".webgal-editor").join("project-structure.json"))
-            .unwrap()
-            .contains(r#""status":"before""#));
+        assert!(
+            fs::read_to_string(tmp.join(".webgal-editor").join("project-structure.json"))
+                .unwrap()
+                .contains(r#""status":"before""#)
+        );
         assert!(!tmp.join(".webgal-editor").join("stale-cache.json").exists());
         assert!(tmp.join(".webgal-editor").join("snapshots").is_dir());
         let _ = fs::remove_dir_all(&tmp);
@@ -1820,7 +1834,9 @@ mod tests {
 
         assert!(!snapshot.includes_editor_state);
         assert_eq!(snapshot.metadata_included, Some(true));
-        assert!(!PathBuf::from(&snapshot.path).join(".webgal-editor").exists());
+        assert!(!PathBuf::from(&snapshot.path)
+            .join(".webgal-editor")
+            .exists());
         let _ = fs::remove_dir_all(&tmp);
     }
 

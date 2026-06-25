@@ -3,23 +3,41 @@ use std::fs;
 
 #[test]
 fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
-    assert_eq!(normalize_cosyvoice_voice("longwanjun", "cosyvoice-v2"), "longwanjun_v2");
-    assert_eq!(normalize_cosyvoice_voice("longanrou", "cosyvoice-v3-flash"), "longanrou_v2");
+    assert_eq!(
+        normalize_cosyvoice_voice("longwanjun", "cosyvoice-v2"),
+        "longwanjun_v2"
+    );
+    assert_eq!(
+        normalize_cosyvoice_voice("longanrou", "cosyvoice-v3-flash"),
+        "longanrou_v2"
+    );
     // Already has _v2 — no double-append.
-    assert_eq!(normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v2"), "longxiaochun_v2");
+    assert_eq!(
+        normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v2"),
+        "longxiaochun_v2"
+    );
 }
 
 #[test]
 fn normalize_cosyvoice_voice_strips_v2_for_v1_model() {
-    assert_eq!(normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v1"), "longxiaochun");
-    assert_eq!(normalize_cosyvoice_voice("longwanjun", "cosyvoice-v1"), "longwanjun");
+    assert_eq!(
+        normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v1"),
+        "longxiaochun"
+    );
+    assert_eq!(
+        normalize_cosyvoice_voice("longwanjun", "cosyvoice-v1"),
+        "longwanjun"
+    );
 }
 
 #[test]
 fn normalize_cosyvoice_voice_passes_through_custom_clone_id() {
     // Clone IDs contain hyphens; must not be mangled.
     let clone_id = "speech-synthesizer-clone-v3-abc123-def456";
-    assert_eq!(normalize_cosyvoice_voice(clone_id, "cosyvoice-v2"), clone_id);
+    assert_eq!(
+        normalize_cosyvoice_voice(clone_id, "cosyvoice-v2"),
+        clone_id
+    );
 }
 
 #[test]
@@ -674,7 +692,10 @@ fn run_real_model_harness_tool(
             ]
         }),
         "search_assets" => {
-            let category = args.get("category").and_then(|v| v.as_str()).unwrap_or("figure");
+            let category = args
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("figure");
             if category != "figure" {
                 return serde_json::json!({
                     "error": format!("测试 harness 只有 figure 素材；场景请用 list_scenes/read_scene，不要用 search_assets 查询 {category}。")
@@ -692,7 +713,10 @@ fn run_real_model_harness_tool(
         "insert_figure" => {
             let character = args.get("character").and_then(|v| v.as_str()).unwrap_or("");
             let emotion = args.get("emotion").and_then(|v| v.as_str()).unwrap_or("");
-            let position = args.get("position").and_then(|v| v.as_str()).unwrap_or("center");
+            let position = args
+                .get("position")
+                .and_then(|v| v.as_str())
+                .unwrap_or("center");
             if !["静香", "小静", "char_shizuka"].contains(&character) {
                 return serde_json::json!({ "staged": false, "error": format!("找不到角色：{character}") });
             }
@@ -712,9 +736,7 @@ fn run_real_model_harness_tool(
             let line = format!(
                 "changeFigure:char_shizuka/静香_生气_1700000000.png -figureCharacter=静香 -figureEmotion=生气{position_flag}{next};"
             );
-            let after = format!(
-                ":静香站在门口，紧紧攥着袖口;\n{line}\n静香:我已经不会再退让了;\n"
-            );
+            let after = format!(":静香站在门口，紧紧攥着袖口;\n{line}\n静香:我已经不会再退让了;\n");
             *preview = Some(after.clone());
             serde_json::json!({
                 "staged": true,
@@ -1094,7 +1116,11 @@ fn structured_branch_preview(choices: &[serde_json::Value]) -> Result<String, St
             "create {target_file} chapter={chapter} outline={outline} content={content}"
         ));
     }
-    Ok(format!("choose:{};\n{}", parts.join("|"), created.join("\n")))
+    Ok(format!(
+        "choose:{};\n{}",
+        parts.join("|"),
+        created.join("\n")
+    ))
 }
 
 fn escape_choice_part(value: &str) -> String {

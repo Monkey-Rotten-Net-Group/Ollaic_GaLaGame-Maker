@@ -125,8 +125,8 @@ pub fn load_config() -> AiConfig {
 }
 
 pub fn save_config(config: &AiConfig) -> Result<(), String> {
-    let path =
-        config_path(CONFIG_FILE).ok_or_else(|| "Unable to locate user config directory".to_string())?;
+    let path = config_path(CONFIG_FILE)
+        .ok_or_else(|| "Unable to locate user config directory".to_string())?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {e}"))?;
@@ -173,8 +173,8 @@ fn load_provider_config(
 }
 
 fn save_provider_config(file_name: &str, config: &AiProviderConfig) -> Result<(), String> {
-    let path =
-        config_path(file_name).ok_or_else(|| "Unable to locate user config directory".to_string())?;
+    let path = config_path(file_name)
+        .ok_or_else(|| "Unable to locate user config directory".to_string())?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {e}"))?;

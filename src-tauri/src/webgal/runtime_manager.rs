@@ -16,7 +16,11 @@ pub fn read_info(dir: &Path) -> RuntimeInfo {
         std::fs::read_to_string(dir.join("webgal-engine.json"))
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|v| v.get("webgalVersion").and_then(|x| x.as_str()).map(String::from))
+            .and_then(|v| {
+                v.get("webgalVersion")
+                    .and_then(|x| x.as_str())
+                    .map(String::from)
+            })
     } else {
         None
     };
@@ -57,10 +61,7 @@ pub async fn install(version: &str, target_dir: &Path) -> Result<(), String> {
         .await
         .map_err(|e| format!("create parent failed: {e}"))?;
 
-    let staging = parent.join(format!(
-        ".WebGAL_Template.staging-{}",
-        std::process::id()
-    ));
+    let staging = parent.join(format!(".WebGAL_Template.staging-{}", std::process::id()));
     if staging.exists() {
         tokio::fs::remove_dir_all(&staging)
             .await
@@ -86,10 +87,7 @@ pub async fn install(version: &str, target_dir: &Path) -> Result<(), String> {
     }
 
     // Atomic swap: move existing aside, install staging, drop old.
-    let backup = parent.join(format!(
-        ".WebGAL_Template.old-{}",
-        std::process::id()
-    ));
+    let backup = parent.join(format!(".WebGAL_Template.old-{}", std::process::id()));
     if target_dir.exists() {
         tokio::fs::rename(target_dir, &backup)
             .await
@@ -111,8 +109,7 @@ pub async fn install(version: &str, target_dir: &Path) -> Result<(), String> {
 
 fn extract_zip(bytes: &[u8], target: &Path) -> Result<(), String> {
     let cursor = std::io::Cursor::new(bytes);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| format!("zip open failed: {e}"))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("zip open failed: {e}"))?;
 
     for i in 0..archive.len() {
         let mut entry = archive
@@ -132,8 +129,8 @@ fn extract_zip(bytes: &[u8], target: &Path) -> Result<(), String> {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
         }
-        let mut out =
-            std::fs::File::create(&outpath).map_err(|e| format!("create {}: {e}", outpath.display()))?;
+        let mut out = std::fs::File::create(&outpath)
+            .map_err(|e| format!("create {}: {e}", outpath.display()))?;
         std::io::copy(&mut entry, &mut out)
             .map_err(|e| format!("write {}: {e}", outpath.display()))?;
     }

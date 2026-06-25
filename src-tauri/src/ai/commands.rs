@@ -1,4 +1,5 @@
 use super::config::{self, AiConfig, AiProviderConfig};
+use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
@@ -6,7 +7,6 @@ use genai::chat::{
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::path::PathBuf;
@@ -396,10 +396,18 @@ pub async fn ai_generate_tts(
         "openai" | "custom" => {
             generate_openai_compatible_tts(&cfg, model, &text, &voice_prompt, response_format).await
         }
-        "elevenlabs" => generate_elevenlabs_tts(&cfg, model, &text, &voice_prompt, response_format).await,
-        "aliyun" => generate_dashscope_tts(&cfg, model, &text, &voice_prompt, response_format).await,
-        "volcengine" => generate_volcengine_tts(&cfg, model, &text, &voice_prompt, response_format).await,
-        other => Err(format!("当前暂未适配 {other} 音频生成接口，请使用 OpenAI 兼容 Base URL 或选择已适配供应商。")),
+        "elevenlabs" => {
+            generate_elevenlabs_tts(&cfg, model, &text, &voice_prompt, response_format).await
+        }
+        "aliyun" => {
+            generate_dashscope_tts(&cfg, model, &text, &voice_prompt, response_format).await
+        }
+        "volcengine" => {
+            generate_volcengine_tts(&cfg, model, &text, &voice_prompt, response_format).await
+        }
+        other => Err(format!(
+            "当前暂未适配 {other} 音频生成接口，请使用 OpenAI 兼容 Base URL 或选择已适配供应商。"
+        )),
     }
 }
 
@@ -423,7 +431,10 @@ pub async fn generate_music(
     }
 
     if cfg.provider.trim() == "custom" && cfg.base_url.trim().is_empty() {
-        return Err("自定义音乐端点未填写 Base URL，请在 AI 设置的音乐 Tab 填写返回音频的接口地址".to_string());
+        return Err(
+            "自定义音乐端点未填写 Base URL，请在 AI 设置的音乐 Tab 填写返回音频的接口地址"
+                .to_string(),
+        );
     }
 
     let response_format = normalize_audio_format(&format);
@@ -494,7 +505,14 @@ async fn generate_openai_compatible_music(
             .bytes()
             .await
             .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
-        log_provider_event("music_generate", cfg, model, &endpoint, true, "music generated");
+        log_provider_event(
+            "music_generate",
+            cfg,
+            model,
+            &endpoint,
+            true,
+            "music generated",
+        );
         return Ok(GeneratedMedia {
             base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
             extension: ext,
@@ -519,17 +537,35 @@ async fn parse_music_json_response(
     fallback_ext: &str,
 ) -> Result<GeneratedMedia, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|e| {
-        format!("解析音乐生成响应失败: {e}; 响应: {}", truncate_log_field(text))
+        format!(
+            "解析音乐生成响应失败: {e}; 响应: {}",
+            truncate_log_field(text)
+        )
     })?;
     if let Some(b64) = find_audio_base64(&value) {
-        log_provider_event("music_generate", cfg, model, endpoint, true, "music generated (base64)");
+        log_provider_event(
+            "music_generate",
+            cfg,
+            model,
+            endpoint,
+            true,
+            "music generated (base64)",
+        );
         return Ok(GeneratedMedia {
             base64_data: strip_data_url_prefix(&b64).to_string(),
             extension: fallback_ext.to_string(),
         });
     }
     if let Some(url) = find_audio_url(&value) {
-        return download_generated_media(cfg, model, endpoint, &url, fallback_ext, "music_generate").await;
+        return download_generated_media(
+            cfg,
+            model,
+            endpoint,
+            &url,
+            fallback_ext,
+            "music_generate",
+        )
+        .await;
     }
     log_provider_event("music_generate", cfg, model, endpoint, false, text);
     Err(format!(
@@ -752,9 +788,7 @@ pub async fn ai_chat_turn(
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     if let Some(ctx) = character_context {
         if !ctx.trim().is_empty() {
-            chat_messages.push(ChatMessage::system(format!(
-                "## 当前项目的角色设定\n{ctx}"
-            )));
+            chat_messages.push(ChatMessage::system(format!("## 当前项目的角色设定\n{ctx}")));
         }
     }
     chat_messages.extend(to_chat_messages(messages));
@@ -763,7 +797,11 @@ pub async fn ai_chat_turn(
     if !tools.is_empty() {
         let genai_tools: Vec<Tool> = tools
             .into_iter()
-            .map(|t| Tool::new(t.name).with_description(t.description).with_schema(t.parameters))
+            .map(|t| {
+                Tool::new(t.name)
+                    .with_description(t.description)
+                    .with_schema(t.parameters)
+            })
             .collect();
         request = request.with_tools(genai_tools);
     }
@@ -890,7 +928,9 @@ fn effective_endpoint(cfg: &AiConfig) -> String {
     if !cfg.base_url.trim().is_empty() {
         return cfg.base_url.trim().to_string();
     }
-    default_chat_endpoint(cfg.provider.as_str()).unwrap_or("").to_string()
+    default_chat_endpoint(cfg.provider.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn media_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
@@ -994,7 +1034,8 @@ async fn generate_dashscope_image(
             "n": 1
         }
     });
-    let body = serde_json::to_string(&body).map_err(|e| format!("序列化阿里云图片生成请求失败: {e}"))?;
+    let body =
+        serde_json::to_string(&body).map_err(|e| format!("序列化阿里云图片生成请求失败: {e}"))?;
     let client = http_client();
     let response = client
         .post(&endpoint)
@@ -1006,7 +1047,10 @@ async fn generate_dashscope_image(
         .await
         .map_err(|e| format!("阿里云图片生成请求失败: {e}"))?;
     let status = response.status();
-    let text = response.text().await.map_err(|e| format!("读取阿里云图片生成响应失败: {e}"))?;
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取阿里云图片生成响应失败: {e}"))?;
     if !status.is_success() {
         log_provider_event("image_generate", cfg, model, &endpoint, false, &text);
         return Err(format!("阿里云图片生成失败 ({status}): {text}"));
@@ -1045,7 +1089,10 @@ async fn generate_dashscope_image(
             .await
             .map_err(|e| format!("查询阿里云图片任务失败: {e}"))?;
         let status = poll.status();
-        let text = poll.text().await.map_err(|e| format!("读取阿里云图片任务响应失败: {e}"))?;
+        let text = poll
+            .text()
+            .await
+            .map_err(|e| format!("读取阿里云图片任务响应失败: {e}"))?;
         if !status.is_success() {
             log_provider_event("image_generate", cfg, model, &task_endpoint, false, &text);
             return Err(format!("查询阿里云图片任务失败 ({status}): {text}"));
@@ -1069,7 +1116,15 @@ async fn generate_dashscope_image(
                     .into_iter()
                     .find_map(|item| item.url)
                     .ok_or_else(|| format!("阿里云图片任务完成但缺少图片 URL: {text}"))?;
-                return download_generated_media(cfg, model, &task_endpoint, &url, "png", "image_generate").await;
+                return download_generated_media(
+                    cfg,
+                    model,
+                    &task_endpoint,
+                    &url,
+                    "png",
+                    "image_generate",
+                )
+                .await;
             }
             Some("FAILED") | Some("CANCELED") | Some("UNKNOWN") => {
                 emit_media_generation_progress(
@@ -1141,7 +1196,8 @@ async fn generate_gemini_image(
             "parts": parts
         }]
     });
-    let body = serde_json::to_string(&body).map_err(|e| format!("序列化 Gemini 图片生成请求失败: {e}"))?;
+    let body =
+        serde_json::to_string(&body).map_err(|e| format!("序列化 Gemini 图片生成请求失败: {e}"))?;
     let response = http_client()
         .post(&endpoint)
         .header("Content-Type", "application/json")
@@ -1151,7 +1207,10 @@ async fn generate_gemini_image(
         .await
         .map_err(|e| format!("Gemini 图片生成请求失败: {e}"))?;
     let status = response.status();
-    let text = response.text().await.map_err(|e| format!("读取 Gemini 图片生成响应失败: {e}"))?;
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取 Gemini 图片生成响应失败: {e}"))?;
     if !status.is_success() {
         log_provider_event("image_generate", cfg, model, &endpoint, false, &text);
         return Err(format!("Gemini 图片生成失败 ({status}): {text}"));
@@ -1163,7 +1222,14 @@ async fn generate_gemini_image(
             for part in content.parts {
                 if let Some(inline) = part.inline_data {
                     let extension = extension_from_mime(&inline.mime_type, "png");
-                    log_provider_event("image_generate", cfg, model, &endpoint, true, "image generated");
+                    log_provider_event(
+                        "image_generate",
+                        cfg,
+                        model,
+                        &endpoint,
+                        true,
+                        "image generated",
+                    );
                     return Ok(GeneratedMedia {
                         base64_data: inline.data,
                         extension,
@@ -1197,7 +1263,14 @@ async fn generate_sd_webui_image(
         .and_then(|items| items.first())
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("Stable Diffusion WebUI 响应中没有 images[0]: {text}"))?;
-    log_provider_event("image_generate", cfg, cfg.model.trim(), &endpoint, true, "image generated");
+    log_provider_event(
+        "image_generate",
+        cfg,
+        cfg.model.trim(),
+        &endpoint,
+        true,
+        "image generated",
+    );
     Ok(GeneratedMedia {
         base64_data: strip_data_url_prefix(b64).to_string(),
         extension: "png".to_string(),
@@ -1251,7 +1324,8 @@ async fn generate_elevenlabs_tts(
         "model_id": model,
         "output_format": output_format
     });
-    let body = serde_json::to_string(&body).map_err(|e| format!("序列化 ElevenLabs 请求失败: {e}"))?;
+    let body =
+        serde_json::to_string(&body).map_err(|e| format!("序列化 ElevenLabs 请求失败: {e}"))?;
     let response = http_client()
         .post(&endpoint)
         .header("Content-Type", "application/json")
@@ -1260,7 +1334,15 @@ async fn generate_elevenlabs_tts(
         .send()
         .await
         .map_err(|e| format!("ElevenLabs 音频生成请求失败: {e}"))?;
-    response_to_generated_media(response, cfg, model, &endpoint, response_format, "tts_generate").await
+    response_to_generated_media(
+        response,
+        cfg,
+        model,
+        &endpoint,
+        response_format,
+        "tts_generate",
+    )
+    .await
 }
 
 async fn generate_dashscope_tts(
@@ -1278,7 +1360,8 @@ async fn generate_dashscope_tts(
     // Sambert 系列同样不走本 HTTP 端点，且协议更老，暂不支持。
     let lower_model = model.to_ascii_lowercase();
     if lower_model.starts_with("cosyvoice") {
-        return generate_dashscope_cosyvoice_ws(cfg, model, text, voice_prompt, response_format).await;
+        return generate_dashscope_cosyvoice_ws(cfg, model, text, voice_prompt, response_format)
+            .await;
     }
     if lower_model.starts_with("sambert") {
         return Err(format!(
@@ -1289,7 +1372,11 @@ async fn generate_dashscope_tts(
     // Qwen-TTS 音色名（如 Cherry/Ethan）直接透传 voice_prompt，空时给默认音色。
     let voice = {
         let trimmed = voice_prompt.trim();
-        if trimmed.is_empty() { "Cherry" } else { trimmed }
+        if trimmed.is_empty() {
+            "Cherry"
+        } else {
+            trimmed
+        }
     };
     let body = serde_json::json!({
         "model": model,
@@ -1310,13 +1397,22 @@ async fn generate_dashscope_tts(
         return download_generated_media(cfg, model, &endpoint, &url, "wav", "tts_generate").await;
     }
     if let Some(data) = audio.data.filter(|d| !d.is_empty()) {
-        log_provider_event("tts_generate", cfg, model, &endpoint, true, "audio generated");
+        log_provider_event(
+            "tts_generate",
+            cfg,
+            model,
+            &endpoint,
+            true,
+            "audio generated",
+        );
         return Ok(GeneratedMedia {
             base64_data: strip_data_url_prefix(&data).to_string(),
             extension: response_format.to_string(),
         });
     }
-    Err(format!("阿里云语音合成响应既无 url 也无 data: {response_text}"))
+    Err(format!(
+        "阿里云语音合成响应既无 url 也无 data: {response_text}"
+    ))
 }
 
 /// 生成 32 位 hex 的简易唯一 task_id（避免引入 uuid 依赖）。
@@ -1554,7 +1650,14 @@ async fn generate_dashscope_cosyvoice_ws(
         log_provider_event("tts_generate", cfg, model, &log_url, false, &message);
         return Err(message);
     }
-    log_provider_event("tts_generate", cfg, model, &log_url, true, "audio generated");
+    log_provider_event(
+        "tts_generate",
+        cfg,
+        model,
+        &log_url,
+        true,
+        "audio generated",
+    );
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(&audio_bytes),
         extension: format.to_string(),
@@ -1577,7 +1680,11 @@ async fn generate_volcengine_tts(
         cfg.base_url.trim().trim_end_matches('/').to_string()
     };
     // X-Api-Resource-Id 用模型字段承载（如 seed-tts-2.0）；speaker 用音色提示原文。
-    let resource_id = if model.is_empty() { "seed-tts-2.0" } else { model };
+    let resource_id = if model.is_empty() {
+        "seed-tts-2.0"
+    } else {
+        model
+    };
     let speaker = {
         let trimmed = voice_prompt.trim();
         if trimmed.is_empty() {
@@ -1597,7 +1704,8 @@ async fn generate_volcengine_tts(
             }
         }
     });
-    let body = serde_json::to_string(&body).map_err(|e| format!("序列化火山语音合成请求失败: {e}"))?;
+    let body =
+        serde_json::to_string(&body).map_err(|e| format!("序列化火山语音合成请求失败: {e}"))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
         .build()
@@ -1659,7 +1767,14 @@ async fn generate_volcengine_tts(
         }
         return Err(format!("火山语音合成响应中没有音频数据: {response_text}"));
     }
-    log_provider_event("tts_generate", cfg, model, &endpoint, true, "audio generated");
+    log_provider_event(
+        "tts_generate",
+        cfg,
+        model,
+        &endpoint,
+        true,
+        "audio generated",
+    );
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(&audio_bytes),
         extension: response_format.to_string(),
@@ -1672,7 +1787,8 @@ async fn post_json_text(
     body: serde_json::Value,
     action_label: &str,
 ) -> Result<String, String> {
-    let body = serde_json::to_string(&body).map_err(|e| format!("序列化{action_label}请求失败: {e}"))?;
+    let body =
+        serde_json::to_string(&body).map_err(|e| format!("序列化{action_label}请求失败: {e}"))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
         .build()
@@ -1684,21 +1800,32 @@ async fn post_json_text(
     if !cfg.api_key.trim().is_empty() {
         request = request.bearer_auth(cfg.api_key.trim());
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| {
-            let message = format!("{action_label}请求失败: {e}");
-            log_provider_event("media_generate", cfg, cfg.model.trim(), endpoint, false, &message);
-            message
-        })?;
+    let response = request.send().await.map_err(|e| {
+        let message = format!("{action_label}请求失败: {e}");
+        log_provider_event(
+            "media_generate",
+            cfg,
+            cfg.model.trim(),
+            endpoint,
+            false,
+            &message,
+        );
+        message
+    })?;
     let status = response.status();
     let text = response
         .text()
         .await
         .map_err(|e| format!("读取{action_label}响应失败: {e}"))?;
     if !status.is_success() {
-        log_provider_event("media_generate", cfg, cfg.model.trim(), endpoint, false, &text);
+        log_provider_event(
+            "media_generate",
+            cfg,
+            cfg.model.trim(),
+            endpoint,
+            false,
+            &text,
+        );
         return Err(format!("{action_label}失败 ({status}): {text}"));
     }
     Ok(text)
@@ -1766,7 +1893,14 @@ async fn parse_openai_image_response(
         .next()
         .ok_or_else(|| "图片生成响应中没有图片数据".to_string())?;
     if let Some(b64) = item.b64_json {
-        log_provider_event("image_generate", cfg, model, endpoint, true, "image generated");
+        log_provider_event(
+            "image_generate",
+            cfg,
+            model,
+            endpoint,
+            true,
+            "image generated",
+        );
         return Ok(GeneratedMedia {
             base64_data: strip_data_url_prefix(&b64).to_string(),
             extension: "png".to_string(),
@@ -1856,7 +1990,9 @@ fn validate_provider_config_basics(cfg: &AiProviderConfig, capability: &str) -> 
         return Err(format!("尚未配置{capability}模型"));
     }
     if cfg.provider == "custom" && is_placeholder_base_url(&cfg.base_url) {
-        return Err(format!("自定义{capability} Base URL 仍是示例地址，请填写真实接口地址"));
+        return Err(format!(
+            "自定义{capability} Base URL 仍是示例地址，请填写真实接口地址"
+        ));
     }
     if cfg.api_key.trim().is_empty()
         && cfg.provider != "sd-webui"
@@ -1869,7 +2005,12 @@ fn validate_provider_config_basics(cfg: &AiProviderConfig, capability: &str) -> 
 }
 
 fn normalize_audio_format(value: &str) -> &'static str {
-    match value.trim().trim_start_matches('.').to_ascii_lowercase().as_str() {
+    match value
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "opus" => "opus",
         "aac" => "aac",
         "flac" => "flac",
@@ -1881,7 +2022,9 @@ fn normalize_audio_format(value: &str) -> &'static str {
 
 fn openai_voice_from_prompt(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
-    for voice in ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"] {
+    for voice in [
+        "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+    ] {
         if lower.contains(voice) {
             return voice.to_string();
         }
@@ -1890,9 +2033,15 @@ fn openai_voice_from_prompt(value: &str) -> String {
 }
 
 fn elevenlabs_voice_id(value: &str) -> String {
-    for token in value.split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '，' || c == '；') {
+    for token in
+        value.split(|c: char| c.is_whitespace() || c == ',' || c == ';' || c == '，' || c == '；')
+    {
         let token = token.trim();
-        if token.len() >= 16 && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if token.len() >= 16
+            && token
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return token.to_string();
         }
     }
@@ -2066,7 +2215,10 @@ fn truncate_log_field(value: &str) -> String {
 
 fn truncate_trace_field(value: &str) -> String {
     let mut chars = value.chars();
-    let truncated = chars.by_ref().take(MAX_TRACE_FIELD_CHARS).collect::<String>();
+    let truncated = chars
+        .by_ref()
+        .take(MAX_TRACE_FIELD_CHARS)
+        .collect::<String>();
     if chars.next().is_some() {
         format!("{truncated}…")
     } else {
@@ -2145,20 +2297,31 @@ pub async fn generate_batch_tts(
         let gen_result = match cfg.provider.trim() {
             "openai" | "custom" => {
                 generate_openai_compatible_tts(
-                    &cfg, model, &item.text, &item.voice_prompt, response_format,
-                ).await
+                    &cfg,
+                    model,
+                    &item.text,
+                    &item.voice_prompt,
+                    response_format,
+                )
+                .await
             }
             "elevenlabs" => {
                 generate_elevenlabs_tts(
-                    &cfg, model, &item.text, &item.voice_prompt, response_format,
-                ).await
+                    &cfg,
+                    model,
+                    &item.text,
+                    &item.voice_prompt,
+                    response_format,
+                )
+                .await
             }
             "aliyun" => {
-                generate_dashscope_tts(
-                    &cfg, model, &item.text, &item.voice_prompt, response_format,
-                ).await
+                generate_dashscope_tts(&cfg, model, &item.text, &item.voice_prompt, response_format)
+                    .await
             }
-            other => Err(format!("批量生成暂不支持 {other}，请使用 Amazon 兼容或已适配供应商。")),
+            other => Err(format!(
+                "批量生成暂不支持 {other}，请使用 Amazon 兼容或已适配供应商。"
+            )),
         };
 
         match gen_result {

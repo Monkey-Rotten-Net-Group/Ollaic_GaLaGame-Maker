@@ -261,7 +261,10 @@ pub(crate) fn read_asset_metadata(project_path: &str) -> Result<AssetMetadata, S
     serde_json::from_str(&source).map_err(|e| format!("解析素材元数据失败 {}: {e}", path.display()))
 }
 
-pub(crate) fn write_asset_metadata(project_path: &str, metadata: &AssetMetadata) -> Result<(), String> {
+pub(crate) fn write_asset_metadata(
+    project_path: &str,
+    metadata: &AssetMetadata,
+) -> Result<(), String> {
     let path = asset_metadata_path(project_path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
@@ -306,7 +309,12 @@ fn rename_asset_metadata(
     let new_key = asset_metadata_key(category, new_name);
     let legacy_key = owns_asset_metadata(category).then_some(old_name);
     rename_metadata_entry(&mut metadata.aliases, &old_key, legacy_key, new_key.clone());
-    rename_metadata_entry(&mut metadata.descriptions, &old_key, legacy_key, new_key.clone());
+    rename_metadata_entry(
+        &mut metadata.descriptions,
+        &old_key,
+        legacy_key,
+        new_key.clone(),
+    );
     rename_metadata_entry(&mut metadata.tags, &old_key, legacy_key, new_key.clone());
     rename_metadata_entry(&mut metadata.references, &old_key, legacy_key, new_key);
     write_asset_metadata(project_path, &metadata)
@@ -701,10 +709,32 @@ fn detect_emotion(text: &str, flags: &[serde_json::Value]) -> String {
     }
     let lower = text.to_lowercase();
     let emotion_keywords: &[(&str, &[&str])] = &[
-        ("happy", &["开心", "高兴", "太好", "哈哈", "喜欢", "微笑", "笑", "棒", "赞"]),
-        ("sad", &["伤心", "难过", "哭", "痛", "悲伤", "遗憾", "对不起", "抱歉"]),
-        ("angry", &["生气", "怒", "可恶", "过分", "混蛋", "滚", "闭嘴"]),
-        ("surprised", &["惊讶", "什么", "不会吧", "竟然", "天啊", "不可能", "真的假的"]),
+        (
+            "happy",
+            &[
+                "开心", "高兴", "太好", "哈哈", "喜欢", "微笑", "笑", "棒", "赞",
+            ],
+        ),
+        (
+            "sad",
+            &["伤心", "难过", "哭", "痛", "悲伤", "遗憾", "对不起", "抱歉"],
+        ),
+        (
+            "angry",
+            &["生气", "怒", "可恶", "过分", "混蛋", "滚", "闭嘴"],
+        ),
+        (
+            "surprised",
+            &[
+                "惊讶",
+                "什么",
+                "不会吧",
+                "竟然",
+                "天啊",
+                "不可能",
+                "真的假的",
+            ],
+        ),
         ("fearful", &["害怕", "恐怖", "不要", "救命", "危险", "吓"]),
         ("gentle", &["温柔", "乖", "可爱", "安静", "轻声"]),
     ];
@@ -864,10 +894,7 @@ pub fn fill_voice_card(
 
 /// Delete a voice card (mark as deleted so it won't be re-created on sync).
 #[tauri::command]
-pub fn delete_voice_card(
-    project_path: String,
-    voice_card_id: String,
-) -> Result<(), String> {
+pub fn delete_voice_card(project_path: String, voice_card_id: String) -> Result<(), String> {
     let mut metadata = read_asset_metadata(&project_path)?;
     let already_deleted = metadata.deleted_voice_cards.contains(&voice_card_id);
     metadata.voice_cards.remove(&voice_card_id);
