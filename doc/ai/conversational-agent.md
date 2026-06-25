@@ -127,7 +127,7 @@ cargo test --manifest-path src-tauri/Cargo.toml real_model_structured_story_tool
 - 先在应用 AI 设置里保存可用的 chat provider/model/API key/base URL;harness 读取同一份 `get_ai_config` 配置。
 - 这是真实网络调用,不会随普通 `cargo test` 自动运行。
 - 输出会打印每轮 assistant 文本、tool call 参数、tool result 和最终 preview,适合调工具提示词与 schema。
-- 源码入口:`src-tauri/src/ai/commands.rs` 的 `real_model_insert_figure_harness` / `real_model_structured_story_tools_harness`。
+- 源码入口:`src-tauri/src/ai/commands_tests.rs` 的 `real_model_insert_figure_harness` / `real_model_structured_story_tools_harness`。
 
 ## 相关源码
 - `design/src/app/hooks/useAiAgent.ts`(`runAgentLoop` / `runLegacyTurn` / `sendPrompt` / `stop` / `retry`)
