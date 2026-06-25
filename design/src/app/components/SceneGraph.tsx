@@ -183,6 +183,9 @@ interface SceneGraphProps {
   /** viewBox width — narrow (224) for the side panel, larger for full-screen.
    *  Acts as a minimum: the graph grows wider when a row needs more space. */
   graphWidth?: number;
+  /** Fit the whole graph to the container width. Disable in narrow sidebars so
+   *  dense projects keep readable card sizes and scroll horizontally instead. */
+  fitToWidth?: boolean;
   /** Classes for the scroll container (height, borders, …). */
   className?: string;
 }
@@ -201,6 +204,7 @@ export const SceneGraph = memo(function SceneGraph({
   onSwitchScene,
   onNodeContextMenu,
   graphWidth = 224,
+  fitToWidth = true,
   className,
 }: SceneGraphProps) {
   const layout = useMemo(
@@ -231,9 +235,16 @@ export const SceneGraph = memo(function SceneGraph({
 
   const { width, height } = layout;
 
+  const wrapperStyle = fitToWidth
+    ? { aspectRatio: `${width} / ${height}` }
+    : { width, height };
+
   return (
-    <div className={`relative overflow-auto overflow-x-hidden ${className ?? ''}`}>
-      <div className="relative w-full" style={{ aspectRatio: `${width} / ${height}` }}>
+    <div className={`relative overflow-auto ${fitToWidth ? 'overflow-x-hidden' : ''} ${className ?? ''}`}>
+      <div
+        className={`relative ${fitToWidth ? 'w-full' : 'shrink-0'}`}
+        style={wrapperStyle}
+      >
         {/* Edges — mapped 1:1 onto the box (matching aspect ratio → uniform scale). */}
         <svg
           viewBox={`0 0 ${width} ${height}`}

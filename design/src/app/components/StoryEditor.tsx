@@ -480,6 +480,7 @@ function SceneWorldlinePanel({
         sceneLinkMap={sceneLinkMap}
         sceneHeaders={sceneHeaders}
         onSwitchScene={onOpenScene}
+        fitToWidth={false}
         className="h-72 shrink-0 border-b border-border bg-surface-container-low p-2"
       />
 
