@@ -5,10 +5,11 @@ import {
   ChevronRight, FileEdit, Wrench, AlertCircle,
   List, FileText, Search, Users, UserRound, Brain,
   PencilLine, UserCog, BookMarked, FilePlus,
-  UserPlus, ImageIcon,
+  UserPlus, ImageIcon, Paperclip,
   type LucideIcon,
 } from 'lucide-react';
-import type { AssistantStep, ChatDiffLine } from '../hooks/useChatSession';
+import type { AssistantStep, ChatAttachment, ChatDiffLine } from '../hooks/useChatSession';
+import { AiSentAttachments } from './AiUploadsPanel';
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
   list_scenes: List,
@@ -17,6 +18,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   list_characters: Users,
   get_character: UserRound,
   read_memory: Brain,
+  list_reference_files: Paperclip,
+  read_reference_file: FileText,
   edit_scene: PencilLine,
   set_scene_header: FileEdit,
   insert_dialogue_block: PencilLine,
@@ -37,6 +40,8 @@ interface AiMessageBubbleProps {
   isStreaming?: boolean;
   stopped?: boolean;
   diff?: ChatDiffLine[];
+  /** Reference files that were sent along with this user message. */
+  attachments?: ChatAttachment[];
 }
 
 function DiffBlock({ diff }: { diff: ChatDiffLine[] }) {
@@ -160,7 +165,7 @@ function StepsView({ steps }: { steps: AssistantStep[] }) {
   );
 }
 
-export function AiMessageBubble({ role, content, steps, isStreaming = false, stopped = false, diff }: AiMessageBubbleProps) {
+export function AiMessageBubble({ role, content, steps, isStreaming = false, stopped = false, diff, attachments }: AiMessageBubbleProps) {
   return (
     <div
       className={`min-w-0 max-w-[85%] rounded-lg px-3 py-2 text-sm break-words ${
@@ -178,6 +183,7 @@ export function AiMessageBubble({ role, content, steps, isStreaming = false, sto
       )}
       {!content && (!steps || steps.length === 0) && isStreaming && '思考中...'}
       {isStreaming && content && <span className="inline-block w-2 h-3 ml-1 bg-current align-middle animate-pulse" />}
+      {attachments && attachments.length > 0 && <AiSentAttachments attachments={attachments} />}
       {diff && diff.length > 0 && !isStreaming && <DiffBlock diff={diff} />}
       {stopped && <div className="mt-1 text-[11px] text-muted-foreground">已停止</div>}
     </div>

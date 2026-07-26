@@ -32,6 +32,10 @@ Editor-managed information associated with an Asset, including its display alias
 
 Supplemental source media associated with an asset for creation workflows. It is stored below `game/config/references/` and follows the owning asset lifecycle.
 
+### AI Reference Upload
+
+A local text file the author attaches to the AI workflow as reference material. It is copied into the Project editor state below `.webgal-editor/ai-uploads/`, never into `game/`, so it is not exported and never becomes a playable project file. Agent read tools may list it and read its content; changing the Project from it still goes through the normal change approval path.
+
 ### Character
 
 A person authored for a Project, with stable identity, dialogue context, relationships, and figure sprite mappings. Character reads expose one canonical entry per identity.

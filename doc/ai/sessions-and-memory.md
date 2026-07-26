@@ -24,6 +24,8 @@
 - `diff`:用户同意修改后附带的文本 diff
 - `stopped`:中断标记
 
+用户消息可包含 `attachments`:随这条消息发出的参考资料(文件名、行数、大小),详见[参考资料上传](./reference-uploads.md)。
+
 写入是 best-effort:localStorage 不可用、隐私模式或配额满时只在 console 警告,不阻塞编辑器渲染。删除会话会移除对应 `ai-session-*` key;索引为空时自动创建一个新会话。
 
 ## 历史截断

@@ -120,6 +120,8 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [logsLoading, setLogsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validation, setValidation] = useState<AiValidationResult | null>(null);
+  /** True when the last successful verification also persisted the chat config. */
+  const [verifiedSaved, setVerifiedSaved] = useState(false);
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
   const [logPath, setLogPath] = useState('');
 
@@ -128,6 +130,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     setActiveTab('chat');
     setError(null);
     setValidation(null);
+    setVerifiedSaved(false);
     setLogs([]);
     setLogPath('');
     Promise.all([getAiConfig(), getAiImageConfig(), getAiTtsConfig(), getAiMusicConfig()])
@@ -142,8 +145,12 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   if (!open) return null;
 
-  const updateChat = (patch: Partial<AiConfig>) =>
+  // Any edit invalidates the previous verification result (and its auto-save).
+  const updateChat = (patch: Partial<AiConfig>) => {
+    setValidation(null);
+    setVerifiedSaved(false);
     setConfig((c) => (c ? { ...c, ...patch } : c));
+  };
 
   const updateImage = (patch: Partial<AiProviderConfig>) =>
     setImageConfig((c) => (c ? { ...c, ...patch } : c));
@@ -164,6 +171,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     if (!preset) {
       update({ provider: value });
       setValidation(null);
+      setVerifiedSaved(false);
       return;
     }
     update({
@@ -172,6 +180,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       base_url: preset.needsBaseUrl ? (current.base_url || preset.defaultBaseUrl) : '',
     });
     setValidation(null);
+    setVerifiedSaved(false);
   };
 
   const handleVerify = async () => {
@@ -182,6 +191,14 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     try {
       const result = await validateAiConfig(config);
       setValidation(result);
+      // A successful trial connection is an unambiguous "use this config".
+      // Persist it right away: the dialog reloads from disk every time it
+      // opens, so an unsaved draft would otherwise be silently discarded.
+      if (result.ok) {
+        await setAiConfig(config);
+        setVerifiedSaved(true);
+        onSaved?.();
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -297,6 +314,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   <ConnectionPanel
                     verifying={verifying}
                     validation={validation}
+                    verifiedSaved={verifiedSaved}
                     onVerify={handleVerify}
                   />
 
@@ -732,10 +750,12 @@ function ModelTagPicker({
 function ConnectionPanel({
   verifying,
   validation,
+  verifiedSaved,
   onVerify,
 }: {
   verifying: boolean;
   validation: AiValidationResult | null;
+  verifiedSaved: boolean;
   onVerify: () => void;
 }) {
   return (
@@ -758,14 +778,19 @@ function ConnectionPanel({
       </div>
 
       {validation && (
-        <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+        <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4" />
             <span>{validation.message}</span>
           </div>
-          <div className="mt-1 text-xs text-emerald-100/80">
+          <div className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
             Endpoint: {validation.endpoint || '自动解析'}
           </div>
+          {verifiedSaved && (
+            <div className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
+              已自动保存这份聊天配置，可直接关闭对话框。
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -842,7 +867,7 @@ function AiLogRow({ entry }: { entry: AiLogEntry }) {
         <span
           className={`shrink-0 rounded px-1.5 py-0.5 ${
             entry.success
-              ? 'bg-emerald-500/10 text-emerald-300'
+              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
               : 'bg-destructive/10 text-destructive'
           }`}
         >

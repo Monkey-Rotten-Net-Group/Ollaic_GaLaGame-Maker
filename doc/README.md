@@ -12,7 +12,7 @@
 | 素材管理 | 已实现 | 背景/CG/音频/立绘导入、元数据、素材选择器、配音清单 |
 | 角色管理 | 已实现 | 角色资料、别名、立绘表情、音色字段 |
 | 运行预览 | 已实现 | 本地 WebGAL runtime、指定节点附近跳转 |
-| AI 辅助 | 已实现 | 对话修改、变更预览、角色/场景/素材规划、供应商配置 |
+| AI 辅助 | 已实现 | 对话修改、变更预览、角色/场景/素材规划、参考资料上传、供应商配置 |
 | 打包发布 | 准备中 | release workflow 构建 Windows x64、Linux x64 与 macOS Apple Silicon 包 |
 
 ## 模块索引
@@ -24,7 +24,7 @@
 | [`scenes/`](./scenes/README.md) | 场景管理、关系图、章节/大纲元数据 |
 | [`assets/`](./assets/README.md) | 素材库、元数据、配音管理 |
 | [`characters/`](./characters/README.md) | 角色资料与立绘系统 |
-| [`ai/`](./ai/README.md) | AI Agent、修改预览、会话记忆、媒体生成、供应商配置 |
+| [`ai/`](./ai/README.md) | AI Agent、修改预览、会话记忆、参考资料上传、媒体生成、供应商配置 |
 
 ## 维护原则
 

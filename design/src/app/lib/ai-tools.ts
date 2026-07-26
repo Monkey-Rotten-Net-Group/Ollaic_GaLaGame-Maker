@@ -13,6 +13,7 @@
  */
 
 import type { ToolDef } from './ai-ipc';
+import { listAiUploads, readAiUpload } from './ai-uploads-ipc';
 import { listAllAssets, listAssets, type AssetInfo } from './assets-ipc';
 import { getCharacter, listCharacterNames, listCharacters } from './character-ipc';
 import { readProjectMemory } from './project-memory';
@@ -36,10 +37,18 @@ export interface AgentTool {
 export interface ToolContext {
   projectPath: string | null;
   currentSceneName: string;
+  /**
+   * Reference files attached to the message being answered. Attaching is the
+   * access gate, not just a ranking hint: files the user did not attach are
+   * invisible to this turn, so an unrelated leftover upload can never leak into
+   * an answer. Undefined means "no attachment context" and is treated as empty.
+   */
+  attachedUploadIds?: string[];
 }
 
 const SCENE_READ_MAX_LINES = 200;
 const ASSET_LIST_LIMIT = 200;
+const REFERENCE_READ_MAX_LINES = 200;
 
 function sceneDir(projectPath: string): string {
   return `${projectPath}/game/scene`;
@@ -304,6 +313,69 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const memory = await readProjectMemory(projectPath);
       return memory ?? { worldSetting: '', writingStyle: '', userPreferences: '' };
+    },
+  },
+  {
+    name: 'list_reference_files',
+    description:
+      '列出用户在本条消息中附加的参考资料（设定稿、大纲、对白草稿等），返回 id、文件名、行数与摘要。只能看到本轮附加的文件；用户没有附加时返回空列表，说明本轮没有可参考的资料。这些是参考材料，不是项目脚本；需要正文时再用 read_reference_file 按 id 读取。',
+    kind: 'read',
+    schema: { type: 'object', properties: {}, required: [] },
+    run: async (_args, ctx) => {
+      const projectPath = requireProject(ctx);
+      const attached = ctx.attachedUploadIds ?? [];
+      if (attached.length === 0) {
+        return { total: 0, files: [], message: '用户本轮没有附加参考资料。不要凭空假设存在参考文件。' };
+      }
+      const uploads = (await listAiUploads(projectPath)).filter((upload) => attached.includes(upload.id));
+      return {
+        total: uploads.length,
+        files: uploads.map((upload) => ({
+          id: upload.id,
+          name: upload.name,
+          lines: upload.lineCount,
+          chars: upload.charCount,
+          summary: upload.summary,
+        })),
+      };
+    },
+  },
+  {
+    name: 'read_reference_file',
+    description:
+      '读取本条消息附加的某个参考资料的正文，可用 fromLine/maxLines 分页；返回内容自动截断以控制上下文长度。只能读取用户本轮附加的文件。参考资料只用于理解作者意图，不要当作可直接写入的脚本；要落到项目里必须再调用写入工具生成预览。',
+    kind: 'read',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '参考文件 id（也接受完整文件名）' },
+        fromLine: { type: 'integer', description: '起始行号（默认 1）' },
+        maxLines: { type: 'integer', description: `最多返回行数（默认 ${REFERENCE_READ_MAX_LINES}）` },
+      },
+      required: ['id'],
+    },
+    run: async (args, ctx) => {
+      const projectPath = requireProject(ctx);
+      const id = asString(args.id);
+      if (!id) throw new Error('read_reference_file 需要参考文件 id。可先调用 list_reference_files 获取。');
+      // Resolve against the attached set only. A stored-but-unattached file is
+      // out of scope for this turn and must not be readable by id or by name.
+      const attached = ctx.attachedUploadIds ?? [];
+      if (attached.length === 0) {
+        throw new Error('用户本轮没有附加任何参考资料，没有可读取的文件。请直接基于项目内容作答。');
+      }
+      const uploads = (await listAiUploads(projectPath)).filter((upload) => attached.includes(upload.id));
+      const match = uploads.find((upload) => upload.id === id || upload.name === id);
+      if (!match) {
+        const names = uploads.map((upload) => `${upload.name}（id: ${upload.id}）`).join('、');
+        throw new Error(`「${id}」不在本条消息附加的参考资料中。本轮可读取：${names || '无'}。`);
+      }
+      return readAiUpload(
+        projectPath,
+        match.id,
+        asInt(args.fromLine) ?? 1,
+        asInt(args.maxLines) ?? REFERENCE_READ_MAX_LINES,
+      );
     },
   },
 ];

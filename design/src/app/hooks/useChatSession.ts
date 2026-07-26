@@ -19,6 +19,14 @@ export interface AssistantStep {
   toolCalls?: StepToolCall[];
 }
 
+/** A reference file attached to one user message. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  lineCount: number;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -27,6 +35,8 @@ export interface ChatMessage {
   steps?: AssistantStep[];
   stopped?: boolean;
   diff?: ChatDiffLine[];
+  /** role === 'user': reference files sent along with this message. */
+  attachments?: ChatAttachment[];
 }
 
 export interface SessionMeta {

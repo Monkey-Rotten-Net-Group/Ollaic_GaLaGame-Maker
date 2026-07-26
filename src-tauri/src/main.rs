@@ -195,6 +195,11 @@ fn main() {
             ai::commands::get_ai_agent_trace_path,
             ai::commands::append_ai_agent_trace,
             ai::commands::generate_batch_tts,
+            // AI reference uploads
+            ai::uploads::list_ai_uploads,
+            ai::uploads::import_ai_upload,
+            ai::uploads::read_ai_upload,
+            ai::uploads::delete_ai_upload,
             // Matting (background removal)
             matting::commands::remove_background,
             // Assets

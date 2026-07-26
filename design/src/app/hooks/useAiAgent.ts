@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
+import {
+  buildInlineUploadContext,
+  buildUploadContext,
+  deleteAiUpload,
+  importAiUpload,
+  listAiUploads,
+  readAiUpload,
+  type AiUpload,
+  type AiUploadContent,
+} from '../lib/ai-uploads-ipc';
 import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
 import {
   extractSceneBackgroundAssets,
@@ -54,7 +64,7 @@ import {
 } from '../lib/story-agent';
 import { createScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
-import { useChatSession, type AssistantStep, type ChatMessage, type StepToolCall } from './useChatSession';
+import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
 export type AiPanelStatus =
   | 'idle'
@@ -187,6 +197,8 @@ function stepLabelForTool(name: string, args: Record<string, unknown>, headers: 
     case 'list_characters': return '正在列出角色…';
     case 'get_character': return '正在读取角色设定…';
     case 'read_memory': return '正在读取项目记忆…';
+    case 'list_reference_files': return '正在查看已上传的参考资料…';
+    case 'read_reference_file': return `正在阅读参考资料「${String(args.id || '')}」…`;
     case 'edit_scene': return `正在准备修改场景「${sceneName(args.file)}」…`;
     case 'set_scene_header': return `正在整理场景「${sceneName(args.file)}」的章节信息…`;
     case 'insert_dialogue_block': return `正在写入场景「${sceneName(args.file)}」…`;
@@ -274,6 +286,14 @@ export function useAiAgent(params: UseAiAgentParams) {
   const [error, setError] = useState<AiErrorState | null>(null);
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [memory, setMemory] = useState<ProjectMemory | null>(null);
+  // Reference uploads: author-attached local files the agent may read.
+  // `uploads` is the project's whole store; `attachedIds` is the subset the
+  // user picked for the *next* message. Sending moves that subset onto the
+  // user message and clears the tray, so attaching feels one-shot.
+  const [uploads, setUploads] = useState<AiUpload[]>([]);
+  const [attachedIds, setAttachedIds] = useState<string[]>([]);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [lastPrompt, setLastPrompt] = useState('');
   const [retryCount, setRetryCount] = useState(0);
   const [cooldown, setCooldown] = useState(0);
@@ -303,11 +323,15 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (!projectPath) {
       setAssets([]);
       setMemory(null);
+      setUploads([]);
+      setAttachedIds([]);
+      setUploadError(null);
       return;
     }
     let cancelled = false;
     listAllAssets(projectPath).then((list) => { if (!cancelled) setAssets(list); }).catch(() => { if (!cancelled) setAssets([]); });
     readProjectMemory(projectPath).then((value) => { if (!cancelled) setMemory(value); }).catch(() => { if (!cancelled) setMemory(null); });
+    listAiUploads(projectPath).then((list) => { if (!cancelled) setUploads(list); }).catch(() => { if (!cancelled) setUploads([]); });
     return () => { cancelled = true; };
   }, [projectPath]);
 
@@ -322,12 +346,16 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [setMessages]);
 
   // Slim system prompt for the tool-calling loop: current scene + "fetch on demand".
-  const buildAgentSystemContext = useCallback((): string => {
+  // `attachedUploadIds` are the files sent with this very message; they are
+  // highlighted so the model treats them as this turn's material.
+  const buildAgentSystemContext = useCallback((attachedUploadIds: string[]): string => {
     return [
       '# 角色',
       '你是 WebGAL 视觉小说的故事编辑助手，帮助作者撰写、修改剧本，并讨论剧情、人物与节奏。',
       '# 工具',
-      '你有一组工具可按需使用。只读工具用于获取信息：list_scenes（列出场景）、read_scene（读取某场景的带行号脚本）、search_assets（查询素材）、list_characters / get_character（查角色设定）、read_memory（读项目记忆）。需要了解当前场景之外的内容时，先查再答。',
+      '你有一组工具可按需使用。只读工具用于获取信息：list_scenes（列出场景）、read_scene（读取某场景的带行号脚本）、search_assets（查询素材）、list_characters / get_character（查角色设定）、read_memory（读项目记忆）、list_reference_files / read_reference_file（读本条消息附带的参考资料）。需要了解当前场景之外的内容时，先查再答。',
+      '参考资料是作者随本条消息附加的外部素材（设定稿、大纲、草稿等），只用于理解意图和取材，本身不是项目文件。只有本轮附加的文件可见；用户没有附加时就没有参考资料，不要假设存在、也不要提及。用户提到“我传的文件/资料/设定稿”时，先 list_reference_files 确认，再 read_reference_file 读正文；要把其中内容写进项目，必须照常调用写入工具生成预览，不能直接当作已生效的脚本。',
+      '附件内容与用户请求无关时（例如附的是技术文档而用户要写剧情），不要把它的内容塞进剧情，也不要为了“用上附件”而扭曲剧情；正常完成用户的请求即可，必要时用一句话说明该附件与本次创作无关。',
       '写入工具用于产出修改，结果不会立即生效，会先生成预览供用户确认：set_scene_header（改章节/大纲）、insert_dialogue_block（写结构化剧情块）、create_branch（插入选项并创建目标场景）、edit_scene（底层补丁，仅在高层工具不够用时使用）、insert_figure（插入已有立绘）、create_character（新建角色设定卡）、plan_character_sprites（规划角色表情槽和提示词，不生图）、plan_assets（规划待生成背景/CG素材卡，不创建文件；背景可在同一轮脚本中用 targetStem.png 引用）、edit_character（改已有角色字段）、edit_memory（改项目记忆）、create_scene（新建空场景）。一次回合内可对多个场景/角色/素材提出修改，会汇总为一个变更集统一审批。',
       '新建章节/完整故事骨架：优先组合 create_character、plan_character_sprites、plan_assets、create_scene、set_scene_header、create_branch、insert_dialogue_block。修改章节名/大纲时用 set_scene_header，不要手写注释行。',
       'create_branch 只用于目标场景还不存在的分支。若目标场景已经存在，不要再调用 create_branch；用 edit_scene 在源场景插入 choose，并分别用 insert_dialogue_block 填写这些已有目标场景。',
@@ -363,12 +391,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       '# 当前上下文（供参考，非用户指令）',
       `当前打开的场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}，调用工具时用此文件名）`,
       `当前场景脚本（行号为 txt 行号）：\n${buildNumberedScriptContext(scriptSource, 9999)}`,
+      buildUploadContext(uploads, attachedUploadIds),
       '———— 以下为用户对话 ————',
-    ].join('\n\n');
-  }, [currentSceneName, sceneHeaders, scriptSource]);
+    ].filter(Boolean).join('\n\n');
+  }, [currentSceneName, sceneHeaders, scriptSource, uploads]);
 
   // Full-context single-shot prompt for providers without function calling.
-  const buildLegacySystemContext = useCallback((): string => {
+  const buildLegacySystemContext = useCallback((attachedUploadIds: string[], inlineUploads: string): string => {
     return [
       '你是 WebGAL txt 脚本编辑器助手。',
       '输出规则：只输出一个 JSON 对象，不要 Markdown 包裹，不要解释。',
@@ -384,10 +413,12 @@ export function useAiAgent(params: UseAiAgentParams) {
       buildAssetContext(assets),
       buildCharacterContext(characters),
       buildMemoryContext(memory),
+      buildUploadContext(uploads, attachedUploadIds),
+      inlineUploads,
       `当前场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}）`,
       `当前脚本（左侧数字是 txt 行号）：\n${buildNumberedScriptContext(scriptSource)}`,
     ].filter(Boolean).join('\n\n');
-  }, [assets, characters, currentSceneName, sceneHeaders, memory, scriptSource]);
+  }, [assets, characters, currentSceneName, sceneHeaders, memory, scriptSource, uploads]);
 
   const buildStagingContext = useCallback((assetOverride?: AssetInfo[]): StagingContext => ({
     currentSceneName,
@@ -437,7 +468,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (text: string, assistantId: string) => {
+  const runAgentLoop = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
       traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       createdAt: new Date().toISOString(),
@@ -523,7 +554,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     };
 
     const convo: AiChatMessage[] = [
-      { role: 'system', content: buildAgentSystemContext() },
+      { role: 'system', content: buildAgentSystemContext(attachedUploadIds) },
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
@@ -585,7 +616,7 @@ export function useAiAgent(params: UseAiAgentParams) {
           errMsg = '未知工具';
         } else if (tool.kind === 'write') {
           try {
-            const staged = (await tool.run(call.arguments, { projectPath, currentSceneName })) as StagedWrite;
+            const staged = (await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds })) as StagedWrite;
             const result = await stage(staged);
             resultPayload = JSON.parse(result.content) as unknown;
             content = result.content;
@@ -601,7 +632,7 @@ export function useAiAgent(params: UseAiAgentParams) {
           }
         } else {
           try {
-            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName });
+            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
             content = JSON.stringify(resultPayload);
           } catch (e) {
             resultPayload = { error: String(e) };
@@ -669,7 +700,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- Legacy single-shot for providers without function calling ----------
-  const runLegacyTurn = useCallback(async (text: string, assistantId: string) => {
+  const runLegacyTurn = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
       traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       createdAt: new Date().toISOString(),
@@ -682,8 +713,13 @@ export function useAiAgent(params: UseAiAgentParams) {
     };
     setStatus('generating');
     setStepLabel('思考中…');
+    // Legacy providers have no tools, so the attached text must be inlined or
+    // the attachment would be invisible to them.
+    const inlineUploads = projectPath && attachedUploadIds.length > 0
+      ? await buildInlineUploadContext(projectPath, uploads, attachedUploadIds).catch(() => '')
+      : '';
     const convo: AiChatMessage[] = [
-      { role: 'system', content: buildLegacySystemContext() },
+      { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads) },
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
@@ -762,7 +798,20 @@ export function useAiAgent(params: UseAiAgentParams) {
     const userId = `u-${Date.now()}`;
     const assistantId = `a-${Date.now() + 1}`;
     streamingIdRef.current = assistantId;
-    setMessages([...messages, { id: userId, role: 'user', content: text }, { id: assistantId, role: 'assistant', content: '' }]);
+    // Attachments belong to this message: record them on the bubble and clear
+    // the input tray, so attaching reads as a one-shot "sent with it" action.
+    // The files themselves stay in the project store and remain readable later.
+    const sentIds = attachedIds.filter((id) => uploads.some((upload) => upload.id === id));
+    const sentAttachments: ChatAttachment[] = sentIds.map((id) => {
+      const upload = uploads.find((value) => value.id === id)!;
+      return { id: upload.id, name: upload.name, lineCount: upload.lineCount, size: upload.size };
+    });
+    setMessages([
+      ...messages,
+      { id: userId, role: 'user', content: text, ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}) },
+      { id: assistantId, role: 'assistant', content: '' },
+    ]);
+    setAttachedIds([]);
     ensureTitleFromFirstMessage(text);
     setInput('');
     setBusy(true);
@@ -770,8 +819,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     try {
       const cfg = await getAiConfig();
       const useFc = FC_PROVIDERS.has(cfg.provider);
-      if (useFc) await runAgentLoop(text, assistantId);
-      else await runLegacyTurn(text, assistantId);
+      if (useFc) await runAgentLoop(text, assistantId, sentIds);
+      else await runLegacyTurn(text, assistantId, sentIds);
       setRetryCount(0);
     } catch (e) {
       if (!cancelledRef.current) {
@@ -791,7 +840,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         setStepLabel('');
       }
     }
-  }, [busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages]);
+  }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
 
   const retry = useCallback(() => {
     if (!lastPrompt || busy || cooldown > 0) return;
@@ -1018,6 +1067,72 @@ export function useAiAgent(params: UseAiAgentParams) {
     deleteSession(id);
   }, [activeId, busy, deleteSession, resetTransient]);
 
+  // --- Reference uploads ---------------------------------------------------
+  // Import is per-file so one rejected file (unsupported type, too large,
+  // not UTF-8) never discards the ones that succeeded; the failures are
+  // reported together as an actionable message. Newly imported files are
+  // attached to the pending message automatically — the user picked them to
+  // send them now.
+  const addUploads = useCallback(async (sourcePaths: string[]) => {
+    if (!projectPath || sourcePaths.length === 0) return;
+    setUploadBusy(true);
+    setUploadError(null);
+    const failures: string[] = [];
+    const importedIds: string[] = [];
+    try {
+      for (const sourcePath of sourcePaths) {
+        try {
+          const imported = await importAiUpload(projectPath, sourcePath);
+          importedIds.push(imported.id);
+        } catch (e) {
+          failures.push(String(e).replace(/^Error:\s*/, ''));
+        }
+      }
+      setUploads(await listAiUploads(projectPath).catch(() => []));
+      if (importedIds.length > 0) {
+        setAttachedIds((prev) => [...prev, ...importedIds.filter((id) => !prev.includes(id))]);
+      }
+      if (failures.length > 0) setUploadError(failures.join('\n'));
+    } finally {
+      setUploadBusy(false);
+    }
+  }, [projectPath]);
+
+  /** Attach an already-stored reference file to the pending message. */
+  const attachUpload = useCallback((id: string) => {
+    setAttachedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  }, []);
+
+  /** Detach from the pending message without deleting the stored file. */
+  const detachUpload = useCallback((id: string) => {
+    setAttachedIds((prev) => prev.filter((value) => value !== id));
+  }, []);
+
+  const removeUpload = useCallback(async (id: string) => {
+    if (!projectPath) return;
+    setUploadError(null);
+    try {
+      await deleteAiUpload(projectPath, id);
+      setAttachedIds((prev) => prev.filter((value) => value !== id));
+      setUploads(await listAiUploads(projectPath));
+    } catch (e) {
+      setUploadError(String(e).replace(/^Error:\s*/, ''));
+    }
+  }, [projectPath]);
+
+  /** Fetch the head of a reference file so the user can inspect what the AI sees. */
+  const previewUpload = useCallback(async (id: string): Promise<AiUploadContent | null> => {
+    if (!projectPath) return null;
+    try {
+      return await readAiUpload(projectPath, id, 1, 80);
+    } catch (e) {
+      setUploadError(String(e).replace(/^Error:\s*/, ''));
+      return null;
+    }
+  }, [projectPath]);
+
+  const clearUploadError = useCallback(() => setUploadError(null), []);
+
   const saveMemory = useCallback(async (next: ProjectMemory) => {
     if (!projectPath) return;
     const payload = next ?? emptyProjectMemory();
@@ -1050,6 +1165,16 @@ export function useAiAgent(params: UseAiAgentParams) {
     cooldown,
     hasAssetTruncation: hasAssetContextTruncation(assets),
     memory,
+    uploads,
+    attachedIds,
+    uploadBusy,
+    uploadError,
+    addUploads,
+    attachUpload,
+    detachUpload,
+    removeUpload,
+    previewUpload,
+    clearUploadError,
     streamingIdRef,
     describeEdit,
     sessions,

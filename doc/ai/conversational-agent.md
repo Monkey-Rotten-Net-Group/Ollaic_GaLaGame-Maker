@@ -5,7 +5,7 @@ AI 助手通过多轮对话理解项目上下文，读取场景、素材、角�
 ## 0.1 能力
 
 - 支持 function-calling 供应商的多步工具循环；不支持工具调用的供应商走 legacy 单轮 JSON patch 兜底。
-- 读工具：列出场景、读取场景、搜索素材、读取角色、读取项目记忆。
+- 读工具：列出场景、读取场景、搜索素材、读取角色、读取项目记忆、列出/读取用户上传的参考资料。
 - 写工具：设置场景章节/大纲、插入剧情块、创建分支、编辑场景、插入立绘、创建场景、创建/编辑角色、规划角色表情、规划背景/CG、编辑项目记忆。
 - 高层故事工具优先使用结构化输入，减少模型直接手写 WebGAL txt 的失败面。
 - 所有写入先进入 change-set；用户可接受或拒绝，冲突时保留手动处理入口。
@@ -16,7 +16,8 @@ AI 助手通过多轮对话理解项目上下文，读取场景、素材、角�
 - AI 不直接删除角色或素材。
 - 缺失背景/CG 时先规划待生成素材，再允许脚本引用规划出的目标文件名。
 - 缺失立绘时只规划角色表情槽，不编造 `changeFigure` 文件。
-- 当前上下文会截断：保留当前场景、最近对话、素材摘要和项目记忆的关键部分。
+- 当前上下文会截断：保留当前场景、最近对话、素材摘要、项目记忆和参考资料清单的关键部分；参考资料正文按需分页读取，不整篇注入。
+- 参考资料只读：AI 可以取材，但不能据此直接改动可玩文件，落地仍走写工具 + change-set。详见[参考资料上传](./reference-uploads.md)。
 
 ## 状态
 
@@ -40,6 +41,7 @@ AI 助手通过多轮对话理解项目上下文，读取场景、素材、角�
 - `design/src/app/hooks/useAiAgent.ts`
 - `design/src/app/lib/ai-tools.ts`
 - `design/src/app/lib/story-agent.ts`
+- `design/src/app/lib/ai-uploads-ipc.ts`
 - `design/src/app/components/AiMessageBubble.tsx`
 - `src-tauri/src/ai/commands.rs`
 - `src-tauri/src/ai/commands_tests.rs`
