@@ -26,6 +26,9 @@ export interface AiUploadContent {
   toLine: number;
   totalLines: number;
   truncated: boolean;
+  fromChar: number;
+  nextLine?: number | null;
+  nextChar?: number | null;
 }
 
 /** Text extensions the backend accepts. Mirrors `ai::uploads::SUPPORTED_EXTENSIONS`. */
@@ -50,12 +53,14 @@ export async function readAiUpload(
   id: string,
   fromLine?: number,
   maxLines?: number,
+  fromChar?: number,
 ): Promise<AiUploadContent> {
   return invoke<AiUploadContent>('read_ai_upload', {
     projectPath,
     id,
     fromLine: fromLine ?? null,
     maxLines: maxLines ?? null,
+    fromChar: fromChar ?? null,
   });
 }
 

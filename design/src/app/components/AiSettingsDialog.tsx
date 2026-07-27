@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   X,
   Save,
@@ -124,6 +124,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [verifiedSaved, setVerifiedSaved] = useState(false);
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
   const [logPath, setLogPath] = useState('');
+  const configRef = useRef<AiConfig | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -131,11 +132,13 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     setError(null);
     setValidation(null);
     setVerifiedSaved(false);
+    configRef.current = null;
     setLogs([]);
     setLogPath('');
     Promise.all([getAiConfig(), getAiImageConfig(), getAiTtsConfig(), getAiMusicConfig()])
       .then(([chat, image, tts, music]) => {
         setConfig(chat);
+        configRef.current = chat;
         setImageConfig(normalizeImageConfig(image));
         setTtsConfig(tts);
         setMusicConfig(normalizeMusicConfig(music));
@@ -149,7 +152,11 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const updateChat = (patch: Partial<AiConfig>) => {
     setValidation(null);
     setVerifiedSaved(false);
-    setConfig((c) => (c ? { ...c, ...patch } : c));
+    setConfig((current) => {
+      const next = current ? { ...current, ...patch } : current;
+      configRef.current = next;
+      return next;
+    });
   };
 
   const updateImage = (patch: Partial<AiProviderConfig>) =>
@@ -185,17 +192,25 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   const handleVerify = async () => {
     if (!config) return;
+    const testedConfig = { ...config };
     setVerifying(true);
     setError(null);
     setValidation(null);
     try {
-      const result = await validateAiConfig(config);
+      const result = await validateAiConfig(testedConfig);
+      const currentConfig = configRef.current;
+      const unchanged = currentConfig
+        && currentConfig.provider === testedConfig.provider
+        && currentConfig.model === testedConfig.model
+        && currentConfig.api_key === testedConfig.api_key
+        && currentConfig.base_url === testedConfig.base_url;
+      if (!unchanged) return;
       setValidation(result);
       // A successful trial connection is an unambiguous "use this config".
       // Persist it right away: the dialog reloads from disk every time it
       // opens, so an unsaved draft would otherwise be silently discarded.
       if (result.ok) {
-        await setAiConfig(config);
+        await setAiConfig(testedConfig);
         setVerifiedSaved(true);
         onSaved?.();
       }
@@ -291,25 +306,27 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
             <>
               {activeTab === 'chat' && (
                 <>
-                  <ConfigFields
-                    config={config}
-                    providers={CHAT_PROVIDERS}
-                    multiModel={false}
-                    onProviderChange={(value) => handleProviderChange(value, config, CHAT_PROVIDERS, updateChat)}
-                    onUpdate={updateChat}
-                    apiKeyHint={
-                      config.provider === 'ollama'
-                        ? '本地 Ollama 通常不需要 Key'
-                        : config.provider === 'custom'
-                          ? 'OpenAI 兼容接口可按服务端要求决定是否填写'
-                          : '存储在本地配置文件中'
-                    }
-                    baseUrlHint={
-                      config.provider === 'custom'
-                        ? '必填，OpenAI 兼容端点（DeepSeek/Moonshot/通义/本地 vLLM 等）'
-                        : '留空使用供应商默认地址'
-                    }
-                  />
+                  <fieldset disabled={verifying} className="disabled:opacity-70">
+                    <ConfigFields
+                      config={config}
+                      providers={CHAT_PROVIDERS}
+                      multiModel={false}
+                      onProviderChange={(value) => handleProviderChange(value, config, CHAT_PROVIDERS, updateChat)}
+                      onUpdate={updateChat}
+                      apiKeyHint={
+                        config.provider === 'ollama'
+                          ? '本地 Ollama 通常不需要 Key'
+                          : config.provider === 'custom'
+                            ? 'OpenAI 兼容接口可按服务端要求决定是否填写'
+                            : '存储在本地配置文件中'
+                      }
+                      baseUrlHint={
+                        config.provider === 'custom'
+                          ? '必填，OpenAI 兼容端点（DeepSeek/Moonshot/通义/本地 vLLM 等）'
+                          : '留空使用供应商默认地址'
+                      }
+                    />
+                  </fieldset>
 
                   <ConnectionPanel
                     verifying={verifying}

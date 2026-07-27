@@ -154,6 +154,7 @@ describe('reference file tools', () => {
       id: 'ref-1',
       fromLine: 1,
       maxLines: 200,
+      fromChar: 0,
     });
   });
 

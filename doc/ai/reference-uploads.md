@@ -54,7 +54,7 @@
 | 工具 | 作用 |
 |------|------|
 | `list_reference_files` | 列出**本条消息附加的**参考文件的 `id`、文件名、行数、字数与摘要 |
-| `read_reference_file` | 按 `id`(也接受完整文件名)读取正文,支持 `fromLine`/`maxLines` 分页 |
+| `read_reference_file` | 按 `id`（也接受完整文件名）读取正文，支持 `fromLine`/`maxLines` 分页；超长单行可按返回的 `nextLine`/`nextChar` 游标继续读取 |
 
 ### 附加即访问边界
 

@@ -128,6 +128,7 @@ export const INITIAL_AI_MESSAGE: ChatMessage = {
 interface UseAiAgentParams {
   projectId?: string;
   projectPath: string | null;
+  uploadsRevision?: number;
   currentSceneName: string;
   sceneHeaders: Record<string, SceneHeader>;
   nodes: WebGalNode[];
@@ -250,6 +251,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   const {
     projectId,
     projectPath,
+    uploadsRevision = 0,
     currentSceneName,
     sceneHeaders,
     nodes,
@@ -294,7 +296,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   const [attachedIds, setAttachedIds] = useState<string[]>([]);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [lastPrompt, setLastPrompt] = useState('');
+  const [lastRequest, setLastRequest] = useState<{ prompt: string; attachmentIds: string[] } | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [cooldown, setCooldown] = useState(0);
   const cancelledRef = useRef(false);
@@ -308,6 +310,8 @@ export function useAiAgent(params: UseAiAgentParams) {
   // matches, so a stale request can't clobber a newer one.
   const requestTokenRef = useRef(0);
   const currentSceneNameRef = useRef(currentSceneName);
+  const projectPathRef = useRef(projectPath);
+  projectPathRef.current = projectPath;
 
   // Sessions are shared across scenes, and a pending change set is cross-scene
   // (each edit carries its own file + before/after snapshots). So switching
@@ -319,13 +323,15 @@ export function useAiAgent(params: UseAiAgentParams) {
     currentSceneNameRef.current = currentSceneName;
   }, [currentSceneName]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    setUploads([]);
+    setAttachedIds([]);
+    setUploadError(null);
+    setUploadBusy(false);
+    setLastRequest(null);
     if (!projectPath) {
       setAssets([]);
       setMemory(null);
-      setUploads([]);
-      setAttachedIds([]);
-      setUploadError(null);
       return;
     }
     let cancelled = false;
@@ -333,7 +339,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     readProjectMemory(projectPath).then((value) => { if (!cancelled) setMemory(value); }).catch(() => { if (!cancelled) setMemory(null); });
     listAiUploads(projectPath).then((list) => { if (!cancelled) setUploads(list); }).catch(() => { if (!cancelled) setUploads([]); });
     return () => { cancelled = true; };
-  }, [projectPath]);
+  }, [projectPath, uploadsRevision]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -779,7 +785,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
   }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
 
-  const sendPrompt = useCallback(async (prompt: string) => {
+  const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
     if (!text || busy || inFlightRef.current) return;
     if (pendingChangeSet?.status === 'pending') {
@@ -790,7 +796,6 @@ export function useAiAgent(params: UseAiAgentParams) {
     cancelledRef.current = false;
     const myToken = requestTokenRef.current + 1;
     requestTokenRef.current = myToken;
-    setLastPrompt(text);
     setError(null);
     setPendingChangeSet(null);
     setStatus('generating');
@@ -801,7 +806,9 @@ export function useAiAgent(params: UseAiAgentParams) {
     // Attachments belong to this message: record them on the bubble and clear
     // the input tray, so attaching reads as a one-shot "sent with it" action.
     // The files themselves stay in the project store and remain readable later.
-    const sentIds = attachedIds.filter((id) => uploads.some((upload) => upload.id === id));
+    const requestedIds = retryAttachmentIds ?? attachedIds;
+    const sentIds = requestedIds.filter((id) => uploads.some((upload) => upload.id === id));
+    setLastRequest({ prompt: text, attachmentIds: sentIds });
     const sentAttachments: ChatAttachment[] = sentIds.map((id) => {
       const upload = uploads.find((value) => value.id === id)!;
       return { id: upload.id, name: upload.name, lineCount: upload.lineCount, size: upload.size };
@@ -843,13 +850,13 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
 
   const retry = useCallback(() => {
-    if (!lastPrompt || busy || cooldown > 0) return;
+    if (!lastRequest || busy || cooldown > 0) return;
     // Cap automatic retries for every retryable error class, not just timeouts,
     // so a persistently-failing request can't be retried without bound.
     if (retryCount >= 2) return;
     setRetryCount((value) => value + 1);
-    void sendPrompt(lastPrompt);
-  }, [busy, cooldown, lastPrompt, retryCount, sendPrompt]);
+    void sendPrompt(lastRequest.prompt, lastRequest.attachmentIds);
+  }, [busy, cooldown, lastRequest, retryCount, sendPrompt]);
 
   const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
     if (!projectPath) return;
@@ -1075,6 +1082,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   // send them now.
   const addUploads = useCallback(async (sourcePaths: string[]) => {
     if (!projectPath || sourcePaths.length === 0) return;
+    const operationProjectPath = projectPath;
     setUploadBusy(true);
     setUploadError(null);
     const failures: string[] = [];
@@ -1088,13 +1096,15 @@ export function useAiAgent(params: UseAiAgentParams) {
           failures.push(String(e).replace(/^Error:\s*/, ''));
         }
       }
-      setUploads(await listAiUploads(projectPath).catch(() => []));
+      const nextUploads = await listAiUploads(operationProjectPath).catch(() => []);
+      if (projectPathRef.current !== operationProjectPath) return;
+      setUploads(nextUploads);
       if (importedIds.length > 0) {
         setAttachedIds((prev) => [...prev, ...importedIds.filter((id) => !prev.includes(id))]);
       }
       if (failures.length > 0) setUploadError(failures.join('\n'));
     } finally {
-      setUploadBusy(false);
+      if (projectPathRef.current === operationProjectPath) setUploadBusy(false);
     }
   }, [projectPath]);
 
@@ -1110,23 +1120,32 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const removeUpload = useCallback(async (id: string) => {
     if (!projectPath) return;
+    const operationProjectPath = projectPath;
     setUploadError(null);
     try {
-      await deleteAiUpload(projectPath, id);
+      await deleteAiUpload(operationProjectPath, id);
+      const nextUploads = await listAiUploads(operationProjectPath);
+      if (projectPathRef.current !== operationProjectPath) return;
       setAttachedIds((prev) => prev.filter((value) => value !== id));
-      setUploads(await listAiUploads(projectPath));
+      setUploads(nextUploads);
     } catch (e) {
-      setUploadError(String(e).replace(/^Error:\s*/, ''));
+      if (projectPathRef.current === operationProjectPath) {
+        setUploadError(String(e).replace(/^Error:\s*/, ''));
+      }
     }
   }, [projectPath]);
 
   /** Fetch the head of a reference file so the user can inspect what the AI sees. */
   const previewUpload = useCallback(async (id: string): Promise<AiUploadContent | null> => {
     if (!projectPath) return null;
+    const operationProjectPath = projectPath;
     try {
-      return await readAiUpload(projectPath, id, 1, 80);
+      const content = await readAiUpload(operationProjectPath, id, 1, 80);
+      return projectPathRef.current === operationProjectPath ? content : null;
     } catch (e) {
-      setUploadError(String(e).replace(/^Error:\s*/, ''));
+      if (projectPathRef.current === operationProjectPath) {
+        setUploadError(String(e).replace(/^Error:\s*/, ''));
+      }
       return null;
     }
   }, [projectPath]);

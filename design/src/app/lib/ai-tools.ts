@@ -343,7 +343,7 @@ const readTools: AgentTool[] = [
   {
     name: 'read_reference_file',
     description:
-      '读取本条消息附加的某个参考资料的正文，可用 fromLine/maxLines 分页；返回内容自动截断以控制上下文长度。只能读取用户本轮附加的文件。参考资料只用于理解作者意图，不要当作可直接写入的脚本；要落到项目里必须再调用写入工具生成预览。',
+      '读取本条消息附加的某个参考资料的正文，可用 fromLine/maxLines 分页；超长单行可用返回的 nextLine/nextChar 游标继续读取。返回内容自动截断以控制上下文长度。只能读取用户本轮附加的文件。参考资料只用于理解作者意图，不要当作可直接写入的脚本；要落到项目里必须再调用写入工具生成预览。',
     kind: 'read',
     schema: {
       type: 'object',
@@ -351,6 +351,7 @@ const readTools: AgentTool[] = [
         id: { type: 'string', description: '参考文件 id（也接受完整文件名）' },
         fromLine: { type: 'integer', description: '起始行号（默认 1）' },
         maxLines: { type: 'integer', description: `最多返回行数（默认 ${REFERENCE_READ_MAX_LINES}）` },
+        fromChar: { type: 'integer', description: '首行的零基字符偏移，用于继续读取超长单行' },
       },
       required: ['id'],
     },
@@ -375,6 +376,7 @@ const readTools: AgentTool[] = [
         match.id,
         asInt(args.fromLine) ?? 1,
         asInt(args.maxLines) ?? REFERENCE_READ_MAX_LINES,
+        asInt(args.fromChar) ?? 0,
       );
     },
   },

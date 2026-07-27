@@ -1614,6 +1614,7 @@ export function StoryEditor() {
 
   // AI state
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [aiUploadsRevision, setAiUploadsRevision] = useState(0);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [projectMetadataOpen, setProjectMetadataOpen] = useState(false);
   const [projectMetadata, setProjectMetadata] = useState<ProjectMetadata | null>(null);
@@ -2762,6 +2763,7 @@ export function StoryEditor() {
       if (dirty && !(await handleSave())) return;
       await createProjectSnapshot(projectPath, 'before-restore', 'beforeRestore', `回滚到"${snapshot.label}"前自动备份`);
       await restoreProjectSnapshot(projectPath, snapshot.id);
+      setAiUploadsRevision((revision) => revision + 1);
       const info = await openProject(projectPath);
       setProjectInfo(info);
       void loadSceneHeaders(projectPath, info.scenes);
@@ -2859,6 +2861,7 @@ export function StoryEditor() {
   const aiAgent = useAiAgent({
     projectId,
     projectPath,
+    uploadsRevision: aiUploadsRevision,
     currentSceneName,
     sceneHeaders,
     nodes,

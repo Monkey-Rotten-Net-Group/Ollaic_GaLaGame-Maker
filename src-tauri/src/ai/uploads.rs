@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,6 +59,11 @@ pub struct AiUploadContent {
     pub to_line: usize,
     pub total_lines: usize,
     pub truncated: bool,
+    /// Zero-based character offset used for the first returned line.
+    pub from_char: usize,
+    /// Cursor for continuing a character-truncated line.
+    pub next_line: Option<usize>,
+    pub next_char: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -78,6 +84,50 @@ fn index_path(project_path: &str) -> PathBuf {
     uploads_dir(project_path).join("index.json")
 }
 
+fn canonical_uploads_dir(project_path: &str, create: bool) -> Result<PathBuf, String> {
+    let project = PathBuf::from(project_path)
+        .canonicalize()
+        .map_err(|e| format!("无法解析项目目录 {project_path}: {e}"))?;
+    let dir = uploads_dir(project_path);
+    if create {
+        fs::create_dir_all(&dir)
+            .map_err(|e| format!("创建参考文件目录失败 {}: {e}", dir.display()))?;
+    } else if !dir.exists() {
+        return Err(format!("参考文件目录不存在: {}", dir.display()));
+    }
+    if fs::symlink_metadata(&dir)
+        .map_err(|e| format!("读取参考文件目录信息失败 {}: {e}", dir.display()))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("参考文件目录不能是符号链接。".to_string());
+    }
+    let canonical = dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析参考文件目录 {}: {e}", dir.display()))?;
+    if !canonical.starts_with(&project) {
+        return Err("参考文件目录超出项目范围。".to_string());
+    }
+    Ok(canonical)
+}
+
+fn checked_index_path(project_path: &str, create_dir: bool) -> Result<PathBuf, String> {
+    let root = canonical_uploads_dir(project_path, create_dir)?;
+    let path = index_path(project_path);
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() {
+            return Err("参考文件索引不能是符号链接。".to_string());
+        }
+        let canonical = path
+            .canonicalize()
+            .map_err(|e| format!("无法解析参考文件索引 {}: {e}", path.display()))?;
+        if !canonical.starts_with(root) {
+            return Err("参考文件索引超出上传目录。".to_string());
+        }
+    }
+    Ok(path)
+}
+
 fn now_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -90,6 +140,7 @@ fn read_index(project_path: &str) -> Result<UploadIndex, String> {
     if !path.exists() {
         return Ok(UploadIndex::default());
     }
+    let path = checked_index_path(project_path, false)?;
     let source = fs::read_to_string(&path)
         .map_err(|e| format!("读取参考文件索引失败 {}: {e}", path.display()))?;
     serde_json::from_str(&source)
@@ -97,11 +148,9 @@ fn read_index(project_path: &str) -> Result<UploadIndex, String> {
 }
 
 fn write_index(project_path: &str, index: &UploadIndex) -> Result<(), String> {
-    let dir = uploads_dir(project_path);
-    fs::create_dir_all(&dir).map_err(|e| format!("创建参考文件目录失败 {}: {e}", dir.display()))?;
+    let path = checked_index_path(project_path, true)?;
     let source = serde_json::to_string_pretty(index).map_err(|e| e.to_string())?;
-    fs::write(index_path(project_path), source)
-        .map_err(|e| format!("写入参考文件索引失败: {e}"))
+    fs::write(path, source).map_err(|e| format!("写入参考文件索引失败: {e}"))
 }
 
 fn format_size(bytes: u64) -> String {
@@ -172,7 +221,9 @@ fn sanitize_stored_name(id: &str, original: &str) -> String {
 
 fn decode_text(bytes: &[u8], name: &str) -> Result<String, String> {
     let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
-        format!("「{name}」不是 UTF-8 文本（可能是二进制文件或其它编码）。请另存为 UTF-8 后重新上传。")
+        format!(
+            "「{name}」不是 UTF-8 文本（可能是二进制文件或其它编码）。请另存为 UTF-8 后重新上传。"
+        )
     })?;
     Ok(text.trim_start_matches('\u{feff}').replace("\r\n", "\n"))
 }
@@ -214,12 +265,40 @@ fn stored_path(project_path: &str, upload: &AiUpload) -> Result<PathBuf, String>
     Ok(uploads_dir(project_path).join(&upload.stored_name))
 }
 
+fn checked_stored_file(project_path: &str, upload: &AiUpload) -> Result<(PathBuf, u64), String> {
+    let root = canonical_uploads_dir(project_path, false)?;
+    let path = stored_path(project_path, upload)?;
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|e| format!("读取参考文件信息失败 {}: {e}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("参考文件不能是符号链接: {}", upload.name));
+    }
+    if !metadata.is_file() {
+        return Err(format!("参考文件不是普通文件: {}", upload.name));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("无法解析参考文件路径 {}: {e}", path.display()))?;
+    if !canonical.starts_with(root) {
+        return Err(format!("参考文件超出上传目录: {}", upload.name));
+    }
+    if metadata.len() > MAX_UPLOAD_BYTES {
+        return Err(format!(
+            "「{}」当前大小为 {}，超过参考文件上限 {}。请删除后重新上传。",
+            upload.name,
+            format_size(metadata.len()),
+            format_size(MAX_UPLOAD_BYTES)
+        ));
+    }
+    Ok((canonical, metadata.len()))
+}
+
 /// Drop index entries whose file disappeared (manual deletion, restore, sync).
 fn prune_missing(project_path: &str, index: &mut UploadIndex) -> bool {
     let before = index.uploads.len();
     index
         .uploads
-        .retain(|upload| stored_path(project_path, upload).map(|p| p.is_file()) == Ok(true));
+        .retain(|upload| checked_stored_file(project_path, upload).is_ok());
     index.uploads.len() != before
 }
 
@@ -294,10 +373,16 @@ pub fn import_ai_upload(project_path: String, source_path: String) -> Result<AiU
         imported_at: now_millis().to_string(),
     };
 
-    let dir = uploads_dir(&project_path);
-    fs::create_dir_all(&dir).map_err(|e| format!("创建参考文件目录失败 {}: {e}", dir.display()))?;
-    let target = stored_path(&project_path, &upload)?;
-    fs::write(&target, text.as_bytes())
+    let root = canonical_uploads_dir(&project_path, true)?;
+    stored_path(&project_path, &upload)?;
+    let target = root.join(&upload.stored_name);
+    let mut target_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map_err(|e| format!("创建参考文件失败 {}: {e}", target.display()))?;
+    target_file
+        .write_all(text.as_bytes())
         .map_err(|e| format!("保存参考文件失败 {}: {e}", target.display()))?;
 
     index.uploads.push(upload.clone());
@@ -316,6 +401,7 @@ pub fn read_ai_upload(
     id: String,
     from_line: Option<usize>,
     max_lines: Option<usize>,
+    from_char: Option<usize>,
 ) -> Result<AiUploadContent, String> {
     let index = read_index(&project_path)?;
     let upload = index
@@ -324,19 +410,28 @@ pub fn read_ai_upload(
         .find(|upload| upload.id == id || upload.name == id)
         .ok_or_else(|| format!("找不到参考文件：{id}。请先在 AI 面板上传，或用列表中的 id。"))?;
 
-    let path = stored_path(&project_path, upload)?;
+    let (path, actual_size) = checked_stored_file(&project_path, upload)?;
     let bytes = fs::read(&path).map_err(|e| {
         format!(
             "读取参考文件失败 {}: {e}。文件可能已被移动或删除，请重新上传。",
             path.display()
         )
     })?;
+    if bytes.len() as u64 != actual_size || bytes.len() as u64 > MAX_UPLOAD_BYTES {
+        return Err(format!(
+            "「{}」在读取期间发生变化，请重试或重新上传。",
+            upload.name
+        ));
+    }
     let text = decode_text(&bytes, &upload.name)?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
 
     let start = from_line.unwrap_or(1).max(1);
-    let limit = max_lines.unwrap_or(DEFAULT_READ_LINES).clamp(1, MAX_READ_LINES);
+    let start_char = from_char.unwrap_or(0);
+    let limit = max_lines
+        .unwrap_or(DEFAULT_READ_LINES)
+        .clamp(1, MAX_READ_LINES);
     if start > total_lines {
         return Ok(AiUploadContent {
             id: upload.id.clone(),
@@ -346,23 +441,46 @@ pub fn read_ai_upload(
             to_line: total_lines,
             total_lines,
             truncated: false,
+            from_char: start_char,
+            next_line: None,
+            next_char: None,
         });
     }
     let end = (start + limit - 1).min(total_lines);
 
     let mut body = String::new();
+    let mut used_chars = 0usize;
+    let mut emitted_line = false;
     let mut last_line = start;
-    let mut char_truncated = false;
+    let mut next_cursor = None;
     for (offset, line) in lines[start - 1..end].iter().enumerate() {
-        if body.chars().count() + line.chars().count() > MAX_READ_CHARS {
-            char_truncated = true;
+        let line_number = start + offset;
+        let line_offset = if offset == 0 { start_char } else { 0 };
+        let line_chars: Vec<char> = line.chars().collect();
+        let line_offset = line_offset.min(line_chars.len());
+        let separator_chars = usize::from(emitted_line);
+        let available = MAX_READ_CHARS.saturating_sub(used_chars + separator_chars);
+        if available == 0 {
+            next_cursor = Some((line_number, line_offset));
             break;
         }
-        if offset > 0 {
+        if separator_chars == 1 {
             body.push('\n');
+            used_chars += 1;
         }
-        body.push_str(line);
-        last_line = start + offset;
+        let take = available.min(line_chars.len() - line_offset);
+        body.extend(line_chars[line_offset..line_offset + take].iter().copied());
+        used_chars += take;
+        emitted_line = true;
+        last_line = line_number;
+        if line_offset + take < line_chars.len() {
+            next_cursor = Some((line_number, line_offset + take));
+            break;
+        }
+    }
+
+    if next_cursor.is_none() && end < total_lines {
+        next_cursor = Some((end + 1, 0));
     }
 
     Ok(AiUploadContent {
@@ -372,7 +490,10 @@ pub fn read_ai_upload(
         from_line: start,
         to_line: last_line,
         total_lines,
-        truncated: char_truncated || end < total_lines || start > 1,
+        truncated: next_cursor.is_some() || start > 1 || start_char > 0,
+        from_char: start_char,
+        next_line: next_cursor.map(|cursor| cursor.0),
+        next_char: next_cursor.map(|cursor| cursor.1),
     })
 }
 
@@ -388,8 +509,7 @@ pub fn delete_ai_upload(project_path: String, id: String) -> Result<(), String> 
     let upload = index.uploads.remove(position);
     let path = stored_path(&project_path, &upload)?;
     if path.exists() {
-        fs::remove_file(&path)
-            .map_err(|e| format!("删除参考文件失败 {}: {e}", path.display()))?;
+        fs::remove_file(&path).map_err(|e| format!("删除参考文件失败 {}: {e}", path.display()))?;
     }
     write_index(&project_path, &index)
 }
@@ -439,13 +559,17 @@ mod tests {
             .join(".webgal-editor/ai-uploads")
             .join(&upload.stored_name)
             .is_file());
-        assert!(!PathBuf::from(project.path()).join("game").join(&upload.stored_name).exists());
+        assert!(!PathBuf::from(project.path())
+            .join("game")
+            .join(&upload.stored_name)
+            .exists());
 
         let listed = list_ai_uploads(project.path()).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, upload.id);
 
-        let content = read_ai_upload(project.path(), upload.id.clone(), Some(2), Some(1)).unwrap();
+        let content =
+            read_ai_upload(project.path(), upload.id.clone(), Some(2), Some(1), None).unwrap();
         assert_eq!(content.text, "第二行");
         assert_eq!(content.total_lines, 3);
         assert!(content.truncated);
@@ -494,5 +618,61 @@ mod tests {
 
         fs::remove_file(stored_path(&project.path(), &upload).unwrap()).unwrap();
         assert!(list_ai_uploads(project.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn long_single_lines_can_be_read_with_a_character_cursor() {
+        let project = TempProject::new("long-line");
+        let source = project.write_source("compact.json", &vec![b'a'; MAX_READ_CHARS + 25]);
+        let upload = import_ai_upload(project.path(), source).unwrap();
+
+        let first = read_ai_upload(project.path(), upload.id.clone(), None, None, None).unwrap();
+        assert_eq!(first.text.chars().count(), MAX_READ_CHARS);
+        assert_eq!(first.next_line, Some(1));
+        assert_eq!(first.next_char, Some(MAX_READ_CHARS));
+
+        let second = read_ai_upload(
+            project.path(),
+            upload.id,
+            first.next_line,
+            None,
+            first.next_char,
+        )
+        .unwrap();
+        assert_eq!(second.text.chars().count(), 25);
+        assert_eq!(second.from_char, MAX_READ_CHARS);
+        assert_eq!(second.next_line, None);
+    }
+
+    #[test]
+    fn rejects_a_stored_file_that_grows_past_the_limit() {
+        let project = TempProject::new("grown-file");
+        let source = project.write_source("notes.txt", b"hello");
+        let upload = import_ai_upload(project.path(), source).unwrap();
+        fs::write(
+            stored_path(&project.path(), &upload).unwrap(),
+            vec![b'a'; (MAX_UPLOAD_BYTES + 1) as usize],
+        )
+        .unwrap();
+
+        let error = read_ai_upload(project.path(), upload.id, None, None, None).unwrap_err();
+        assert!(error.contains("超过参考文件上限"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_stored_files() {
+        use std::os::unix::fs::symlink;
+
+        let project = TempProject::new("symlink");
+        let source = project.write_source("notes.txt", b"safe");
+        let upload = import_ai_upload(project.path(), source).unwrap();
+        let stored = stored_path(&project.path(), &upload).unwrap();
+        fs::remove_file(&stored).unwrap();
+        let secret = project.write_source("secret.txt", b"outside secret");
+        symlink(secret, stored).unwrap();
+
+        let error = read_ai_upload(project.path(), upload.id, None, None, None).unwrap_err();
+        assert!(error.contains("符号链接"), "{error}");
     }
 }
