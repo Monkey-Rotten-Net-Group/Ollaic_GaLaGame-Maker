@@ -4,6 +4,7 @@ mod agents;
 mod ai;
 mod asset_queue;
 mod assets;
+mod change_set_commit;
 mod characters;
 mod flow_edit_lock;
 mod json_store;
@@ -150,6 +151,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Conversational ChangeSet commit
+            change_set_commit::apply_change_set,
             // Scene parsing & serialization
             webgal::commands::parse_scene,
             webgal::commands::serialize_scene,
