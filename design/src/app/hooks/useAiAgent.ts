@@ -139,6 +139,13 @@ interface UseAiAgentParams {
   setSelectedNode: (node: WebGalNode | null) => void;
   setShowScript: (show: boolean) => void;
   pushHistory: (nodes: WebGalNode[]) => void;
+  /** Blocks editor saves for affected scenes until the backend commit settles. */
+  onCommitStart?: (sceneFiles: string[]) => Promise<void> | void;
+  onCommitSettled?: () => void;
+  /** Returns an unsaved non-current scene draft, when one exists. */
+  readSceneDraft?: (sceneFile: string) => Promise<string | undefined>;
+  /** Reconciles a committed edit with the currently visible scene buffer. */
+  reconcileCurrentScene?: (edit: SceneEdit) => void;
   /** Called after accepting a change set that created a new scene file. */
   onScenesChanged?: () => void;
   /** Called after accepting a change set that creates or updates characters. */
@@ -242,6 +249,10 @@ export function useAiAgent(params: UseAiAgentParams) {
     setSelectedNode,
     setShowScript,
     pushHistory,
+    onCommitStart,
+    onCommitSettled,
+    readSceneDraft,
+    reconcileCurrentScene,
     onScenesChanged,
     onCharactersChanged,
   } = params;
@@ -1048,12 +1059,16 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
 
     if (currentSceneEdit && currentSceneRevisionRef.current === sceneRevision) {
-      pushHistory(options.historyNodes ?? currentSceneEdit.beforeNodes);
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-      setSelectedNode(null);
-      setDirty(false);
-      setSaveStatus('saved');
+      if (reconcileCurrentScene) {
+        reconcileCurrentScene(currentSceneEdit);
+      } else {
+        pushHistory(options.historyNodes ?? currentSceneEdit.beforeNodes);
+        setNodes(currentSceneEdit.afterNodes);
+        setScriptSource(currentSceneEdit.afterContent);
+        setSelectedNode(null);
+        setDirty(false);
+        setSaveStatus('saved');
+      }
     }
     if (set.edits.some((edit) => edit.kind === 'create_scene')) onScenesChanged?.();
     if (set.edits.some((edit) => edit.kind === 'character' || edit.kind === 'create_character')) onCharactersChanged?.();
@@ -1072,6 +1087,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     onCharactersChanged,
     projectPath,
     pushHistory,
+    reconcileCurrentScene,
     replaceAssistantMessage,
     setDirty,
     setNodes,
@@ -1088,18 +1104,31 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (commitInFlightRef.current) return;
     commitInFlightRef.current = true;
     setCommitting(true);
+    const affectedSceneFiles = set.edits.flatMap((edit) =>
+      edit.kind === 'scene' || edit.kind === 'create_scene' ? [edit.file] : [],
+    );
     try {
+      await onCommitStart?.(affectedSceneFiles);
       await persistChangeSet(set, options);
     } finally {
+      onCommitSettled?.();
       commitInFlightRef.current = false;
       setCommitting(false);
     }
-  }, [persistChangeSet]);
+  }, [onCommitSettled, onCommitStart, persistChangeSet]);
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
+    for (const edit of pendingChangeSet.edits) {
+      if (edit.kind !== 'scene' || edit.file === currentSceneName) continue;
+      const draft = await readSceneDraft?.(edit.file);
+      if (draft !== undefined && draft !== edit.beforeContent) {
+        setStatus('conflict');
+        return;
+      }
+    }
     await commitChangeSet(pendingChangeSet, { force: false });
-  }, [commitChangeSet, pendingChangeSet, projectPath]);
+  }, [commitChangeSet, currentSceneName, pendingChangeSet, projectPath, readSceneDraft]);
 
   const revertChange = useCallback(() => {
     if (!pendingChangeSet || commitInFlightRef.current) return;

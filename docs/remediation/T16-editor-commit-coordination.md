@@ -34,7 +34,7 @@ Use fake timers and a deferred commit Adapter. Cover autosave firing before/duri
 ## Verification Commands
 
 ```bash
-pnpm --dir design test --run src/app/components/StoryEditor-ai-commit.test.tsx
+pnpm --dir design test --run src/app/components/StoryEditor-ai-commit.test.ts
 pnpm --dir design test --run src/app/hooks/useAiAgent-preview.test.ts
 pnpm --dir design test
 ```

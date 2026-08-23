@@ -134,6 +134,56 @@ describe('AI pending preview isolation', () => {
     expect(params.setDirty).not.toHaveBeenCalled();
   });
 
+  it('holds editor save coordination until the backend commit settles', async () => {
+    let finishCommit!: (value: { outcome: 'applied' }) => void;
+    vi.mocked(applyAiChangeSet).mockImplementationOnce(() => new Promise((resolve) => {
+      finishCommit = resolve;
+    }));
+    const onCommitStart = vi.fn(async () => {});
+    const onCommitSettled = vi.fn();
+    const params = makeParams({ onCommitStart, onCommitSettled });
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('请修改场景'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+
+    let applyPromise!: Promise<void>;
+    act(() => { applyPromise = result.current.acceptChange(); });
+    await waitFor(() => { expect(onCommitStart).toHaveBeenCalledWith(['start.txt']); });
+    expect(onCommitSettled).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishCommit({ outcome: 'applied' });
+      await applyPromise;
+    });
+    expect(onCommitSettled).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a non-current user draft reviewable instead of committing over it', async () => {
+    vi.mocked(getTool).mockReturnValue({
+      name: 'edit_scene',
+      kind: 'write',
+      schema: {},
+      run: async () => ({
+        tool: 'edit_scene',
+        file: 'chapter-2.txt',
+        patches: [{ type: 'insert', file: 'chapter-2.txt', afterLine: 'end', text: 'B:world;' }],
+      }),
+    } as never);
+    const readSceneDraft = vi.fn(async () => 'author:unsaved draft;');
+    const params = makeParams({ readSceneDraft });
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('请修改第二章'); });
+    await waitFor(() => { expect(result.current.pendingChangeSet).toBeTruthy(); });
+    vi.mocked(applyAiChangeSet).mockClear();
+
+    await act(async () => { await result.current.acceptChange(); });
+
+    expect(readSceneDraft).toHaveBeenCalledWith('chapter-2.txt');
+    expect(applyAiChangeSet).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('conflict');
+    expect(result.current.pendingChangeSet?.status).toBe('pending');
+  });
+
   it('does not replace the live buffer during force apply until the backend commit succeeds', async () => {
     let finishCommit!: (value: { outcome: 'applied' }) => void;
     vi.mocked(applyAiChangeSet).mockImplementationOnce(() => new Promise((resolve) => {
