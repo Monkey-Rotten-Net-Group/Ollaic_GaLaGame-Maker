@@ -42,6 +42,21 @@ pub struct ProjectMemory {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcceptedNarrativeFact {
+    pub id: String,
+    pub accepted_at: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NarrativeContextDocument {
+    pub version: u8,
+    pub accepted_facts: Vec<AcceptedNarrativeFact>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMetadata {
@@ -264,6 +279,61 @@ pub fn save_project_memory(project_path: String, memory: ProjectMemory) -> Resul
         .map_err(|e| format!("Failed to serialize ai-memory.json: {}", e))?;
     crate::json_store::write_crash_safe(&path, text.as_bytes())
         .map_err(|e| format!("Failed to write ai-memory.json: {}", e))
+}
+
+fn narrative_context_path(project_path: &str) -> PathBuf {
+    PathBuf::from(project_path)
+        .join(".webgal-editor")
+        .join("narrative-context.json")
+}
+
+fn validate_narrative_context(document: &NarrativeContextDocument) -> Result<(), String> {
+    if document.version != 1 || document.accepted_facts.len() > 50 {
+        return Err("Unsupported or oversized narrative context document".to_string());
+    }
+    if document.accepted_facts.iter().any(|fact| {
+        fact.id.len() > 128 || fact.accepted_at.len() > 64 || fact.summary.chars().count() > 320
+    }) {
+        return Err("Invalid narrative context fact".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_narrative_context(
+    project_path: String,
+) -> Result<Option<NarrativeContextDocument>, String> {
+    let path = narrative_context_path(&project_path);
+    if !path.exists() && !crate::json_store::backup_path(&path).exists() {
+        return Ok(None);
+    }
+    for candidate in crate::json_store::read_candidates(&path)
+        .map_err(|e| format!("Failed to read narrative context: {e}"))?
+    {
+        if let Ok(document) = serde_json::from_str::<NarrativeContextDocument>(&candidate) {
+            validate_narrative_context(&document)?;
+            return Ok(Some(document));
+        }
+    }
+    Err("Narrative context is corrupt and no valid backup is available".to_string())
+}
+
+#[tauri::command]
+pub fn save_narrative_context(
+    project_path: String,
+    document: NarrativeContextDocument,
+) -> Result<(), String> {
+    if !PathBuf::from(&project_path).join("game").is_dir() {
+        return Err("Invalid project path for narrative context".to_string());
+    }
+    validate_narrative_context(&document)?;
+    let path = narrative_context_path(&project_path);
+    fs::create_dir_all(path.parent().expect("narrative context has parent"))
+        .map_err(|e| format!("Failed to create narrative context directory: {e}"))?;
+    let bytes = serde_json::to_vec_pretty(&document)
+        .map_err(|e| format!("Failed to serialize narrative context: {e}"))?;
+    crate::json_store::write_crash_safe(&path, &bytes)
+        .map_err(|e| format!("Failed to write narrative context: {e}"))
 }
 
 #[tauri::command]
@@ -1429,6 +1499,37 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("ollaic_export_project_{label}_{nonce}"))
+    }
+
+    #[test]
+    fn narrative_context_survives_reload_and_rejects_oversized_facts() {
+        let tmp = std::env::temp_dir().join("webgal_test_narrative_context");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game")).unwrap();
+        let document = NarrativeContextDocument {
+            version: 1,
+            accepted_facts: vec![AcceptedNarrativeFact {
+                id: "set-1".to_string(),
+                accepted_at: "2026-08-23T00:00:00Z".to_string(),
+                summary: "主角接受了委托".to_string(),
+            }],
+        };
+        save_narrative_context(tmp.to_string_lossy().to_string(), document).unwrap();
+        let reloaded = read_narrative_context(tmp.to_string_lossy().to_string())
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded.accepted_facts[0].summary, "主角接受了委托");
+
+        let oversized = NarrativeContextDocument {
+            version: 1,
+            accepted_facts: vec![AcceptedNarrativeFact {
+                id: "set-2".to_string(),
+                accepted_at: "2026-08-23T00:00:00Z".to_string(),
+                summary: "x".repeat(321),
+            }],
+        };
+        assert!(save_narrative_context(tmp.to_string_lossy().to_string(), oversized).is_err());
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

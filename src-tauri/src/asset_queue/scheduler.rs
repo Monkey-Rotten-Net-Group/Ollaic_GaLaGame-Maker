@@ -9,8 +9,9 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
 use super::binder::{bind_asset, rebind_asset};
-use super::store::{load_queue, save_queue};
+use super::store::{load_queue, queue_path, save_queue};
 use super::types::{AssetAttempt, AssetKind, AssetQueue, AssetTask, AssetTaskStatus};
+use crate::project_transaction::ProjectFileTransaction;
 use crate::story_plan::types::StoryPlan;
 
 pub const ASSET_QUEUE_CANCELLED: &str = "asset queue cancelled";
@@ -19,6 +20,11 @@ pub struct GeneratedArtifact {
     pub extension: String,
     pub bytes: Vec<u8>,
     pub used_local_fallback: bool,
+}
+
+pub struct AssetQueueRun {
+    pub queue: AssetQueue,
+    pub transaction: ProjectFileTransaction,
 }
 
 pub trait AssetGenerator: Send + Sync {
@@ -52,6 +58,92 @@ pub async fn run_queue(
 }
 
 pub async fn run_queue_cancellable(
+    project_path: &Path,
+    run_id: &str,
+    plan: &StoryPlan,
+    generator: Arc<dyn AssetGenerator>,
+    cancelled: Arc<AtomicBool>,
+    binding_gate: Arc<Mutex<()>>,
+) -> Result<AssetQueue, String> {
+    let AssetQueueRun {
+        queue,
+        mut transaction,
+    } = run_queue_cancellable_transactional(
+        project_path,
+        run_id,
+        plan,
+        generator,
+        cancelled,
+        binding_gate,
+    )
+    .await?;
+    if let Err(error) = transaction.prepare_commit() {
+        let rollback = transaction
+            .rollback()
+            .err()
+            .map(|rollback| format!("; rollback failed: {rollback}"))
+            .unwrap_or_default();
+        return Err(format!("{error}{rollback}"));
+    }
+    transaction.commit();
+    Ok(queue)
+}
+
+pub async fn run_queue_cancellable_transactional(
+    project_path: &Path,
+    run_id: &str,
+    plan: &StoryPlan,
+    generator: Arc<dyn AssetGenerator>,
+    cancelled: Arc<AtomicBool>,
+    binding_gate: Arc<Mutex<()>>,
+) -> Result<AssetQueueRun, String> {
+    let mut transaction = ProjectFileTransaction::begin(
+        project_path,
+        &format!("asset-queue-{run_id}"),
+        asset_queue_transaction_paths(),
+    )
+    .await?;
+    let queue = match run_queue_inner(
+        project_path,
+        run_id,
+        plan,
+        generator,
+        cancelled,
+        binding_gate,
+    )
+    .await
+    {
+        Ok(queue) => queue,
+        Err(error) => {
+            let rollback = transaction
+                .rollback()
+                .err()
+                .map(|rollback| format!("; rollback failed: {rollback}"))
+                .unwrap_or_default();
+            return Err(format!("{error}{rollback}"));
+        }
+    };
+    Ok(AssetQueueRun { queue, transaction })
+}
+
+fn asset_queue_transaction_paths() -> Vec<std::path::PathBuf> {
+    [
+        "game/scene",
+        "game/background",
+        "game/figure",
+        "game/bgm",
+        "game/vocal",
+        "game/config/characters.json",
+        "game/config/asset-metadata.json",
+        ".ollaic/assets/queue.json",
+        ".ollaic/plan.json",
+    ]
+    .into_iter()
+    .map(std::path::PathBuf::from)
+    .collect()
+}
+
+async fn run_queue_inner(
     project_path: &Path,
     run_id: &str,
     plan: &StoryPlan,
@@ -839,7 +931,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancellation_after_generation_stops_serial_binding() {
+    async fn asset_queue_rollback_on_cancellation_after_generation() {
         let project = std::env::temp_dir().join(format!("ollaic_queue_cancel_bind_{}", now_ms()));
         std::fs::create_dir_all(project.join("game/scene")).unwrap();
         std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
@@ -850,6 +942,8 @@ mod tests {
         );
         let plan = plan_for(&queue, vec!["start.txt".into()]);
         save_queue(&project, &queue).unwrap();
+        let queue_before = std::fs::read(queue_path(&project)).unwrap();
+        let scene_before = std::fs::read(project.join("game/scene/start.txt")).unwrap();
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let binding_gate = Arc::new(Mutex::new(()));
         let binding_guard = binding_gate.lock().await;
@@ -882,6 +976,12 @@ mod tests {
         assert_eq!(result.unwrap_err(), ASSET_QUEUE_CANCELLED);
         assert!(cancelled.load(Ordering::SeqCst));
         assert!(!project.join("game/background/bg_one.wav").exists());
+        assert_eq!(std::fs::read(queue_path(&project)).unwrap(), queue_before);
+        assert_eq!(
+            std::fs::read(project.join("game/scene/start.txt")).unwrap(),
+            scene_before
+        );
+        assert!(artifact.is_file(), "generated cache artifacts are retained");
         let _ = std::fs::remove_dir_all(project);
     }
 

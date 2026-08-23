@@ -87,22 +87,62 @@ fn ai_log_list_honors_limit() {
     let _ = fs::remove_file(&tmp);
 }
 
-#[test]
-fn ai_agent_trace_sanitizes_secrets_without_log_truncation() {
-    let long_text = "x".repeat(MAX_LOG_FIELD_CHARS + 50);
-    let trace = serde_json::json!({
-        "apiKey": "secret-key",
-        "modelText": format!("response api_key=secret-token {long_text}"),
-        "nested": [{ "authorization": "Bearer secret-token" }],
-    });
+fn valid_trace_record() -> serde_json::Value {
+    serde_json::json!({
+        "version": 1, "classification": "operational", "traceId": "trace-1",
+        "createdAt": "2026-08-23T00:00:00.000Z", "mode": "function_calling",
+        "outcome": "pending_preview",
+        "input": { "promptHash": "sha256:abc", "promptChars": 12, "promptBytes": 12 },
+        "output": { "responseHash": "sha256:def", "responseChars": 20, "responseBytes": 20, "editCount": 1, "assetCount": 0 },
+        "durationMs": 42,
+        "tools": [{ "turn": 0, "name": "read_scene", "ok": true, "argumentBytes": 10, "resultBytes": 20 }],
+        "retention": { "maxRecords": 200, "diagnosticRetentionHours": 24, "maxDiagnosticExcerptChars": 256 }
+    })
+}
 
-    let sanitized = sanitize_trace_value(trace);
-    assert_eq!(sanitized["apiKey"], "[REDACTED]");
-    assert_eq!(sanitized["nested"][0]["authorization"], "[REDACTED]");
-    let model_text = sanitized["modelText"].as_str().unwrap();
-    assert!(model_text.contains("api_key=[REDACTED]"));
-    assert!(!model_text.contains("secret-token"));
-    assert!(model_text.len() > MAX_LOG_FIELD_CHARS);
+#[test]
+fn agent_trace_schema_rejects_payloads_and_unknown_versions() {
+    for (key, value) in [
+        ("prompt", "full scene prose"),
+        ("apiKey", "nonstandard-high-entropy-credential-987654321"),
+        ("authorization", "Bearer secret-token"),
+        ("nested", "uploaded reference contents"),
+    ] {
+        let mut trace = valid_trace_record();
+        trace[key] = serde_json::Value::String(value.to_string());
+        assert!(serde_json::from_value::<AgentTraceRecord>(trace).is_err());
+    }
+    let mut trace = valid_trace_record();
+    trace["version"] = serde_json::json!(2);
+    assert!(serde_json::from_value::<AgentTraceRecord>(trace)
+        .unwrap()
+        .validate()
+        .is_err());
+}
+
+#[test]
+fn agent_trace_diagnostic_requires_opt_in_and_is_bounded() {
+    let normal = serde_json::from_value::<AgentTraceRecord>(valid_trace_record()).unwrap();
+    assert!(normal.diagnostic.is_none());
+
+    let mut trace = valid_trace_record();
+    trace["diagnostic"] = serde_json::json!({
+        "enabled": false, "excerpt": "not opted in", "expiresAt": "2026-08-24T00:00:00.000Z"
+    });
+    assert!(serde_json::from_value::<AgentTraceRecord>(trace)
+        .unwrap()
+        .validate()
+        .is_err());
+
+    let mut oversized = valid_trace_record();
+    oversized["diagnostic"] = serde_json::json!({
+        "enabled": true, "excerpt": "x".repeat(MAX_DIAGNOSTIC_EXCERPT_CHARS + 1),
+        "expiresAt": "2026-08-24T00:00:00.000Z"
+    });
+    assert!(serde_json::from_value::<AgentTraceRecord>(oversized)
+        .unwrap()
+        .validate()
+        .is_err());
 }
 
 #[tokio::test]
@@ -123,7 +163,7 @@ async fn real_pipeline_json_mode_harness() {
 #[tokio::test]
 #[ignore]
 async fn real_model_insert_figure_harness() {
-    let cfg = config::load_config();
+    let cfg = config::load_config().unwrap();
     eprintln!(
         "[harness] provider={} model={} endpoint={}",
         cfg.provider,
@@ -217,7 +257,7 @@ async fn real_model_insert_figure_harness() {
 #[tokio::test]
 #[ignore]
 async fn real_model_structured_story_tools_harness() {
-    let cfg = config::load_config();
+    let cfg = config::load_config().unwrap();
     eprintln!(
         "[harness] provider={} model={} endpoint={}",
         cfg.provider,
@@ -1277,8 +1317,8 @@ fn media_download_url_rejects_ssrf_targets() {
     assert!(validate_media_download_url("http://[::1]/x.png").is_err());
     // Public endpoints pass.
     assert!(validate_media_download_url("https://example.com/image.png").is_ok());
-    assert!(validate_media_download_url(
-        "https://oaidalleapiprodscus.blob.core.windows.net/x.png"
-    )
-    .is_ok());
+    assert!(
+        validate_media_download_url("https://oaidalleapiprodscus.blob.core.windows.net/x.png")
+            .is_ok()
+    );
 }

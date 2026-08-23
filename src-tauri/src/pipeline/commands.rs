@@ -44,9 +44,10 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub fn new(app: &tauri::AppHandle) -> Self {
-        let flow_step_timeout = crate::ai::provider_capability::capability_for_config(
-            &crate::ai::config::load_config(),
-        )
+        let flow_step_timeout = crate::ai::config::load_config()
+            .and_then(|config| {
+                crate::ai::provider_capability::capability_for_config(&config)
+            })
         .map(|capability| std::time::Duration::from_millis(capability.flow_step_deadline_ms))
         .unwrap_or_else(|_| std::time::Duration::from_secs(180));
         Orchestrator {

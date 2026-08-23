@@ -1,3 +1,4 @@
+use super::batch_tts_transaction::{publish_batch, PreparedVoiceAsset};
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
 use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
@@ -20,7 +21,8 @@ use tauri::{AppHandle, Emitter};
 const MAX_LOG_LIMIT: usize = 500;
 const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
-const MAX_TRACE_FIELD_CHARS: usize = 50_000;
+const MAX_TRACE_TOOLS: usize = 256;
+const MAX_DIAGNOSTIC_EXCERPT_CHARS: usize = 256;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
 /// A reqwest client with the standard request timeout applied. Using this
@@ -265,7 +267,7 @@ pub struct AiLogOutput {
 }
 
 #[tauri::command]
-pub fn get_ai_config() -> AiConfig {
+pub fn get_ai_config() -> Result<AiConfig, String> {
     config::load_config()
 }
 
@@ -277,11 +279,15 @@ pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_ai_provider_capability(config: Option<AiConfig>) -> Result<ProviderCapability, String> {
-    capability_for_config(&config.unwrap_or_else(config::load_config))
+    let config = match config {
+        Some(config) => config,
+        None => config::load_config()?,
+    };
+    capability_for_config(&config)
 }
 
 #[tauri::command]
-pub fn get_ai_image_config() -> AiProviderConfig {
+pub fn get_ai_image_config() -> Result<AiProviderConfig, String> {
     config::load_image_config()
 }
 
@@ -291,7 +297,7 @@ pub fn set_ai_image_config(config: AiProviderConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_ai_tts_config() -> AiProviderConfig {
+pub fn get_ai_tts_config() -> Result<AiProviderConfig, String> {
     config::load_tts_config()
 }
 
@@ -301,7 +307,7 @@ pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_ai_music_config() -> AiProviderConfig {
+pub fn get_ai_music_config() -> Result<AiProviderConfig, String> {
     config::load_music_config()
 }
 
@@ -334,9 +340,107 @@ pub fn get_ai_agent_trace_path() -> Result<String, String> {
 
 #[tauri::command]
 pub fn append_ai_agent_trace(payload: serde_json::Value) -> Result<(), String> {
-    let sanitized = sanitize_trace_value(payload);
-    let line = serde_json::to_string(&sanitized).map_err(|e| e.to_string())?;
+    let record: AgentTraceRecord = serde_json::from_value(payload)
+        .map_err(|e| format!("Unsupported agent trace schema: {e}"))?;
+    record.validate()?;
+    let line = serde_json::to_string(&record).map_err(|e| e.to_string())?;
     config::append_agent_trace_line(&line)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceRecord {
+    version: u8,
+    classification: String,
+    trace_id: String,
+    created_at: String,
+    mode: String,
+    outcome: String,
+    input: AgentTraceInput,
+    output: AgentTraceOutput,
+    duration_ms: usize,
+    tools: Vec<AgentTraceTool>,
+    retention: AgentTraceRetention,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<AgentTraceDiagnostic>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceInput {
+    prompt_hash: String,
+    prompt_chars: usize,
+    prompt_bytes: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceOutput {
+    response_hash: String,
+    response_chars: usize,
+    response_bytes: usize,
+    edit_count: usize,
+    asset_count: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceTool {
+    turn: usize,
+    name: String,
+    ok: bool,
+    argument_bytes: usize,
+    result_bytes: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceRetention {
+    max_records: usize,
+    diagnostic_retention_hours: usize,
+    max_diagnostic_excerpt_chars: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentTraceDiagnostic {
+    enabled: bool,
+    excerpt: String,
+    expires_at: String,
+}
+
+impl AgentTraceRecord {
+    fn validate(&self) -> Result<(), String> {
+        if self.version != 1 || self.classification != "operational" {
+            return Err("Unsupported agent trace version or classification".to_string());
+        }
+        if !matches!(self.mode.as_str(), "function_calling" | "legacy")
+            || !self.input.prompt_hash.starts_with("sha256:")
+            || !self.output.response_hash.starts_with("sha256:")
+            || self.tools.len() > MAX_TRACE_TOOLS
+            || self.trace_id.len() > 128
+            || self.created_at.len() > 64
+            || self.outcome.len() > 128
+            || self.tools.iter().any(|tool| tool.name.len() > 128)
+        {
+            return Err("Invalid agent trace operational metadata".to_string());
+        }
+        if self.retention.max_records != 200
+            || self.retention.diagnostic_retention_hours != 24
+            || self.retention.max_diagnostic_excerpt_chars != MAX_DIAGNOSTIC_EXCERPT_CHARS
+        {
+            return Err("Invalid agent trace retention declaration".to_string());
+        }
+        if let Some(diagnostic) = &self.diagnostic {
+            if !diagnostic.enabled
+                || diagnostic.excerpt.chars().count() > MAX_DIAGNOSTIC_EXCERPT_CHARS
+                || diagnostic.expires_at.len() > 64
+            {
+                return Err("Invalid agent trace diagnostic payload".to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -355,7 +459,7 @@ pub(crate) async fn generate_image_media(
     model: String,
     reference_image_path: Option<String>,
 ) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_image_config();
+    let cfg = config::load_image_config()?;
     validate_provider_config_basics(&cfg, "图片")?;
     let model = model.trim();
     if model.is_empty() {
@@ -409,7 +513,7 @@ pub(crate) async fn generate_tts_media(
     model: String,
     format: String,
 ) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_tts_config();
+    let cfg = config::load_tts_config()?;
     validate_provider_config_basics(&cfg, "音频")?;
     let model = model.trim();
     if model.is_empty() {
@@ -456,7 +560,7 @@ pub(crate) async fn generate_music_media(
     model: String,
     format: String,
 ) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_music_config();
+    let cfg = config::load_music_config()?;
     validate_provider_config_basics(&cfg, "音乐")?;
     let model = model.trim();
     if model.is_empty() {
@@ -708,7 +812,7 @@ pub async fn ai_chat_stream(
     messages: Vec<AiMessageInput>,
     character_context: Option<String>,
 ) -> Result<(), String> {
-    let cfg = config::load_config();
+    let cfg = config::load_config()?;
     validate_config_basics(&cfg)?;
     capability_for_config(&cfg)?;
 
@@ -827,7 +931,7 @@ pub async fn ai_chat_turn(
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
-    let cfg = config::load_config();
+    let cfg = config::load_config()?;
     validate_config_basics(&cfg)?;
     let capability = capability_for_config(&cfg)?;
     if !tools.is_empty() {
@@ -909,7 +1013,7 @@ pub(crate) async fn complete_agent_text(
     system_prompt: &str,
     user_prompt: &str,
 ) -> Result<Option<(String, String, Option<u32>, Option<u32>)>, String> {
-    let cfg = config::load_config();
+    let cfg = config::load_config()?;
     if validate_config_basics(&cfg).is_err() {
         return Ok(None);
     }
@@ -1041,7 +1145,9 @@ fn validate_config_basics(cfg: &AiConfig) -> Result<(), String> {
 }
 
 pub(crate) fn has_agent_chat_config() -> bool {
-    validate_config_basics(&config::load_config()).is_ok()
+    config::load_config()
+        .and_then(|config| validate_config_basics(&config))
+        .is_ok()
 }
 
 /// Default API endpoint for a chat provider. `None` means there is no built-in
@@ -2260,40 +2366,6 @@ fn parse_ai_log_line(line: &str) -> Option<AiLogOutput> {
     })
 }
 
-fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(s) => serde_json::Value::String(sanitize_trace_field(&s)),
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.into_iter().map(sanitize_trace_value).collect())
-        }
-        serde_json::Value::Object(map) => {
-            let sanitized = map
-                .into_iter()
-                .map(|(key, value)| {
-                    let key_lower = key.to_ascii_lowercase();
-                    let value = if key_lower.contains("apikey")
-                        || key_lower.contains("api_key")
-                        || key_lower == "key"
-                        || key_lower.contains("token")
-                        || key_lower.contains("authorization")
-                    {
-                        serde_json::Value::String("[REDACTED]".to_string())
-                    } else {
-                        sanitize_trace_value(value)
-                    };
-                    (sanitize_log_field(&key), value)
-                })
-                .collect();
-            serde_json::Value::Object(sanitized)
-        }
-        other => other,
-    }
-}
-
-fn sanitize_trace_field(value: &str) -> String {
-    truncate_trace_field(&redact_common_secrets(value))
-}
-
 fn sanitize_log_field(value: &str) -> String {
     truncate_log_field(&redact_common_secrets(value))
 }
@@ -2364,19 +2436,6 @@ fn truncate_log_field(value: &str) -> String {
     }
 }
 
-fn truncate_trace_field(value: &str) -> String {
-    let mut chars = value.chars();
-    let truncated = chars
-        .by_ref()
-        .take(MAX_TRACE_FIELD_CHARS)
-        .collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
-    }
-}
-
 // ── Batch TTS ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -2399,6 +2458,16 @@ pub struct BatchTtsProgress {
     pub asset_name: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchTtsFailure {
+    code: &'static str,
+    failed_index: usize,
+    voice_card_id: String,
+    generated_count: usize,
+    message: String,
+}
+
 /// Generate TTS audio for multiple voice cards in sequence, emitting progress
 /// events via `batch-tts-progress` so the UI can show per-item status.
 #[tauri::command]
@@ -2409,7 +2478,7 @@ pub async fn generate_batch_tts(
     model: String,
     format: String,
 ) -> Result<Vec<BatchTtsProgress>, String> {
-    let cfg = config::load_tts_config();
+    let cfg = config::load_tts_config()?;
     validate_provider_config_basics(&cfg, "音频")?;
     let model = model.trim();
     if model.is_empty() {
@@ -2417,7 +2486,7 @@ pub async fn generate_batch_tts(
     }
 
     let total = items.len();
-    let mut results: Vec<BatchTtsProgress> = Vec::with_capacity(total);
+    let mut prepared = Vec::with_capacity(total);
     let response_format = normalize_audio_format(&format);
 
     // Resolve a friendly filename stem for each card from its `target_stem`
@@ -2475,89 +2544,68 @@ pub async fn generate_batch_tts(
             )),
         };
 
-        match gen_result {
-            Ok(media) => {
-                // Save the audio file to disk, preferring the card's friendly
-                // target stem and falling back to the id-based name. Use the
-                // extension reported by the provider (e.g. Qwen-TTS returns wav
-                // regardless of the requested response_format) so the file's
-                // contents and extension always match.
-                let stem = stem_map
-                    .get(&item.voice_card_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
-                let filename = format!("{}.{}", stem, media.extension);
-                let save = crate::assets::commands::save_generated_asset(
-                    project_path.clone(),
-                    "vocal".to_string(),
-                    filename.clone(),
-                    media.base64_data.clone(),
-                );
-                let asset_name = match save {
-                    Ok(info) => info.name,
-                    Err(e) => {
-                        let err_progress = BatchTtsProgress {
-                            voice_card_id: item.voice_card_id.clone(),
-                            index,
-                            total,
-                            status: "error".to_string(),
-                            message: format!("保存音频文件失败: {e}"),
-                            asset_name: None,
-                        };
-                        let _ = app_handle.emit("batch-tts-progress", &err_progress);
-                        results.push(err_progress);
-                        continue;
-                    }
-                };
-
-                // Update VoiceAssetCard
-                if let Ok(mut asset_meta) =
-                    crate::assets::commands::read_asset_metadata(&project_path)
-                {
-                    if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
-                        card.voice_asset = Some(asset_name.clone());
-                        // Update tags
-                        let tag_key = format!("vocal/{}", card.target_stem);
-                        let mut tags: Vec<String> =
-                            asset_meta.tags.get(&tag_key).cloned().unwrap_or_default();
-                        tags.retain(|t| !t.starts_with("status:"));
-                        tags.push("status:done".to_string());
-                        tags.retain(|t| !t.starts_with("source:"));
-                        tags.push("source:ai".to_string());
-                        asset_meta.tags.insert(tag_key, tags);
-                        let _ = crate::assets::commands::write_asset_metadata(
-                            &project_path,
-                            &asset_meta,
-                        );
-                    }
-                }
-
-                let progress_done = BatchTtsProgress {
-                    voice_card_id: item.voice_card_id.clone(),
-                    index,
-                    total,
-                    status: "done".to_string(),
-                    message: format!("完成 {}/{}: {}", index + 1, total, asset_name),
-                    asset_name: Some(asset_name),
-                };
-                let _ = app_handle.emit("batch-tts-progress", &progress_done);
-                results.push(progress_done);
-            }
-            Err(err) => {
-                let progress_err = BatchTtsProgress {
+        let media = match gen_result {
+            Ok(media) => media,
+            Err(message) => {
+                let progress = BatchTtsProgress {
                     voice_card_id: item.voice_card_id.clone(),
                     index,
                     total,
                     status: "error".to_string(),
-                    message: format!("生成失败: {err}"),
+                    message: format!("生成失败: {message}"),
                     asset_name: None,
                 };
-                let _ = app_handle.emit("batch-tts-progress", &progress_err);
-                results.push(progress_err);
+                let _ = app_handle.emit("batch-tts-progress", &progress);
+                let failure = BatchTtsFailure {
+                    code: "batch_tts_generation_failed",
+                    failed_index: index,
+                    voice_card_id: item.voice_card_id.clone(),
+                    generated_count: prepared.len(),
+                    message,
+                };
+                return Err(
+                    serde_json::to_string(&failure).unwrap_or_else(|error| error.to_string())
+                );
             }
-        }
+        };
+        let stem = stem_map
+            .get(&item.voice_card_id)
+            .cloned()
+            .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
+        let filename = format!("{}.{}", stem, media.extension);
+        let encoded = media
+            .base64_data
+            .split_once(',')
+            .map(|(_, payload)| payload)
+            .unwrap_or(media.base64_data.as_str());
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|error| format!("解析批量语音结果失败: {error}"))?;
+        prepared.push(PreparedVoiceAsset::new(
+            item.voice_card_id.clone(),
+            filename,
+            bytes,
+        ));
     }
 
+    let published = publish_batch(std::path::Path::new(&project_path), prepared).await?;
+    let results = items
+        .iter()
+        .zip(published)
+        .enumerate()
+        .map(|(index, (item, asset_name))| {
+            let progress = BatchTtsProgress {
+                voice_card_id: item.voice_card_id.clone(),
+                index,
+                total,
+                status: "done".to_string(),
+                message: format!("完成 {}/{}: {}", index + 1, total, asset_name),
+                asset_name: Some(asset_name),
+            };
+            let _ = app_handle.emit("batch-tts-progress", &progress);
+            progress
+        })
+        .collect();
     Ok(results)
 }
 
