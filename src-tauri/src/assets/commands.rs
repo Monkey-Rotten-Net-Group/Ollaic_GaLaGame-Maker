@@ -275,6 +275,35 @@ pub(crate) fn write_asset_metadata(
     fs::write(&path, source).map_err(|e| format!("写入素材元数据失败 {}: {e}", path.display()))
 }
 
+fn with_asset_metadata_write_lock<T>(
+    project_path: &str,
+    operation: impl FnOnce(&str) -> Result<T, String>,
+) -> Result<T, String> {
+    let project = ProjectPaths::open(project_path)?;
+    #[cfg(not(test))]
+    let _guard = project.lock_for_write();
+    #[cfg(test)]
+    let _guard = ASSET_METADATA_LOCK_WAIT_HOOK.with(|slot| match slot.borrow_mut().take() {
+        Some(hook) => project.lock_for_write_with_wait_hook(hook),
+        None => project.lock_for_write(),
+    });
+    let project_path = project.root().to_str().ok_or("项目路径不是有效 UTF-8")?;
+    operation(project_path)
+}
+
+#[cfg(test)]
+thread_local! {
+    static ASSET_METADATA_LOCK_WAIT_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn set_asset_metadata_lock_wait_hook(hook: impl FnOnce() + 'static) {
+    ASSET_METADATA_LOCK_WAIT_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
+}
+
 fn asset_metadata_key(category: &str, filename: &str) -> String {
     format!("{category}/{filename}")
 }
@@ -373,6 +402,37 @@ fn rename_scene_asset_references(
     Ok(())
 }
 
+fn delete_scene_asset_references(
+    project_path: &str,
+    category: &str,
+    filename: &str,
+    failure: AssetMutationFailure,
+) -> Result<(), String> {
+    let scene_dir = PathBuf::from(project_path).join("game").join("scene");
+    let entries = fs::read_dir(&scene_dir)
+        .map_err(|e| format!("无法读取场景目录 {}: {e}", scene_dir.display()))?;
+    let mut updates = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .map_err(|e| format!("无法读取场景文件 {}: {e}", path.display()))?;
+        let (rewritten, count) = references::remove_asset_references(&source, category, filename);
+        if count > 0 {
+            updates.push((path, rewritten));
+        }
+    }
+    updates.sort_by(|left, right| left.0.cmp(&right.0));
+    for (index, (path, source)) in updates.into_iter().enumerate() {
+        fs::write(&path, source)
+            .map_err(|e| format!("无法更新场景文件 {}: {e}", path.display()))?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterScene(index))?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AssetMutationFailure {
     Never,
@@ -382,6 +442,12 @@ enum AssetMutationFailure {
     AfterReference,
     AfterScene(usize),
     AfterMetadata,
+}
+
+#[cfg(test)]
+struct AssetMutationPause {
+    reached: std::sync::mpsc::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
 }
 
 fn fail_asset_mutation(
@@ -439,6 +505,18 @@ fn rollback_asset_mutation(error: String, rollback: Result<(), String>) -> Strin
     }
 }
 
+fn validate_asset_mutation_source(path: &Path) -> Result<(), String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| format!("文件不存在: {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("素材不能是 symbolic link: {}", path.display()));
+    }
+    if !metadata.is_file() {
+        return Err(format!("素材不是项目内的常规文件: {}", path.display()));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn load_asset_metadata(project_path: String) -> Result<AssetMetadata, String> {
     read_asset_metadata(&project_path)
@@ -446,7 +524,9 @@ pub fn load_asset_metadata(project_path: String) -> Result<AssetMetadata, String
 
 #[tauri::command]
 pub fn save_asset_metadata(project_path: String, metadata: AssetMetadata) -> Result<(), String> {
-    write_asset_metadata(&project_path, &metadata)
+    with_asset_metadata_write_lock(&project_path, |project_path| {
+        write_asset_metadata(project_path, &metadata)
+    })
 }
 
 /// List all media files in a project's asset subdirectory.
@@ -618,6 +698,8 @@ pub async fn delete_asset(
         category,
         filename,
         AssetMutationFailure::Never,
+        #[cfg(test)]
+        None,
     )
     .await
 }
@@ -627,6 +709,7 @@ async fn delete_asset_inner(
     category: String,
     filename: String,
     failure: AssetMutationFailure,
+    #[cfg(test)] pause_after_metadata: Option<AssetMutationPause>,
 ) -> Result<(), String> {
     validate_asset_filename(&filename)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
@@ -646,15 +729,13 @@ async fn delete_asset_inner(
         None,
         project_root,
     )?;
+    crate::project_transaction::validate_snapshot_paths(project_root, &transaction_paths)?;
+    validate_asset_mutation_source(&path)?;
     let mut transaction =
         ProjectFileTransaction::begin(project_root, "delete-asset", transaction_paths).await?;
 
     let mutation = (|| {
-        let metadata =
-            fs::symlink_metadata(&path).map_err(|_| format!("文件不存在: {}", path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(format!("素材不是项目内的常规文件: {}", path.display()));
-        }
+        validate_asset_mutation_source(&path)?;
         fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
         fail_asset_mutation(failure, AssetMutationFailure::AfterAsset)?;
         if let Some(reference_dir) = reference_dir {
@@ -665,7 +746,19 @@ async fn delete_asset_inner(
             }
         }
         fail_asset_mutation(failure, AssetMutationFailure::AfterReference)?;
+        delete_scene_asset_references(&project_path, &subdir, &filename, failure)?;
         delete_asset_metadata(&project_path, &subdir, &filename)?;
+        #[cfg(test)]
+        if let Some(pause) = pause_after_metadata {
+            pause
+                .reached
+                .send(())
+                .map_err(|error| format!("failed to signal asset mutation pause: {error}"))?;
+            pause
+                .resume
+                .recv()
+                .map_err(|error| format!("failed to resume asset mutation: {error}"))?;
+        }
         fail_asset_mutation(failure, AssetMutationFailure::AfterMetadata)
     })();
     if let Err(error) = mutation {
@@ -685,7 +778,25 @@ async fn delete_asset_with_failure(
     filename: String,
     failure: AssetMutationFailure,
 ) -> Result<(), String> {
-    delete_asset_inner(project_path, category, filename, failure).await
+    delete_asset_inner(project_path, category, filename, failure, None).await
+}
+
+#[cfg(test)]
+async fn delete_asset_with_failure_and_pause(
+    project_path: String,
+    category: String,
+    filename: String,
+    failure: AssetMutationFailure,
+    pause_after_metadata: AssetMutationPause,
+) -> Result<(), String> {
+    delete_asset_inner(
+        project_path,
+        category,
+        filename,
+        failure,
+        Some(pause_after_metadata),
+    )
+    .await
 }
 
 /// Rename an asset file.
@@ -734,15 +845,21 @@ async fn rename_asset_inner(
         new_reference_dir.as_deref(),
         project_root,
     )?;
+    crate::project_transaction::validate_snapshot_paths(project_root, &transaction_paths)?;
+    validate_asset_mutation_source(&old_path)?;
+    if new_path.exists() {
+        return Err(format!("目标文件已存在: {}", new_path.display()));
+    }
+    if let Some(path) = &new_reference_dir {
+        if path.exists() {
+            return Err(format!("目标素材参考目录已存在: {}", path.display()));
+        }
+    }
     let mut transaction =
         ProjectFileTransaction::begin(project_root, "rename-asset", transaction_paths).await?;
 
     let mutation = (|| {
-        let metadata = fs::symlink_metadata(&old_path)
-            .map_err(|_| format!("文件不存在: {}", old_path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(format!("素材不是项目内的常规文件: {}", old_path.display()));
-        }
+        validate_asset_mutation_source(&old_path)?;
         if new_path.exists() {
             return Err(format!("目标文件已存在: {}", new_path.display()));
         }
@@ -953,17 +1070,26 @@ pub fn sync_scene_voice_cards(
     project_path: String,
     scene_file: String,
 ) -> Result<Vec<VoiceAssetCard>, String> {
-    let scene_path = PathBuf::from(&project_path)
+    with_asset_metadata_write_lock(&project_path, |project_path| {
+        sync_scene_voice_cards_locked(project_path, &scene_file)
+    })
+}
+
+fn sync_scene_voice_cards_locked(
+    project_path: &str,
+    scene_file: &str,
+) -> Result<Vec<VoiceAssetCard>, String> {
+    let scene_path = PathBuf::from(project_path)
         .join("game")
         .join("scene")
-        .join(&scene_file);
+        .join(scene_file);
     if !scene_path.exists() {
         return Err(format!("场景文件不存在: {}", scene_path.display()));
     }
     let source = fs::read_to_string(&scene_path)
         .map_err(|e| format!("读取场景文件失败 {}: {e}", scene_path.display()))?;
     let nodes = webgal_parser::parse_script(&source);
-    let mut metadata = read_asset_metadata(&project_path)?;
+    let mut metadata = read_asset_metadata(project_path)?;
     let scene_stem = scene_file.trim_end_matches(".txt");
     let mut dialogue_index: u32 = 0;
     let mut updated: Vec<VoiceAssetCard> = Vec::new();
@@ -1039,7 +1165,7 @@ pub fn sync_scene_voice_cards(
     }
 
     if !updated.is_empty() {
-        write_asset_metadata(&project_path, &metadata)?;
+        write_asset_metadata(project_path, &metadata)?;
     }
 
     Ok(updated)
@@ -1052,18 +1178,28 @@ pub fn fill_voice_card(
     voice_card_id: String,
     asset_filename: String,
 ) -> Result<VoiceAssetCard, String> {
-    let mut metadata = read_asset_metadata(&project_path)?;
+    with_asset_metadata_write_lock(&project_path, |project_path| {
+        fill_voice_card_locked(project_path, &voice_card_id, &asset_filename)
+    })
+}
+
+fn fill_voice_card_locked(
+    project_path: &str,
+    voice_card_id: &str,
+    asset_filename: &str,
+) -> Result<VoiceAssetCard, String> {
+    let mut metadata = read_asset_metadata(project_path)?;
     // Snapshot the fields we need before taking a mutable reference.
     let card = metadata
         .voice_cards
-        .get(&voice_card_id)
+        .get(voice_card_id)
         .cloned()
         .ok_or_else(|| format!("配音卡片不存在: {voice_card_id}"))?;
     let stem = card.target_stem.clone();
 
     // Update the card in-place
-    if let Some(c) = metadata.voice_cards.get_mut(&voice_card_id) {
-        c.voice_asset = Some(asset_filename.clone());
+    if let Some(c) = metadata.voice_cards.get_mut(voice_card_id) {
+        c.voice_asset = Some(asset_filename.to_string());
     }
 
     // Update status tag
@@ -1075,11 +1211,11 @@ pub fn fill_voice_card(
     tags.push("source:import".to_string());
     metadata.tags.insert(tag_key, tags);
 
-    write_asset_metadata(&project_path, &metadata)?;
+    write_asset_metadata(project_path, &metadata)?;
     // Return updated card
     let updated = metadata
         .voice_cards
-        .get(&voice_card_id)
+        .get(voice_card_id)
         .cloned()
         .unwrap_or(card);
     Ok(updated)
@@ -1088,13 +1224,15 @@ pub fn fill_voice_card(
 /// Delete a voice card (mark as deleted so it won't be re-created on sync).
 #[tauri::command]
 pub fn delete_voice_card(project_path: String, voice_card_id: String) -> Result<(), String> {
-    let mut metadata = read_asset_metadata(&project_path)?;
-    let already_deleted = metadata.deleted_voice_cards.contains(&voice_card_id);
-    metadata.voice_cards.remove(&voice_card_id);
-    if !already_deleted {
-        metadata.deleted_voice_cards.push(voice_card_id);
-    }
-    write_asset_metadata(&project_path, &metadata)
+    with_asset_metadata_write_lock(&project_path, |project_path| {
+        let mut metadata = read_asset_metadata(project_path)?;
+        let already_deleted = metadata.deleted_voice_cards.contains(&voice_card_id);
+        metadata.voice_cards.remove(&voice_card_id);
+        if !already_deleted {
+            metadata.deleted_voice_cards.push(voice_card_id);
+        }
+        write_asset_metadata(project_path, &metadata)
+    })
 }
 
 fn unique_path(path: PathBuf) -> PathBuf {
@@ -1306,6 +1444,9 @@ mod tests {
         assert!(!renamed_reference_dir.exists());
         let metadata = load_asset_metadata(tmp.to_string_lossy().to_string()).unwrap();
         assert!(!metadata.aliases.contains_key("background/garden.webp"));
+        let scene = fs::read_to_string(scene_dir.join("start.txt")).unwrap();
+        assert!(!scene.contains("changeBg:garden.webp"));
+        assert!(scene.contains(":park.webp is dialogue text;"));
         let _ = fs::remove_dir_all(&tmp);
     }
 
@@ -1482,6 +1623,81 @@ mod tests {
     }
 
     #[test]
+    fn public_metadata_save_waits_for_failed_asset_mutation_rollback() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::Duration;
+
+        let tmp = std::env::temp_dir().join("ollaic_asset_metadata_save_during_rollback");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game/background")).unwrap();
+        fs::create_dir_all(tmp.join("game/scene")).unwrap();
+        fs::write(tmp.join("game/background/park.webp"), "asset").unwrap();
+
+        let mut initial = AssetMetadata::default();
+        initial
+            .aliases
+            .insert("background/park.webp".to_string(), "Park".to_string());
+        write_asset_metadata(tmp.to_str().unwrap(), &initial).unwrap();
+
+        let (pause_reached_tx, pause_reached_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let transaction_project = tmp.to_string_lossy().to_string();
+        let transaction = thread::spawn(move || {
+            block_on(delete_asset_with_failure_and_pause(
+                transaction_project,
+                "background".to_string(),
+                "park.webp".to_string(),
+                AssetMutationFailure::AfterMetadata,
+                AssetMutationPause {
+                    reached: pause_reached_tx,
+                    resume: resume_rx,
+                },
+            ))
+        });
+        pause_reached_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("asset mutation did not reach the failure point");
+
+        let mut writer_metadata = AssetMetadata::default();
+        writer_metadata
+            .aliases
+            .insert("background/writer.webp".to_string(), "Writer".to_string());
+        let writer_project = tmp.to_string_lossy().to_string();
+        let (writer_waiting_tx, writer_waiting_rx) = mpsc::channel();
+        let (writer_done_tx, writer_done_rx) = mpsc::channel();
+        let writer = thread::spawn(move || {
+            set_asset_metadata_lock_wait_hook(move || writer_waiting_tx.send(()).unwrap());
+            let result = save_asset_metadata(writer_project, writer_metadata);
+            writer_done_tx.send(()).unwrap();
+            result
+        });
+        writer_waiting_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("metadata writer never waited for the Project transaction lock");
+        assert!(
+            matches!(writer_done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "public metadata writer completed while the Project transaction lock was held"
+        );
+
+        resume_tx.send(()).unwrap();
+        let transaction_error = transaction.join().unwrap().unwrap_err();
+        assert!(transaction_error.contains("injected asset mutation failure"));
+        writer_done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("metadata writer did not resume after rollback");
+        writer.join().unwrap().unwrap();
+
+        let final_metadata = read_asset_metadata(tmp.to_str().unwrap()).unwrap();
+        let _ = fs::remove_dir_all(&tmp);
+        assert_eq!(
+            final_metadata.aliases.get("background/writer.webp"),
+            Some(&"Writer".to_string())
+        );
+        assert!(!final_metadata.aliases.contains_key("background/park.webp"));
+    }
+
+    #[test]
     fn asset_mutation_transaction_reports_rollback_residual_paths() {
         let tmp = std::env::temp_dir().join("ollaic_asset_mutation_rollback_residual");
         let _ = fs::remove_dir_all(&tmp);
@@ -1572,6 +1788,7 @@ mod tests {
         for (label, failure) in [
             ("asset", AssetMutationFailure::AfterAsset),
             ("reference", AssetMutationFailure::AfterReference),
+            ("scene", AssetMutationFailure::AfterScene(0)),
         ] {
             let tmp =
                 std::env::temp_dir().join(format!("ollaic_asset_mutation_delete_stage_{label}"));
@@ -1583,6 +1800,11 @@ mod tests {
             fs::write(
                 tmp.join("game/config/references/backgrounds/park.webp/sketch.webp"),
                 "reference",
+            )
+            .unwrap();
+            fs::write(
+                tmp.join("game/scene/start.txt"),
+                "changeBg:park.webp;\n:park.webp is dialogue text;\n",
             )
             .unwrap();
 
@@ -1600,7 +1822,71 @@ mod tests {
                     .exists(),
                 "{label}"
             );
+            assert_eq!(
+                fs::read_to_string(tmp.join("game/scene/start.txt")).unwrap(),
+                "changeBg:park.webp;\n:park.webp is dialogue text;\n",
+                "{label}"
+            );
             let _ = fs::remove_dir_all(tmp);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn asset_mutation_rejects_outside_symlink_before_snapshot() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = std::env::temp_dir().join("ollaic_asset_mutation_outside_symlink");
+        let _ = fs::remove_dir_all(&workspace);
+        let project = workspace.join("project");
+        let outside = workspace.join("outside.webp");
+        fs::create_dir_all(project.join("game/background")).unwrap();
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(&outside, "outside").unwrap();
+        symlink(&outside, project.join("game/background/linked.webp")).unwrap();
+
+        let error = block_on(delete_asset(
+            project.to_string_lossy().to_string(),
+            "background".to_string(),
+            "linked.webp".to_string(),
+        ))
+        .unwrap_err();
+
+        assert!(error.contains("symbolic link"));
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+        assert!(!project.join(".ollaic/transactions").exists());
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn deleting_vocal_asset_removes_voice_and_effect_references_only() {
+        let project = std::env::temp_dir().join("ollaic_delete_vocal_references");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("game/vocal")).unwrap();
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(project.join("game/vocal/v1.wav"), "voice").unwrap();
+        fs::write(
+            project.join("game/scene/start.txt"),
+            concat!(
+                "Alice:hello -v1.wav;\n",
+                "playEffect:v1.wav;\n",
+                ":v1.wav is dialogue text;\n",
+            ),
+        )
+        .unwrap();
+
+        block_on(delete_asset(
+            project.to_string_lossy().to_string(),
+            "vocal".to_string(),
+            "v1.wav".to_string(),
+        ))
+        .unwrap();
+
+        let scene = fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+        assert!(scene.contains("Alice:hello;"));
+        assert!(!scene.contains("playEffect:v1.wav"));
+        assert!(scene.contains(":v1.wav is dialogue text;"));
+        assert!(references::find_asset_references(&scene).is_empty());
+        let _ = fs::remove_dir_all(project);
     }
 }

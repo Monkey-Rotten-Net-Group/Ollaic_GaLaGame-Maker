@@ -34,7 +34,9 @@ pub fn save_scene(
     nodes: Vec<WebGalNode>,
 ) -> Result<(), String> {
     let text = serializer::serialize_script(&nodes);
-    let path = ProjectPaths::open(project_path)?.existing_scene(&scene_name)?;
+    let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
+    let path = paths.existing_scene(&scene_name)?;
 
     crate::json_store::write_crash_safe(&path, text.as_bytes())
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
@@ -55,7 +57,9 @@ pub fn write_file_text(
     scene_name: String,
     content: String,
 ) -> Result<(), String> {
-    let path = ProjectPaths::open(project_path)?.existing_scene(&scene_name)?;
+    let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
+    let path = paths.existing_scene(&scene_name)?;
     crate::json_store::write_crash_safe(&path, content.as_bytes())
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
@@ -69,7 +73,9 @@ pub fn list_scenes(project_path: String) -> Result<Vec<String>, String> {
 /// Delete a scene file.
 #[tauri::command]
 pub fn delete_scene(project_path: String, scene_name: String) -> Result<(), String> {
-    let path = ProjectPaths::open(project_path)?.existing_scene(&scene_name)?;
+    let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
+    let path = paths.existing_scene(&scene_name)?;
     fs::remove_file(&path).map_err(|e| format!("Failed to delete {}: {}", path.display(), e))
 }
 
@@ -81,6 +87,7 @@ pub fn rename_scene(
     new_name: String,
 ) -> Result<String, String> {
     let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
     let path = paths.existing_scene(&scene_name)?;
     let normalized_name = SceneName::parse(&new_name)?;
     let new_path = paths.scene_candidate(normalized_name.as_str())?;

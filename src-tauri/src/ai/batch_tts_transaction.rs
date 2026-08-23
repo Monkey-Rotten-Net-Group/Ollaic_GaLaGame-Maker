@@ -203,11 +203,44 @@ async fn publish_batch_with_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asset_queue::scheduler::run_queue;
+    use crate::asset_queue::types::AssetTask;
+    use crate::asset_queue::{AssetGenerator, GeneratedArtifact};
     use crate::assets::commands::{
         read_asset_metadata, write_asset_metadata, AssetMetadata, VoiceAssetCard,
     };
+    use crate::story_plan::{AssetTaskPlan, ScenePlan, StoryPlan};
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    struct BlockingAssetQueueGenerator {
+        started: Arc<tokio::sync::Semaphore>,
+        proceed: Arc<tokio::sync::Semaphore>,
+    }
+
+    impl AssetGenerator for BlockingAssetQueueGenerator {
+        fn generate<'a>(
+            &'a self,
+            _task: &'a AssetTask,
+        ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+            Box::pin(async move {
+                self.started.add_permits(1);
+                self.proceed
+                    .acquire()
+                    .await
+                    .map_err(|_| "test semaphore closed".to_string())?
+                    .forget();
+                Ok(GeneratedArtifact {
+                    extension: "png".to_string(),
+                    bytes: b"background".to_vec(),
+                    used_local_fallback: false,
+                })
+            })
+        }
+    }
 
     fn project(name: &str) -> std::path::PathBuf {
         let nonce = SystemTime::now()
@@ -330,6 +363,96 @@ mod tests {
         assert_eq!(
             metadata.voice_cards["voice-2"].voice_asset.as_deref(),
             Some("line_two.wav")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_batch_tts_and_asset_queue_binding_preserve_metadata_updates() {
+        let root = project("asset_queue_concurrent");
+        fs::write(root.join("game/scene/start.txt"), "; empty\n").unwrap();
+        let plan = StoryPlan {
+            scenes: vec!["start.txt".to_string()],
+            scene_plans: vec![ScenePlan {
+                id: "start".to_string(),
+                file: "start.txt".to_string(),
+                chapter_id: "chapter".to_string(),
+                title: "Start".to_string(),
+                summary: String::new(),
+                character_ids: Vec::new(),
+            }],
+            asset_plan: vec![AssetTaskPlan {
+                id: "bg_start".to_string(),
+                kind: "background".to_string(),
+                target_stem: "bg_start".to_string(),
+                prompt: "background".to_string(),
+                scene_ref: Some("start".to_string()),
+                character_ref: None,
+                emotion: None,
+                status: "pending".to_string(),
+            }],
+            ..StoryPlan::new("concurrent asset generation")
+        };
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let proceed = Arc::new(tokio::sync::Semaphore::new(0));
+        let queue_generator = Arc::new(BlockingAssetQueueGenerator {
+            started: started.clone(),
+            proceed: proceed.clone(),
+        });
+        let queue_root = root.clone();
+        let queue = tokio::spawn(async move {
+            run_queue(&queue_root, "run-concurrent", &plan, queue_generator).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), started.acquire())
+            .await
+            .expect("AssetQueue did not reach the generator")
+            .unwrap()
+            .forget();
+
+        let batch_root = root.clone();
+        let batch = tokio::spawn(async move {
+            publish_batch(
+                &batch_root,
+                vec![PreparedVoiceAsset::new(
+                    "voice-1",
+                    "line_one.wav",
+                    b"voice".to_vec(),
+                )],
+            )
+            .await
+        });
+        let staging_root = root.join(".ollaic/tts-staging");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if fs::read_dir(&staging_root).is_ok_and(|mut entries| entries.next().is_some()) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("batch TTS did not reach the Project transaction guard");
+        assert!(
+            !batch.is_finished(),
+            "batch TTS must wait while AssetQueue holds the Project transaction guard"
+        );
+
+        proceed.add_permits(1);
+        let (queue_result, batch_result) =
+            tokio::time::timeout(Duration::from_secs(5), async { (queue.await, batch.await) })
+                .await
+                .expect("concurrent AssetQueue and batch TTS operations deadlocked");
+        queue_result.unwrap().unwrap();
+        batch_result.unwrap().unwrap();
+
+        let metadata = read_asset_metadata(root.to_str().unwrap()).unwrap();
+        assert_eq!(
+            metadata.voice_cards["voice-1"].voice_asset.as_deref(),
+            Some("line_one.wav")
+        );
+        assert_eq!(
+            metadata.scene_cards["bg_start"].image_asset.as_deref(),
+            Some("bg_start.png")
         );
         let _ = fs::remove_dir_all(root);
     }

@@ -150,12 +150,19 @@ describe('AI change-set commit adapter', () => {
     expect(changeSetAdapter).toHaveBeenCalledOnce();
     expect(changeSetAdapter).toHaveBeenCalledWith({
       projectPath: '/tmp/proj',
-      operations: [{
-        kind: 'scene',
-        file: 'start.txt',
-        baseline: '',
-        content: '\nB:world;',
-      }],
+      operations: [
+        {
+          kind: 'scene',
+          file: 'start.txt',
+          baseline: '',
+          content: '\nB:world;',
+        },
+        expect.objectContaining({
+          kind: 'narrative_context',
+          baseline: { version: 1, acceptedFacts: [] },
+          document: expect.objectContaining({ version: 1 }),
+        }),
+      ],
     });
     expect(params.setNodes).toHaveBeenCalledOnce();
     expect(params.setScriptSource).toHaveBeenCalledWith('\nB:world;');
@@ -336,6 +343,7 @@ describe('AI change-set commit adapter', () => {
       'create_scene',
       'characters',
       'project_memory',
+      'narrative_context',
     ]);
     expect(request.operations[0]).toMatchObject({
       kind: 'create_scene',

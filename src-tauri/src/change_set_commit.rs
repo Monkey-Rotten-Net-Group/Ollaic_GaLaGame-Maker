@@ -29,6 +29,10 @@ pub enum ChangeSetOperation {
         baseline: serde_json::Value,
         metadata: serde_json::Value,
     },
+    NarrativeContext {
+        baseline: serde_json::Value,
+        document: serde_json::Value,
+    },
     CreateScene {
         file: String,
         content: String,
@@ -63,6 +67,7 @@ pub enum ResourceId {
     Characters,
     ProjectMemory,
     AssetMetadata,
+    NarrativeContext,
 }
 
 struct PreparedWrite {
@@ -364,6 +369,26 @@ fn prepare_write(
             Baseline::Json(baseline),
             serialize_json(ResourceId::AssetMetadata, &metadata)?,
         ),
+        ChangeSetOperation::NarrativeContext { baseline, document } => {
+            let parsed =
+                serde_json::from_value::<crate::webgal::project::NarrativeContextDocument>(
+                    document.clone(),
+                )
+                .map_err(|error| {
+                    (
+                        ResourceId::NarrativeContext,
+                        format!("invalid narrative context: {error}"),
+                    )
+                })?;
+            crate::webgal::project::validate_narrative_context(&parsed)
+                .map_err(|message| (ResourceId::NarrativeContext, message))?;
+            PreparedWrite::new(
+                ResourceId::NarrativeContext,
+                project.join(".webgal-editor/narrative-context.json"),
+                Baseline::Json(baseline),
+                serialize_json(ResourceId::NarrativeContext, &document)?,
+            )
+        }
         ChangeSetOperation::CreateScene { file, content } => {
             let name = SceneName::parse(&file)
                 .map_err(|message| (ResourceId::Scene { file: file.clone() }, message))?;
@@ -442,6 +467,10 @@ fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> 
                         && metadata.deleted_voice_cards.is_empty()
                 })
         }
+        ResourceId::NarrativeContext => serde_json::from_value::<
+            crate::webgal::project::NarrativeContextDocument,
+        >(expected.clone())
+        .is_ok_and(|document| document.version == 1 && document.accepted_facts.is_empty()),
         _ => false,
     }
 }
@@ -1545,6 +1574,95 @@ mod tests {
             }
         );
         assert_eq!(fs::read_to_string(scene).unwrap(), "Alice:after;\n");
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn narrative_context_commits_with_playable_changes_and_survives_reload() {
+        let project = temp_project("narrative_atomic_success");
+        fs::write(project.join("game/scene/start.txt"), "before").unwrap();
+        let empty = serde_json::json!({"version":1,"acceptedFacts":[]});
+        let accepted = serde_json::json!({
+            "version":1,
+            "acceptedFacts":[{
+                "id":"set-1",
+                "acceptedAt":"2026-08-23T00:00:00Z",
+                "summary":"角色 小艾：修改 personality",
+                "values":["角色 小艾.personality = 勇敢而谨慎"]
+            }]
+        });
+
+        let result = apply_change_set(ApplyChangeSetRequest {
+            project_path: project.to_string_lossy().into_owned(),
+            operations: vec![
+                ChangeSetOperation::Scene {
+                    file: "start.txt".into(),
+                    baseline: "before".into(),
+                    content: "after".into(),
+                },
+                ChangeSetOperation::NarrativeContext {
+                    baseline: empty,
+                    document: accepted,
+                },
+            ],
+        });
+
+        assert!(matches!(result, ApplyChangeSetResult::Committed { .. }));
+        let reloaded =
+            crate::webgal::project::read_narrative_context(project.to_string_lossy().into_owned())
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            reloaded.accepted_facts[0].values,
+            vec!["角色 小艾.personality = 勇敢而谨慎"]
+        );
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn narrative_context_failure_rolls_back_playable_changes() {
+        let project = temp_project("narrative_atomic_rollback");
+        fs::write(project.join("game/scene/start.txt"), "before").unwrap();
+        let result = apply_change_set_with_failures(
+            ApplyChangeSetRequest {
+                project_path: project.to_string_lossy().into_owned(),
+                operations: vec![
+                    ChangeSetOperation::Scene {
+                        file: "start.txt".into(),
+                        baseline: "before".into(),
+                        content: "after".into(),
+                    },
+                    ChangeSetOperation::NarrativeContext {
+                        baseline: serde_json::json!({"version":1,"acceptedFacts":[]}),
+                        document: serde_json::json!({
+                            "version":1,
+                            "acceptedFacts":[{
+                                "id":"set-1",
+                                "acceptedAt":"2026-08-23T00:00:00Z",
+                                "summary":"accepted",
+                                "values":["场景 start.txt 已确认：Alice:hello;"]
+                            }]
+                        }),
+                    },
+                ],
+            },
+            FailurePlan::fail_write(ResourceId::NarrativeContext),
+        );
+
+        assert!(matches!(
+            result,
+            ApplyChangeSetResult::FailedAndRolledBack {
+                failed_resource: ResourceId::NarrativeContext,
+                ..
+            }
+        ));
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+            "before"
+        );
+        assert!(!project
+            .join(".webgal-editor/narrative-context.json")
+            .exists());
         fs::remove_dir_all(project).unwrap();
     }
 }

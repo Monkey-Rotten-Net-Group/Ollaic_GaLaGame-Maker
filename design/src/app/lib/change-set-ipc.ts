@@ -5,13 +5,15 @@ export type ChangeSetResource =
   | { kind: 'scene'; file: string }
   | { kind: 'characters' }
   | { kind: 'project_memory' }
-  | { kind: 'asset_metadata' };
+  | { kind: 'asset_metadata' }
+  | { kind: 'narrative_context' };
 
 export type ChangeSetOperation =
   | { kind: 'scene'; file: string; baseline: string; content: string }
   | { kind: 'characters'; baseline: unknown; document: unknown }
   | { kind: 'project_memory'; baseline: unknown; memory: unknown }
   | { kind: 'asset_metadata'; baseline: unknown; metadata: unknown }
+  | { kind: 'narrative_context'; baseline: unknown; document: unknown }
   | { kind: 'create_scene'; file: string; content: string };
 
 export interface ApplyChangeSetRequest {

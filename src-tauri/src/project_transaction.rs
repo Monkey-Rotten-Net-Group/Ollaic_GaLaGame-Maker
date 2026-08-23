@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,9 +40,17 @@ impl ProjectFileTransaction {
         label: &str,
         paths: impl IntoIterator<Item = PathBuf>,
     ) -> Result<Self, String> {
-        let project_root = normalized_project_root(project_root);
+        let project_root = canonical_project_root(project_root)?;
+        let mut relative_paths = paths
+            .into_iter()
+            .map(|path| validate_relative_path(&path))
+            .collect::<Result<Vec<_>, _>>()?;
+        relative_paths.sort();
+        relative_paths.dedup();
         let guard = project_guard(&project_root).lock_owned().await;
+        validate_snapshot_path(&project_root, Path::new(TRANSACTIONS_DIR))?;
         recover_pending_locked(&project_root)?;
+        validate_snapshot_paths_at(&project_root, &relative_paths)?;
 
         let journal_dir = project_root
             .join(TRANSACTIONS_DIR)
@@ -54,19 +63,31 @@ impl ProjectFileTransaction {
             )
         })?;
 
-        let mut relative_paths = paths
-            .into_iter()
-            .map(|path| validate_relative_path(&path))
-            .collect::<Result<Vec<_>, _>>()?;
-        relative_paths.sort();
-        relative_paths.dedup();
-
         let snapshot_result = (|| {
             let mut entries = Vec::with_capacity(relative_paths.len());
             for relative in relative_paths {
                 let source = project_root.join(&relative);
-                let existed = source.exists();
-                let was_directory = source.is_dir();
+                let source_metadata = match fs::symlink_metadata(&source) {
+                    Ok(metadata) => Some(metadata),
+                    Err(error) if error.kind() == ErrorKind::NotFound => None,
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to inspect transaction path {}: {error}",
+                            source.display()
+                        ));
+                    }
+                };
+                if source_metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.file_type().is_symlink())
+                {
+                    return Err(format!(
+                        "transaction snapshot refuses symbolic link: {}",
+                        source.display()
+                    ));
+                }
+                let existed = source_metadata.is_some();
+                let was_directory = source_metadata.as_ref().is_some_and(fs::Metadata::is_dir);
                 if existed {
                     let backup = backup_root.join(&relative);
                     if was_directory {
@@ -164,9 +185,22 @@ impl Drop for ProjectFileTransaction {
 }
 
 pub async fn recover_pending(project_root: &Path) -> Result<(), String> {
-    let project_root = normalized_project_root(project_root);
+    let project_root = canonical_project_root(project_root)?;
     let _guard = project_guard(&project_root).lock_owned().await;
+    validate_snapshot_path(&project_root, Path::new(TRANSACTIONS_DIR))?;
     recover_pending_locked(&project_root)
+}
+
+pub(crate) fn validate_snapshot_paths(
+    project_root: &Path,
+    relative_paths: &[PathBuf],
+) -> Result<(), String> {
+    let project_root = canonical_project_root(project_root)?;
+    let relative_paths = relative_paths
+        .iter()
+        .map(|path| validate_relative_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    validate_snapshot_paths_at(&project_root, &relative_paths)
 }
 
 fn recover_pending_locked(project_root: &Path) -> Result<(), String> {
@@ -236,6 +270,10 @@ fn restore_manifest(
         };
         let target = project_root.join(&relative);
         let backup = journal_dir.join("backup").join(&relative);
+        if let Err(error) = validate_snapshot_path(project_root, &relative) {
+            errors.push(format!("{}: {error}", target.display()));
+            continue;
+        }
         let result = if entry.existed {
             remove_path_if_exists(&target).and_then(|()| {
                 if entry.was_directory {
@@ -271,14 +309,15 @@ fn restore_manifest(
 }
 
 fn remove_path_if_exists(path: &Path) -> Result<(), String> {
-    if path.is_dir() {
-        fs::remove_dir_all(path)
-            .map_err(|error| format!("failed to remove directory {}: {error}", path.display()))
-    } else if path.exists() {
-        fs::remove_file(path)
-            .map_err(|error| format!("failed to remove file {}: {error}", path.display()))
-    } else {
-        Ok(())
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(path)
+                .map_err(|error| format!("failed to remove directory {}: {error}", path.display()))
+        }
+        Ok(_) => fs::remove_file(path)
+            .map_err(|error| format!("failed to remove file {}: {error}", path.display())),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to inspect {}: {error}", path.display())),
     }
 }
 
@@ -295,9 +334,17 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
         let entry = entry.map_err(|error| error.to_string())?;
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
-        if source_path.is_dir() {
+        let metadata = fs::symlink_metadata(&source_path)
+            .map_err(|error| format!("failed to inspect {}: {error}", source_path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "transaction snapshot refuses symbolic link: {}",
+                source_path.display()
+            ));
+        }
+        if metadata.is_dir() {
             copy_dir_recursive(&source_path, &destination_path)?;
-        } else {
+        } else if metadata.is_file() {
             fs::copy(&source_path, &destination_path).map_err(|error| {
                 format!(
                     "failed to copy {} to {}: {error}",
@@ -305,6 +352,11 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
                     destination_path.display()
                 )
             })?;
+        } else {
+            return Err(format!(
+                "transaction snapshot requires regular files or directories: {}",
+                source_path.display()
+            ));
         }
     }
     Ok(())
@@ -330,17 +382,105 @@ fn path_to_manifest(path: &Path) -> Result<String, String> {
         .ok_or_else(|| format!("transaction path is not UTF-8: {}", path.display()))
 }
 
-fn normalized_project_root(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+fn canonical_project_root(path: &Path) -> Result<PathBuf, String> {
+    let root = path
+        .canonicalize()
+        .map_err(|error| format!("invalid Project root {}: {error}", path.display()))?;
+    if !root.is_dir() {
+        return Err(format!(
+            "invalid Project root {}: not a directory",
+            root.display()
+        ));
+    }
+    Ok(root)
 }
 
-fn project_guard(project_root: &Path) -> Arc<AsyncMutex<()>> {
+fn validate_snapshot_paths_at(project_root: &Path, paths: &[PathBuf]) -> Result<(), String> {
+    for relative in paths {
+        validate_snapshot_path(project_root, relative)?;
+    }
+    Ok(())
+}
+
+fn validate_snapshot_path(project_root: &Path, relative: &Path) -> Result<(), String> {
+    let relative = validate_relative_path(relative)?;
+    let mut current = project_root.to_path_buf();
+    let components = relative.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(part) = component else {
+            unreachable!("relative path was validated")
+        };
+        current.push(part);
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect transaction path {}: {error}",
+                    current.display()
+                ));
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "transaction snapshot refuses symbolic link: {}",
+                current.display()
+            ));
+        }
+        if index + 1 < components.len() && !metadata.is_dir() {
+            return Err(format!(
+                "transaction path ancestor is not a directory: {}",
+                current.display()
+            ));
+        }
+        if index + 1 == components.len() {
+            if metadata.is_dir() {
+                validate_snapshot_tree(&current)?;
+            } else if !metadata.is_file() {
+                return Err(format!(
+                    "transaction snapshot requires a regular file or directory: {}",
+                    current.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_snapshot_tree(directory: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(directory)
+        .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "transaction snapshot refuses symbolic link: {}",
+                path.display()
+            ));
+        }
+        if metadata.is_dir() {
+            validate_snapshot_tree(&path)?;
+        } else if !metadata.is_file() {
+            return Err(format!(
+                "transaction snapshot requires regular files or directories: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn project_guard(project_root: &Path) -> Arc<AsyncMutex<()>> {
     static GUARDS: OnceLock<Mutex<HashMap<PathBuf, Weak<AsyncMutex<()>>>>> = OnceLock::new();
     let guards = GUARDS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guards = guards.lock().expect("project transaction guards poisoned");
     if let Some(guard) = guards.get(project_root).and_then(Weak::upgrade) {
         return guard;
     }
+    guards.retain(|_, guard| guard.strong_count() > 0);
     let guard = Arc::new(AsyncMutex::new(()));
     guards.insert(project_root.to_path_buf(), Arc::downgrade(&guard));
     guard
@@ -459,6 +599,82 @@ mod tests {
         assert!(error.contains("rollback left residual paths"));
         assert!(error.contains("game/scene"));
         transaction.abandon_for_recovery_test();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn project_transaction_rejects_snapshot_symlinks_outside_project() {
+        use std::os::unix::fs::symlink;
+
+        let root = project("snapshot_symlink");
+        let outside = root.parent().unwrap().join(format!(
+            "ollaic_project_transaction_outside_{}",
+            unique_transaction_id("test")
+        ));
+        fs::write(&outside, "outside-secret").unwrap();
+        symlink(&outside, root.join("game/scene/linked.txt")).unwrap();
+
+        let result =
+            ProjectFileTransaction::begin(&root, "test", [PathBuf::from("game/scene")]).await;
+        let error = match result {
+            Ok(transaction) => {
+                transaction.commit();
+                panic!("snapshotting a symbolic link must fail")
+            }
+            Err(error) => error,
+        };
+
+        assert!(error.contains("symbolic link"));
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "outside-secret");
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(outside);
+    }
+
+    #[tokio::test]
+    async fn project_transaction_serializes_concurrent_scene_save() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let root = project("scene_save_lock");
+        let scene = root.join("game/scene/start.txt");
+        fs::write(&scene, "before").unwrap();
+        let mut transaction =
+            ProjectFileTransaction::begin(&root, "test", [PathBuf::from("game/scene")])
+                .await
+                .unwrap();
+        fs::write(&scene, "transaction-write").unwrap();
+
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let project_path = root.to_string_lossy().to_string();
+        let writer = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result = crate::webgal::commands::write_file_text(
+                project_path,
+                "start.txt".to_string(),
+                "concurrent-save".to_string(),
+            );
+            done_tx.send(result).unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        assert!(
+            matches!(
+                done_rx.recv_timeout(Duration::from_millis(100)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "scene save must wait for the Project transaction lock"
+        );
+        transaction.rollback().unwrap();
+        drop(transaction);
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        writer.join().unwrap();
+
+        assert_eq!(fs::read_to_string(&scene).unwrap(), "concurrent-save");
         let _ = fs::remove_dir_all(root);
     }
 }

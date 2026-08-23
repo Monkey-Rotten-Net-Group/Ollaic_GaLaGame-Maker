@@ -66,6 +66,51 @@ pub fn rename_asset_references(
     (rewritten, changed)
 }
 
+/// Remove semantic references to one asset while preserving unrelated source.
+/// Command-only references are removed with their line; dialogue voice flags
+/// are removed without deleting the dialogue itself.
+pub fn remove_asset_references(source: &str, category: &str, filename: &str) -> (String, usize) {
+    let mut changed = 0usize;
+    let mut rewritten = String::with_capacity(source.len());
+
+    for line in source.split_inclusive('\n') {
+        let reference = find_asset_references(line)
+            .into_iter()
+            .find(|reference| reference.category == category && reference.filename == filename);
+        let Some(reference) = reference else {
+            rewritten.push_str(line);
+            continue;
+        };
+
+        changed += 1;
+        if reference.command == "voice" {
+            rewritten.push_str(&remove_voice_flag(line, filename));
+        }
+    }
+
+    (rewritten, changed)
+}
+
+fn remove_voice_flag(line: &str, filename: &str) -> String {
+    let needle = format!("-{filename}");
+    let Some(flag_start) = line.find(&needle) else {
+        return line.to_string();
+    };
+    let mut remove_start = flag_start;
+    while remove_start > 0 {
+        let previous = line[..remove_start].chars().next_back().unwrap();
+        if !previous.is_whitespace() || previous == '\n' || previous == '\r' {
+            break;
+        }
+        remove_start -= previous.len_utf8();
+    }
+    format!(
+        "{}{}",
+        &line[..remove_start],
+        &line[flag_start + needle.len()..]
+    )
+}
+
 fn reference_from_node(node: &WebGalNode) -> Option<(&'static str, &'static str, String)> {
     let (command, category) = match node.cmd_type {
         CommandType::ChangeBg => ("changeBg", "background"),
@@ -145,5 +190,34 @@ mod tests {
         assert_eq!(changed, 1);
         assert!(vocal.contains("Alice:hello -intro.wav;"));
         assert_eq!(find_asset_references(&vocal)[2].filename, "intro.wav");
+    }
+
+    #[test]
+    fn removes_only_matching_semantic_references_and_preserves_dialogue() {
+        let source = concat!(
+            "changeBg:park.webp -next;\n",
+            "changeFigure:park.webp -left;\n",
+            ":park.webp is dialogue text;\n",
+            "Alice:hello -v1.wav;\n",
+        );
+
+        let (without_background, changed) =
+            remove_asset_references(source, "background", "park.webp");
+        assert_eq!(changed, 1);
+        assert!(!without_background.contains("changeBg:park.webp"));
+        assert!(without_background.contains("changeFigure:park.webp -left;"));
+        assert!(without_background.contains(":park.webp is dialogue text;"));
+
+        let (without_voice, changed) =
+            remove_asset_references(&without_background, "vocal", "v1.wav");
+        assert_eq!(changed, 1);
+        assert!(without_voice.contains("Alice:hello;"));
+        let references = find_asset_references(&without_voice);
+        assert!(!references
+            .iter()
+            .any(|reference| reference.category == "background"));
+        assert!(!references
+            .iter()
+            .any(|reference| reference.category == "vocal"));
     }
 }
