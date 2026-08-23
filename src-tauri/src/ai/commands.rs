@@ -13,6 +13,7 @@ use genai::chat::{
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -925,6 +926,15 @@ fn to_chat_messages(messages: Vec<AiMessageInput>) -> Vec<ChatMessage> {
 
 /// Single non-streaming turn used by the multi-step agent loop. Returns either
 /// the model's tool calls (to be executed by the frontend) or its final text.
+async fn run_chat_provider_with_deadline<T>(
+    deadline: Duration,
+    future: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    tokio::time::timeout(deadline, future)
+        .await
+        .map_err(|_| format!("对话请求超时（{} 毫秒）", deadline.as_millis()))?
+}
+
 #[tauri::command]
 pub async fn ai_chat_turn(
     messages: Vec<AiMessageInput>,
@@ -963,7 +973,18 @@ pub async fn ai_chat_turn(
     let endpoint = effective_endpoint(&cfg);
 
     let options = chat_debug_options();
-    match client.exec_chat(&cfg.model, request, Some(&options)).await {
+    let provider_future = async {
+        client
+            .exec_chat(&cfg.model, request, Some(&options))
+            .await
+            .map_err(|error| error.to_string())
+    };
+    match run_chat_provider_with_deadline(
+        Duration::from_millis(capability.chat_deadline_ms),
+        provider_future,
+    )
+    .await
+    {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
             let tool_calls = response
@@ -978,8 +999,7 @@ pub async fn ai_chat_turn(
             log_ai_event("chat_turn", &cfg, &endpoint, true, "turn completed");
             Ok(AiTurnResult { text, tool_calls })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Err(message) => {
             log_ai_event("chat_turn", &cfg, &endpoint, false, &message);
             Err(message)
         }

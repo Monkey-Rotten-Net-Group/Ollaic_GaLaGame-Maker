@@ -106,7 +106,14 @@ mod tests {
         let pipeline = Pipeline::with_default_agents();
         let sink = RecordingSink::new();
         let handle = pipeline
-            .create_run(&project_path, run_id, "brief", &default_recipe(), &SystemClock, &sink)
+            .create_run(
+                &project_path,
+                run_id,
+                "brief",
+                &default_recipe(),
+                &SystemClock,
+                &sink,
+            )
             .unwrap();
         ManagedRun {
             handle,
@@ -120,7 +127,9 @@ mod tests {
         let registry = RunRegistry::new();
         let path_a = std::env::temp_dir().join("ollaic_registry").join("a");
         let path_b = std::env::temp_dir().join("ollaic_registry").join("b");
-        registry.insert("run_a".to_string(), make_run("a", "run_a")).await;
+        registry
+            .insert("run_a".to_string(), make_run("a", "run_a"))
+            .await;
         assert!(registry.resolve("run_a", &path_a).await.is_ok());
         let err = registry.resolve("run_a", &path_b).await.err().unwrap();
         assert!(err.contains("belongs to project"));
@@ -130,7 +139,9 @@ mod tests {
     async fn attach_if_needed_rejects_project_mismatch() {
         let registry = RunRegistry::new();
         let path_b = std::env::temp_dir().join("ollaic_registry").join("b");
-        registry.insert("run_a".to_string(), make_run("a", "run_a")).await;
+        registry
+            .insert("run_a".to_string(), make_run("a", "run_a"))
+            .await;
         let err = registry
             .attach_if_needed("run_a", &path_b, || unreachable!())
             .await

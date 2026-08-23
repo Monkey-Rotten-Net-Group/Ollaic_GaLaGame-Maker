@@ -1,4 +1,6 @@
+use crate::project_transaction::ProjectFileTransaction;
 use crate::webgal::parser as webgal_parser;
+use crate::webgal::project_paths::ProjectPaths;
 use crate::webgal::references;
 use crate::webgal::types::CommandType;
 use base64::Engine;
@@ -341,6 +343,7 @@ fn rename_scene_asset_references(
     category: &str,
     old_name: &str,
     new_name: &str,
+    failure: AssetMutationFailure,
 ) -> Result<(), String> {
     let scene_dir = PathBuf::from(project_path).join("game").join("scene");
     if !scene_dir.exists() {
@@ -362,11 +365,78 @@ fn rename_scene_asset_references(
             updates.push((path, rewritten));
         }
     }
-    for (path, source) in updates {
+    for (index, (path, source)) in updates.into_iter().enumerate() {
         fs::write(&path, source)
             .map_err(|e| format!("无法更新场景文件 {}: {e}", path.display()))?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterScene(index))?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AssetMutationFailure {
+    Never,
+    AfterAsset,
+    #[cfg(test)]
+    AfterAssetRollbackResidual,
+    AfterReference,
+    AfterScene(usize),
+    AfterMetadata,
+}
+
+fn fail_asset_mutation(
+    configured: AssetMutationFailure,
+    current: AssetMutationFailure,
+) -> Result<(), String> {
+    #[cfg(test)]
+    let matches_rollback_residual = configured == AssetMutationFailure::AfterAssetRollbackResidual
+        && current == AssetMutationFailure::AfterAsset;
+    #[cfg(not(test))]
+    let matches_rollback_residual = false;
+    if configured == current || matches_rollback_residual {
+        Err(format!("injected asset mutation failure at {current:?}"))
+    } else {
+        Ok(())
+    }
+}
+
+fn asset_mutation_transaction_paths(
+    subdir: &str,
+    old_name: &str,
+    new_name: Option<&str>,
+    old_reference_dir: Option<&Path>,
+    new_reference_dir: Option<&Path>,
+    project_root: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let mut paths = vec![
+        PathBuf::from("game").join(subdir).join(old_name),
+        PathBuf::from("game/scene"),
+        PathBuf::from("game/config/asset-metadata.json"),
+    ];
+    if let Some(new_name) = new_name {
+        paths.push(PathBuf::from("game").join(subdir).join(new_name));
+    }
+    for reference in [old_reference_dir, new_reference_dir].into_iter().flatten() {
+        paths.push(
+            reference
+                .strip_prefix(project_root)
+                .map_err(|_| {
+                    format!(
+                        "asset reference path escapes Project: {}",
+                        reference.display()
+                    )
+                })?
+                .to_path_buf(),
+        );
+    }
+    Ok(paths)
+}
+
+fn rollback_asset_mutation(error: String, rollback: Result<(), String>) -> String {
+    match rollback {
+        Ok(()) => error,
+        Err(rollback) => format!("{error}; rollback failed: {rollback}"),
+    }
 }
 
 #[tauri::command]
@@ -538,107 +608,230 @@ pub fn save_generated_asset(
 
 /// Delete an asset file from the project.
 #[tauri::command]
-pub fn delete_asset(
+pub async fn delete_asset(
     project_path: String,
     category: String,
     filename: String,
 ) -> Result<(), String> {
+    delete_asset_inner(
+        project_path,
+        category,
+        filename,
+        AssetMutationFailure::Never,
+    )
+    .await
+}
+
+async fn delete_asset_inner(
+    project_path: String,
+    category: String,
+    filename: String,
+    failure: AssetMutationFailure,
+) -> Result<(), String> {
     validate_asset_filename(&filename)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
-    let path = PathBuf::from(&project_path)
-        .join("game")
-        .join(&subdir)
-        .join(&filename);
+    let project = ProjectPaths::open(&project_path)?;
+    let project_root = project.root();
+    let project_path = project_root
+        .to_str()
+        .ok_or("项目路径不是有效 UTF-8")?
+        .to_string();
+    let path = project_root.join("game").join(&subdir).join(&filename);
+    let reference_dir = reference_dir_for_asset(&project_path, &subdir, &filename);
+    let transaction_paths = asset_mutation_transaction_paths(
+        &subdir,
+        &filename,
+        None,
+        reference_dir.as_deref(),
+        None,
+        project_root,
+    )?;
+    let mut transaction =
+        ProjectFileTransaction::begin(project_root, "delete-asset", transaction_paths).await?;
 
-    if !path.exists() {
-        return Err(format!("文件不存在: {}", path.display()));
-    }
-
-    // Safety check: ensure path is still within the project
-    let canonical_project = PathBuf::from(&project_path)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(&project_path));
-    let canonical_target = path.canonicalize().map_err(|e| e.to_string())?;
-    if !canonical_target.starts_with(&canonical_project) {
-        return Err("不允许删除项目目录外的文件".to_string());
-    }
-
-    fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
-    if let Some(reference_dir) = reference_dir_for_asset(&project_path, &subdir, &filename) {
-        if reference_dir.exists() {
-            fs::remove_dir_all(&reference_dir)
-                .map_err(|e| format!("删除素材参考目录失败 {}: {e}", reference_dir.display()))?;
+    let mutation = (|| {
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| format!("文件不存在: {}", path.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!("素材不是项目内的常规文件: {}", path.display()));
         }
+        fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterAsset)?;
+        if let Some(reference_dir) = reference_dir {
+            if reference_dir.exists() {
+                fs::remove_dir_all(&reference_dir).map_err(|e| {
+                    format!("删除素材参考目录失败 {}: {e}", reference_dir.display())
+                })?;
+            }
+        }
+        fail_asset_mutation(failure, AssetMutationFailure::AfterReference)?;
+        delete_asset_metadata(&project_path, &subdir, &filename)?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterMetadata)
+    })();
+    if let Err(error) = mutation {
+        return Err(rollback_asset_mutation(error, transaction.rollback()));
     }
-    delete_asset_metadata(&project_path, &subdir, &filename)?;
+    if let Err(error) = transaction.prepare_commit() {
+        return Err(rollback_asset_mutation(error, transaction.rollback()));
+    }
+    transaction.commit();
     Ok(())
+}
+
+#[cfg(test)]
+async fn delete_asset_with_failure(
+    project_path: String,
+    category: String,
+    filename: String,
+    failure: AssetMutationFailure,
+) -> Result<(), String> {
+    delete_asset_inner(project_path, category, filename, failure).await
 }
 
 /// Rename an asset file.
 #[tauri::command]
-pub fn rename_asset(
+pub async fn rename_asset(
     project_path: String,
     category: String,
     old_name: String,
     new_name: String,
 ) -> Result<AssetInfo, String> {
+    rename_asset_inner(
+        project_path,
+        category,
+        old_name,
+        new_name,
+        AssetMutationFailure::Never,
+    )
+    .await
+}
+
+async fn rename_asset_inner(
+    project_path: String,
+    category: String,
+    old_name: String,
+    new_name: String,
+    failure: AssetMutationFailure,
+) -> Result<AssetInfo, String> {
     validate_asset_filename(&old_name)?;
     validate_asset_filename(&new_name)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
-    let old_path = PathBuf::from(&project_path)
-        .join("game")
-        .join(&subdir)
-        .join(&old_name);
-    let new_path = PathBuf::from(&project_path)
-        .join("game")
-        .join(&subdir)
-        .join(&new_name);
-
-    if !old_path.exists() {
-        return Err(format!("文件不存在: {}", old_path.display()));
-    }
-    if new_path.exists() {
-        return Err(format!("目标文件已存在: {}", new_path.display()));
-    }
+    let project = ProjectPaths::open(&project_path)?;
+    let project_root = project.root();
+    let project_path = project_root
+        .to_str()
+        .ok_or("项目路径不是有效 UTF-8")?
+        .to_string();
+    let old_path = project_root.join("game").join(&subdir).join(&old_name);
+    let new_path = project_root.join("game").join(&subdir).join(&new_name);
     let old_reference_dir = reference_dir_for_asset(&project_path, &subdir, &old_name);
     let new_reference_dir = reference_dir_for_asset(&project_path, &subdir, &new_name);
-    if let Some(path) = &new_reference_dir {
-        if path.exists() {
-            return Err(format!("目标素材参考目录已存在: {}", path.display()));
+    let transaction_paths = asset_mutation_transaction_paths(
+        &subdir,
+        &old_name,
+        Some(&new_name),
+        old_reference_dir.as_deref(),
+        new_reference_dir.as_deref(),
+        project_root,
+    )?;
+    let mut transaction =
+        ProjectFileTransaction::begin(project_root, "rename-asset", transaction_paths).await?;
+
+    let mutation = (|| {
+        let metadata = fs::symlink_metadata(&old_path)
+            .map_err(|_| format!("文件不存在: {}", old_path.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!("素材不是项目内的常规文件: {}", old_path.display()));
         }
+        if new_path.exists() {
+            return Err(format!("目标文件已存在: {}", new_path.display()));
+        }
+        if let Some(path) = &new_reference_dir {
+            if path.exists() {
+                return Err(format!("目标素材参考目录已存在: {}", path.display()));
+            }
+        }
+        fs::rename(&old_path, &new_path).map_err(|e| format!("重命名失败: {e}"))?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterAsset)?;
+        if let (Some(old_reference_dir), Some(new_reference_dir)) =
+            (&old_reference_dir, &new_reference_dir)
+        {
+            if old_reference_dir.exists() {
+                fs::rename(old_reference_dir, new_reference_dir).map_err(|e| {
+                    format!(
+                        "迁移素材参考目录失败 {} -> {}: {e}",
+                        old_reference_dir.display(),
+                        new_reference_dir.display()
+                    )
+                })?;
+            }
+        }
+        fail_asset_mutation(failure, AssetMutationFailure::AfterReference)?;
+        rename_scene_asset_references(&project_path, &subdir, &old_name, &new_name, failure)?;
+        rename_asset_metadata(&project_path, &subdir, &old_name, &new_name)?;
+        fail_asset_mutation(failure, AssetMutationFailure::AfterMetadata)
+    })();
+    if let Err(error) = mutation {
+        #[cfg(test)]
+        if failure == AssetMutationFailure::AfterAssetRollbackResidual {
+            let _ = transaction
+                .remove_backup_for_test(&PathBuf::from("game").join(&subdir).join(&old_name));
+        }
+        return Err(rollback_asset_mutation(error, transaction.rollback()));
     }
 
-    fs::rename(&old_path, &new_path).map_err(|e| format!("重命名失败: {e}"))?;
-    if let (Some(old_reference_dir), Some(new_reference_dir)) =
-        (old_reference_dir, new_reference_dir)
-    {
-        if old_reference_dir.exists() {
-            fs::rename(&old_reference_dir, &new_reference_dir).map_err(|e| {
-                format!(
-                    "迁移素材参考目录失败 {} -> {}: {e}",
-                    old_reference_dir.display(),
-                    new_reference_dir.display()
-                )
-            })?;
+    let info = match new_path.metadata() {
+        Ok(metadata) => AssetInfo {
+            name: new_name,
+            path: new_path.to_string_lossy().to_string(),
+            category: subdir.to_string(),
+            size: metadata.len(),
+            extension: new_path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        },
+        Err(error) => {
+            return Err(rollback_asset_mutation(
+                format!("无法读取改名后的素材 {}: {error}", new_path.display()),
+                transaction.rollback(),
+            ));
         }
+    };
+    if let Err(error) = transaction.prepare_commit() {
+        return Err(rollback_asset_mutation(error, transaction.rollback()));
     }
-    rename_scene_asset_references(&project_path, &subdir, &old_name, &new_name)?;
-    rename_asset_metadata(&project_path, &subdir, &old_name, &new_name)?;
+    transaction.commit();
+    Ok(info)
+}
 
-    let metadata = new_path.metadata().map_err(|e| e.to_string())?;
-    let ext = new_path
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
+#[cfg(test)]
+async fn rename_asset_with_failure(
+    project_path: String,
+    category: String,
+    old_name: String,
+    new_name: String,
+    failure: AssetMutationFailure,
+) -> Result<AssetInfo, String> {
+    rename_asset_inner(project_path, category, old_name, new_name, failure).await
+}
 
-    Ok(AssetInfo {
-        name: new_name,
-        path: new_path.to_string_lossy().to_string(),
-        category: subdir.to_string(),
-        size: metadata.len(),
-        extension: ext,
-    })
+#[cfg(test)]
+async fn rename_asset_with_rollback_failure(
+    project_path: String,
+    category: String,
+    old_name: String,
+    new_name: String,
+) -> Result<AssetInfo, String> {
+    rename_asset_inner(
+        project_path,
+        category,
+        old_name,
+        new_name,
+        AssetMutationFailure::AfterAssetRollbackResidual,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1079,12 +1272,12 @@ mod tests {
         );
         save_asset_metadata(tmp.to_string_lossy().to_string(), metadata).unwrap();
 
-        rename_asset(
+        block_on(rename_asset(
             tmp.to_string_lossy().to_string(),
             "background".to_string(),
             "park.webp".to_string(),
             "garden.webp".to_string(),
-        )
+        ))
         .unwrap();
 
         let renamed_reference_dir = tmp
@@ -1104,11 +1297,11 @@ mod tests {
             Some(&"Park daytime".to_string())
         );
 
-        delete_asset(
+        block_on(delete_asset(
             tmp.to_string_lossy().to_string(),
             "background".to_string(),
             "garden.webp".to_string(),
-        )
+        ))
         .unwrap();
         assert!(!renamed_reference_dir.exists());
         let metadata = load_asset_metadata(tmp.to_string_lossy().to_string()).unwrap();
@@ -1128,18 +1321,18 @@ mod tests {
         )
         .unwrap();
 
-        assert!(delete_asset(
+        assert!(block_on(delete_asset(
             tmp.to_string_lossy().to_string(),
             "background".to_string(),
             "../config.txt".to_string(),
-        )
+        ))
         .is_err());
-        assert!(rename_asset(
+        assert!(block_on(rename_asset(
             tmp.to_string_lossy().to_string(),
             "background".to_string(),
             "park.webp".to_string(),
             "../config.txt".to_string(),
-        )
+        ))
         .is_err());
         assert!(validate_asset_filename("nested\\park.webp").is_err());
         assert_eq!(
@@ -1152,5 +1345,262 @@ mod tests {
             .join("park.webp")
             .exists());
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn asset_mutation_transaction_rolls_back_rename_after_scene_failure() {
+        let tmp = std::env::temp_dir().join("ollaic_asset_mutation_rename_rollback");
+        let _ = fs::remove_dir_all(&tmp);
+        let asset_dir = tmp.join("game/background");
+        let scene_dir = tmp.join("game/scene");
+        let reference_dir = tmp.join("game/config/references/backgrounds/park.webp");
+        fs::create_dir_all(&asset_dir).unwrap();
+        fs::create_dir_all(&scene_dir).unwrap();
+        fs::create_dir_all(&reference_dir).unwrap();
+        fs::write(asset_dir.join("park.webp"), "asset").unwrap();
+        fs::write(reference_dir.join("sketch.webp"), "reference").unwrap();
+        fs::write(scene_dir.join("a.txt"), "changeBg:park.webp;\n").unwrap();
+        fs::write(scene_dir.join("b.txt"), "changeBg:park.webp;\n").unwrap();
+        let mut metadata = AssetMetadata::default();
+        metadata
+            .aliases
+            .insert("background/park.webp".to_string(), "Park".to_string());
+        write_asset_metadata(tmp.to_str().unwrap(), &metadata).unwrap();
+        let metadata_before = fs::read(tmp.join("game/config/asset-metadata.json")).unwrap();
+
+        let error = block_on(rename_asset_with_failure(
+            tmp.to_string_lossy().to_string(),
+            "background".to_string(),
+            "park.webp".to_string(),
+            "garden.webp".to_string(),
+            AssetMutationFailure::AfterScene(0),
+        ))
+        .unwrap_err();
+
+        assert!(error.contains("injected asset mutation failure"));
+        assert!(asset_dir.join("park.webp").exists());
+        assert!(!asset_dir.join("garden.webp").exists());
+        assert!(reference_dir.join("sketch.webp").exists());
+        assert!(!tmp
+            .join("game/config/references/backgrounds/garden.webp")
+            .exists());
+        assert_eq!(
+            fs::read_to_string(scene_dir.join("a.txt")).unwrap(),
+            "changeBg:park.webp;\n"
+        );
+        assert_eq!(
+            fs::read_to_string(scene_dir.join("b.txt")).unwrap(),
+            "changeBg:park.webp;\n"
+        );
+        assert_eq!(
+            fs::read(tmp.join("game/config/asset-metadata.json")).unwrap(),
+            metadata_before
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn asset_mutation_transaction_rolls_back_delete_after_metadata_failure() {
+        let tmp = std::env::temp_dir().join("ollaic_asset_mutation_delete_rollback");
+        let _ = fs::remove_dir_all(&tmp);
+        let asset = tmp.join("game/background/park.webp");
+        let reference_dir = tmp.join("game/config/references/backgrounds/park.webp");
+        fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        fs::create_dir_all(tmp.join("game/scene")).unwrap();
+        fs::create_dir_all(&reference_dir).unwrap();
+        fs::write(&asset, "asset").unwrap();
+        fs::write(reference_dir.join("sketch.webp"), "reference").unwrap();
+        let mut metadata = AssetMetadata::default();
+        metadata
+            .aliases
+            .insert("background/park.webp".to_string(), "Park".to_string());
+        write_asset_metadata(tmp.to_str().unwrap(), &metadata).unwrap();
+        let metadata_before = fs::read(tmp.join("game/config/asset-metadata.json")).unwrap();
+
+        let error = block_on(delete_asset_with_failure(
+            tmp.to_string_lossy().to_string(),
+            "background".to_string(),
+            "park.webp".to_string(),
+            AssetMutationFailure::AfterMetadata,
+        ))
+        .unwrap_err();
+
+        assert!(error.contains("injected asset mutation failure"));
+        assert_eq!(fs::read(&asset).unwrap(), b"asset");
+        assert_eq!(
+            fs::read(reference_dir.join("sketch.webp")).unwrap(),
+            b"reference"
+        );
+        assert_eq!(
+            fs::read(tmp.join("game/config/asset-metadata.json")).unwrap(),
+            metadata_before
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn asset_mutation_transactions_serialize_metadata_by_project() {
+        let tmp = std::env::temp_dir().join("ollaic_asset_mutation_concurrent");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game/background")).unwrap();
+        fs::create_dir_all(tmp.join("game/scene")).unwrap();
+        fs::write(tmp.join("game/background/a.webp"), "a").unwrap();
+        fs::write(tmp.join("game/background/b.webp"), "b").unwrap();
+        let mut metadata = AssetMetadata::default();
+        metadata
+            .aliases
+            .insert("background/a.webp".to_string(), "A".to_string());
+        metadata
+            .aliases
+            .insert("background/b.webp".to_string(), "B".to_string());
+        write_asset_metadata(tmp.to_str().unwrap(), &metadata).unwrap();
+        let project = tmp.to_string_lossy().to_string();
+
+        let (first, second) = tokio::join!(
+            rename_asset(
+                project.clone(),
+                "background".to_string(),
+                "a.webp".to_string(),
+                "a2.webp".to_string(),
+            ),
+            rename_asset(
+                project,
+                "background".to_string(),
+                "b.webp".to_string(),
+                "b2.webp".to_string(),
+            ),
+        );
+
+        first.unwrap();
+        second.unwrap();
+        let metadata = read_asset_metadata(tmp.to_str().unwrap()).unwrap();
+        assert_eq!(metadata.aliases["background/a2.webp"], "A");
+        assert_eq!(metadata.aliases["background/b2.webp"], "B");
+        assert!(tmp.join("game/background/a2.webp").exists());
+        assert!(tmp.join("game/background/b2.webp").exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn asset_mutation_transaction_reports_rollback_residual_paths() {
+        let tmp = std::env::temp_dir().join("ollaic_asset_mutation_rollback_residual");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game/background")).unwrap();
+        fs::create_dir_all(tmp.join("game/scene")).unwrap();
+        fs::write(tmp.join("game/background/park.webp"), "asset").unwrap();
+
+        let error = block_on(rename_asset_with_rollback_failure(
+            tmp.to_string_lossy().to_string(),
+            "background".to_string(),
+            "park.webp".to_string(),
+            "garden.webp".to_string(),
+        ))
+        .unwrap_err();
+
+        assert!(error.contains("rollback failed"));
+        assert!(error.contains("rollback left residual paths"));
+        assert!(error.contains("game/background/park.webp"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn asset_mutation_transaction_rolls_back_rename_at_every_stage() {
+        for (label, failure) in [
+            ("asset", AssetMutationFailure::AfterAsset),
+            ("reference", AssetMutationFailure::AfterReference),
+            ("second_scene", AssetMutationFailure::AfterScene(1)),
+            ("metadata", AssetMutationFailure::AfterMetadata),
+        ] {
+            let tmp =
+                std::env::temp_dir().join(format!("ollaic_asset_mutation_rename_stage_{label}"));
+            let _ = fs::remove_dir_all(&tmp);
+            fs::create_dir_all(tmp.join("game/background")).unwrap();
+            fs::create_dir_all(tmp.join("game/scene")).unwrap();
+            fs::create_dir_all(tmp.join("game/config/references/backgrounds/park.webp")).unwrap();
+            fs::write(tmp.join("game/background/park.webp"), "asset").unwrap();
+            fs::write(
+                tmp.join("game/config/references/backgrounds/park.webp/sketch.webp"),
+                "reference",
+            )
+            .unwrap();
+            fs::write(tmp.join("game/scene/a.txt"), "changeBg:park.webp;\n").unwrap();
+            fs::write(tmp.join("game/scene/b.txt"), "changeBg:park.webp;\n").unwrap();
+            let mut metadata = AssetMetadata::default();
+            metadata
+                .aliases
+                .insert("background/park.webp".to_string(), "Park".to_string());
+            write_asset_metadata(tmp.to_str().unwrap(), &metadata).unwrap();
+
+            block_on(rename_asset_with_failure(
+                tmp.to_string_lossy().to_string(),
+                "background".to_string(),
+                "park.webp".to_string(),
+                "garden.webp".to_string(),
+                failure,
+            ))
+            .unwrap_err();
+
+            assert!(tmp.join("game/background/park.webp").exists(), "{label}");
+            assert!(!tmp.join("game/background/garden.webp").exists(), "{label}");
+            assert!(
+                tmp.join("game/config/references/backgrounds/park.webp/sketch.webp")
+                    .exists(),
+                "{label}"
+            );
+            assert_eq!(
+                fs::read_to_string(tmp.join("game/scene/a.txt")).unwrap(),
+                "changeBg:park.webp;\n",
+                "{label}"
+            );
+            assert_eq!(
+                fs::read_to_string(tmp.join("game/scene/b.txt")).unwrap(),
+                "changeBg:park.webp;\n",
+                "{label}"
+            );
+            let metadata = read_asset_metadata(tmp.to_str().unwrap()).unwrap();
+            assert_eq!(metadata.aliases["background/park.webp"], "Park", "{label}");
+            assert!(
+                !metadata.aliases.contains_key("background/garden.webp"),
+                "{label}"
+            );
+            let _ = fs::remove_dir_all(tmp);
+        }
+    }
+
+    #[test]
+    fn asset_mutation_transaction_rolls_back_delete_at_every_stage() {
+        for (label, failure) in [
+            ("asset", AssetMutationFailure::AfterAsset),
+            ("reference", AssetMutationFailure::AfterReference),
+        ] {
+            let tmp =
+                std::env::temp_dir().join(format!("ollaic_asset_mutation_delete_stage_{label}"));
+            let _ = fs::remove_dir_all(&tmp);
+            fs::create_dir_all(tmp.join("game/background")).unwrap();
+            fs::create_dir_all(tmp.join("game/scene")).unwrap();
+            fs::create_dir_all(tmp.join("game/config/references/backgrounds/park.webp")).unwrap();
+            fs::write(tmp.join("game/background/park.webp"), "asset").unwrap();
+            fs::write(
+                tmp.join("game/config/references/backgrounds/park.webp/sketch.webp"),
+                "reference",
+            )
+            .unwrap();
+
+            block_on(delete_asset_with_failure(
+                tmp.to_string_lossy().to_string(),
+                "background".to_string(),
+                "park.webp".to_string(),
+                failure,
+            ))
+            .unwrap_err();
+
+            assert!(tmp.join("game/background/park.webp").exists(), "{label}");
+            assert!(
+                tmp.join("game/config/references/backgrounds/park.webp/sketch.webp")
+                    .exists(),
+                "{label}"
+            );
+            let _ = fs::remove_dir_all(tmp);
+        }
     }
 }

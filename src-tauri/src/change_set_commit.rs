@@ -415,10 +415,10 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
 
 fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> bool {
     match resource {
-        ResourceId::Characters => serde_json::from_value::<
-            crate::characters::types::CharactersDocument,
-        >(expected.clone())
-        .is_ok_and(|document| document.version == 1 && document.characters.is_empty()),
+        ResourceId::Characters => {
+            serde_json::from_value::<crate::characters::types::CharactersDocument>(expected.clone())
+                .is_ok_and(|document| document.version == 1 && document.characters.is_empty())
+        }
         ResourceId::ProjectMemory => {
             serde_json::from_value::<crate::webgal::project::ProjectMemory>(expected.clone())
                 .is_ok_and(|memory| {
@@ -1162,6 +1162,33 @@ mod tests {
             fs::read_to_string(project.join("game/scene/chapter1.txt")).unwrap(),
             content
         );
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn conversational_persistence_seam_executes_frontend_fixture_through_production_command() {
+        let project = temp_project("conversational_seam");
+        let scene = project.join("game/scene/chapter-2.txt");
+        let mut request: ApplyChangeSetRequest = serde_json::from_str(include_str!(
+            "../../design/src/app/integration/fixtures/create-edit-change-set.json"
+        ))
+        .unwrap();
+        request.project_path = project.to_string_lossy().into_owned();
+
+        // The frontend staging half produces this shared request without
+        // touching the Project. Confirmation is the first production command.
+        assert!(!scene.exists());
+        let result = apply_change_set(request);
+
+        assert_eq!(
+            result,
+            ApplyChangeSetResult::Committed {
+                resources: vec![ResourceId::Scene {
+                    file: "chapter-2.txt".into()
+                }]
+            }
+        );
+        assert_eq!(fs::read_to_string(&scene).unwrap(), "\nB:staged;");
         fs::remove_dir_all(project).unwrap();
     }
 

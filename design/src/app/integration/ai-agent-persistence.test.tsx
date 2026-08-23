@@ -7,6 +7,7 @@ import { createEditorCommitCoordinator } from '../components/story-editor/editor
 import type { AiTurnResult } from '../lib/ai-ipc';
 import type { ApplyChangeSetRequest, ApplyChangeSetResult } from '../lib/change-set-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
+import createEditChangeSet from './fixtures/create-edit-change-set.json';
 
 vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
@@ -18,13 +19,10 @@ vi.mock('../lib/ai-ipc', () => ({
 
 import { aiChatCancel, aiChatTurn } from '../lib/ai-ipc';
 
-type FailureMode = 'none' | 'rolled-back' | 'rollback-failed';
-
 interface HarnessProject {
   scenes: Map<string, string>;
-  writes: number;
-  failureMode: FailureMode;
   requests: ApplyChangeSetRequest[];
+  persistenceResult: ApplyChangeSetResult;
 }
 
 const invokeMock = vi.mocked(invoke);
@@ -47,61 +45,24 @@ function parseNodes(source: string): WebGalNode[] {
   }));
 }
 
-function applyAtCommandSeam(request: ApplyChangeSetRequest): ApplyChangeSetResult | Record<string, unknown> {
+function persistenceResponse(request: ApplyChangeSetRequest): ApplyChangeSetResult | Record<string, unknown> {
   project.requests.push(structuredClone(request));
-  const seen = new Set<string>();
-  const conflicts: Array<{ kind: 'scene'; file: string }> = [];
-  for (const operation of request.operations) {
-    if (operation.kind !== 'scene' && operation.kind !== 'create_scene') continue;
-    const key = operation.file.toLocaleLowerCase();
-    if (seen.has(key)) {
-      return {
-        status: 'failed-and-rolled-back',
-        failed_resource: { kind: 'scene', file: operation.file },
-        message: 'duplicate resource operation',
-      };
-    }
-    seen.add(key);
-    if (operation.kind === 'scene' && project.scenes.get(operation.file) !== operation.baseline) {
-      conflicts.push({ kind: 'scene', file: operation.file });
-    }
-    if (operation.kind === 'create_scene' && project.scenes.has(operation.file)) {
-      conflicts.push({ kind: 'scene', file: operation.file });
-    }
-  }
-  if (conflicts.length > 0) return { status: 'conflict', resources: conflicts };
-
-  const before = new Map(project.scenes);
-  for (const operation of request.operations) {
-    if (operation.kind === 'scene' || operation.kind === 'create_scene') {
-      project.scenes.set(operation.file, operation.content);
-      project.writes += 1;
-    }
-  }
-  if (project.failureMode === 'rolled-back') {
-    project.scenes = before;
+  if (project.persistenceResult.status === 'failed-and-rolled-back') {
     return {
       status: 'failed-and-rolled-back',
-      failed_resource: { kind: 'scene', file: 'start.txt' },
-      message: 'injected write failure',
+      failed_resource: project.persistenceResult.failedResource,
+      message: project.persistenceResult.message,
     };
   }
-  if (project.failureMode === 'rollback-failed') {
+  if (project.persistenceResult.status === 'rollback-failed') {
     return {
       status: 'rollback-failed',
-      failed_resource: { kind: 'scene', file: 'start.txt' },
-      residual_resources: [{ kind: 'scene', file: 'start.txt' }],
-      message: 'injected rollback failure',
+      failed_resource: project.persistenceResult.failedResource,
+      residual_resources: project.persistenceResult.residualResources,
+      message: project.persistenceResult.message,
     };
   }
-  return {
-    status: 'committed',
-    resources: request.operations.flatMap((operation) =>
-      operation.kind === 'scene' || operation.kind === 'create_scene'
-        ? [{ kind: 'scene' as const, file: operation.file }]
-        : [],
-    ),
-  };
+  return project.persistenceResult;
 }
 
 function installCommandSeam() {
@@ -124,7 +85,7 @@ function installCommandSeam() {
       return ((args as { nodes: Array<{ content: string }> }).nodes ?? []).map((node) => node.content).join('\n');
     }
     if (command === 'apply_change_set') {
-      return applyAtCommandSeam((args as { request: ApplyChangeSetRequest }).request);
+      return persistenceResponse((args as { request: ApplyChangeSetRequest }).request);
     }
     throw new Error(`unexpected command: ${command}`);
   });
@@ -162,21 +123,20 @@ async function sendAndWait(result: { current: ReturnType<typeof useAiAgent> }) {
   await waitFor(() => expect(result.current.pendingChangeSet).toBeTruthy());
 }
 
-describe('AI conversational orchestration -> Tauri change-set command seam', () => {
+describe('AI conversational orchestration -> production change-set adapter contract', () => {
   beforeEach(() => {
     localStorage.clear();
     invokeMock.mockReset();
     project = {
       scenes: new Map([['start.txt', 'A:old;']]),
-      writes: 0,
-      failureMode: 'none',
       requests: [],
+      persistenceResult: { status: 'committed', resources: [] },
     };
     installCommandSeam();
     vi.mocked(aiChatCancel).mockClear();
   });
 
-  it('keeps create/edit/read in the staging overlay, then atomically persists one resource on Accept', async () => {
+  it('keeps create/edit/read in the staging overlay, then sends the shared command fixture on Accept', async () => {
     turns(
       { text: '', toolCalls: [{ id: 'create', name: 'create_scene', arguments: { name: 'chapter-2' } }] },
       { text: '', toolCalls: [{
@@ -192,7 +152,7 @@ describe('AI conversational orchestration -> Tauri change-set command seam', () 
     const { result } = renderHook(() => useAiAgent(hookParams), { wrapper: MemoryRouter });
 
     await sendAndWait(result);
-    expect(project.writes).toBe(0);
+    expect(project.requests).toHaveLength(0);
     expect(project.scenes.has('chapter-2.txt')).toBe(false);
     const finalConversation = vi.mocked(aiChatTurn).mock.calls[3][1];
     expect(finalConversation[finalConversation.length - 1]).toMatchObject({
@@ -203,10 +163,8 @@ describe('AI conversational orchestration -> Tauri change-set command seam', () 
     await act(async () => { await result.current.acceptChange(); });
 
     expect(result.current.status).toBe('accepted');
-    expect(project.scenes.get('chapter-2.txt')).toContain('B:staged;');
     expect(project.requests).toHaveLength(1);
-    expect(project.requests[0].operations).toHaveLength(1);
-    expect(project.requests[0].operations[0]).toMatchObject({ kind: 'create_scene', file: 'chapter-2.txt' });
+    expect(project.requests[0]).toEqual(createEditChangeSet as ApplyChangeSetRequest);
   });
 
   it('preserves a user write when the staged baseline is stale', async () => {
@@ -218,20 +176,34 @@ describe('AI conversational orchestration -> Tauri change-set command seam', () 
     );
     const { result } = renderHook(() => useAiAgent(params()), { wrapper: MemoryRouter });
     await sendAndWait(result);
-    project.scenes.set('start.txt', 'AUTHOR:newer;');
+    project.persistenceResult = {
+      status: 'conflict',
+      resources: [{ kind: 'scene', file: 'start.txt' }],
+    };
 
     await act(async () => { await result.current.acceptChange(); });
 
     expect(result.current.status).toBe('conflict');
     expect(result.current.pendingChangeSet?.status).toBe('pending');
-    expect(project.scenes.get('start.txt')).toBe('AUTHOR:newer;');
+    expect(project.scenes.get('start.txt')).toBe('A:old;');
   });
 
   it.each([
     ['rolled-back', true, '已回滚全部修改'],
     ['rollback-failed', false, '部分资源可能已写入'],
   ] as const)('maps %s outcomes while retaining the pending review', async (failureMode, retryable, message) => {
-    project.failureMode = failureMode;
+    project.persistenceResult = failureMode === 'rolled-back'
+      ? {
+          status: 'failed-and-rolled-back',
+          failedResource: { kind: 'scene', file: 'start.txt' },
+          message: 'injected write failure',
+        }
+      : {
+          status: 'rollback-failed',
+          failedResource: { kind: 'scene', file: 'start.txt' },
+          residualResources: [{ kind: 'scene', file: 'start.txt' }],
+          message: 'injected rollback failure',
+        };
     turns(
       { text: '', toolCalls: [{ id: 'edit', name: 'edit_scene', arguments: {
         file: 'start.txt', patches: [{ type: 'insert', afterLine: 'end', text: 'AI:change;' }],
@@ -246,8 +218,7 @@ describe('AI conversational orchestration -> Tauri change-set command seam', () 
     expect(result.current.status).toBe('error');
     expect(result.current.error).toMatchObject({ retryable, message: expect.stringContaining(message) });
     expect(result.current.pendingChangeSet?.status).toBe('pending');
-    if (failureMode === 'rolled-back') expect(project.scenes.get('start.txt')).toBe('A:old;');
-    else expect(project.scenes.get('start.txt')).toContain('AI:change;');
+    expect(project.scenes.get('start.txt')).toBe('A:old;');
   });
 
   it('revokes a stopped run before a late tool can read or write, then allows a new owner', async () => {
@@ -263,7 +234,7 @@ describe('AI conversational orchestration -> Tauri change-set command seam', () 
       file: 'start.txt', patches: [{ type: 'insert', afterLine: 'end', text: 'B:LATE;' }],
     } }] });
     await act(async () => { await first; });
-    expect(project.writes).toBe(0);
+    expect(project.requests).toHaveLength(0);
     expect(result.current.pendingChangeSet).toBeNull();
 
     turns(

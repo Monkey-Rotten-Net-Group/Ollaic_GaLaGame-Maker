@@ -148,6 +148,11 @@ impl ProjectFileTransaction {
     fn abandon_for_recovery_test(mut self) {
         self.active = false;
     }
+
+    #[cfg(test)]
+    pub(crate) fn remove_backup_for_test(&self, relative_path: &Path) -> Result<(), String> {
+        remove_path_if_exists(&self.journal_dir.join("backup").join(relative_path))
+    }
 }
 
 impl Drop for ProjectFileTransaction {

@@ -1,6 +1,27 @@
 use super::*;
 use std::{collections::BTreeSet, fs};
 
+#[tokio::test]
+async fn chat_provider_future_uses_capability_deadline() {
+    let error = run_chat_provider_with_deadline(Duration::from_millis(10), async {
+        std::future::pending::<()>().await;
+        Ok::<_, String>(())
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error, "对话请求超时（10 毫秒）");
+}
+
+#[tokio::test]
+async fn chat_provider_future_can_complete_before_capability_deadline() {
+    let value = run_chat_provider_with_deadline(Duration::from_secs(1), async {
+        Ok::<_, String>("completed")
+    })
+    .await
+    .unwrap();
+    assert_eq!(value, "completed");
+}
+
 #[test]
 fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
     assert_eq!(
