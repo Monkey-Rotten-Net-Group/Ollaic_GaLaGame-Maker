@@ -71,6 +71,20 @@ struct PreparedWrite {
     path: PathBuf,
     baseline: Baseline,
     content: Vec<u8>,
+    parent_existed: bool,
+}
+
+impl PreparedWrite {
+    fn new(resource: ResourceId, path: PathBuf, baseline: Baseline, content: Vec<u8>) -> Self {
+        let parent_existed = path.parent().is_some_and(Path::is_dir);
+        Self {
+            resource,
+            path,
+            baseline,
+            content,
+            parent_existed,
+        }
+    }
 }
 
 enum Baseline {
@@ -224,6 +238,9 @@ fn read_snapshot(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
 }
 
 fn write_resource(write: &PreparedWrite, failures: &FailurePlan) -> std::io::Result<()> {
+    if let Some(parent) = write.path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     match write.baseline {
         Baseline::Missing => {
             write_create_new(&write.path, &write.content)?;
@@ -247,9 +264,9 @@ fn rollback(
         } else if let Some(bytes) = previous {
             crate::json_store::write_crash_safe(&write.path, &bytes)
         } else if write.path.exists() {
-            std::fs::remove_file(&write.path)
+            std::fs::remove_file(&write.path).and_then(|()| remove_created_parent(write))
         } else {
-            Ok(())
+            remove_created_parent(write)
         };
         if result.is_err() {
             residual.push(write.resource.clone());
@@ -258,11 +275,33 @@ fn rollback(
     residual
 }
 
+fn remove_created_parent(write: &PreparedWrite) -> std::io::Result<()> {
+    if write.parent_existed {
+        return Ok(());
+    }
+    let Some(parent) = write.path.parent() else {
+        return Ok(());
+    };
+    match std::fs::remove_dir(parent) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 fn target_is_project_owned(project: &Path, target: &Path) -> bool {
     let Some(parent) = target.parent() else {
         return false;
     };
-    let Ok(parent) = parent.canonicalize() else {
+    let mut existing_ancestor = parent;
+    while !existing_ancestor.exists() {
+        let Some(next) = existing_ancestor.parent() else {
+            return false;
+        };
+        existing_ancestor = next;
+    }
+    let Ok(parent) = existing_ancestor.canonicalize() else {
         return false;
     };
     if !parent.starts_with(project) {
@@ -316,41 +355,41 @@ fn prepare_write(
             if !is_scene_name(&file) {
                 return Err((ResourceId::Scene { file }, "invalid scene name".into()));
             }
-            PreparedWrite {
-                resource: ResourceId::Scene { file: file.clone() },
-                path: project.join("game/scene").join(file),
-                baseline: Baseline::Text(baseline),
-                content: content.into_bytes(),
-            }
+            PreparedWrite::new(
+                ResourceId::Scene { file: file.clone() },
+                project.join("game/scene").join(file),
+                Baseline::Text(baseline),
+                content.into_bytes(),
+            )
         }
-        ChangeSetOperation::Characters { baseline, document } => PreparedWrite {
-            resource: ResourceId::Characters,
-            path: project.join("game/config/characters.json"),
-            baseline: Baseline::Json(baseline),
-            content: serialize_json(ResourceId::Characters, &document)?,
-        },
-        ChangeSetOperation::ProjectMemory { baseline, memory } => PreparedWrite {
-            resource: ResourceId::ProjectMemory,
-            path: project.join("game/ai-memory.json"),
-            baseline: Baseline::Json(baseline),
-            content: serialize_json(ResourceId::ProjectMemory, &memory)?,
-        },
-        ChangeSetOperation::AssetMetadata { baseline, metadata } => PreparedWrite {
-            resource: ResourceId::AssetMetadata,
-            path: project.join("game/config/asset-metadata.json"),
-            baseline: Baseline::Json(baseline),
-            content: serialize_json(ResourceId::AssetMetadata, &metadata)?,
-        },
+        ChangeSetOperation::Characters { baseline, document } => PreparedWrite::new(
+            ResourceId::Characters,
+            project.join("game/config/characters.json"),
+            Baseline::Json(baseline),
+            serialize_json(ResourceId::Characters, &document)?,
+        ),
+        ChangeSetOperation::ProjectMemory { baseline, memory } => PreparedWrite::new(
+            ResourceId::ProjectMemory,
+            project.join("game/ai-memory.json"),
+            Baseline::Json(baseline),
+            serialize_json(ResourceId::ProjectMemory, &memory)?,
+        ),
+        ChangeSetOperation::AssetMetadata { baseline, metadata } => PreparedWrite::new(
+            ResourceId::AssetMetadata,
+            project.join("game/config/asset-metadata.json"),
+            Baseline::Json(baseline),
+            serialize_json(ResourceId::AssetMetadata, &metadata)?,
+        ),
         ChangeSetOperation::CreateScene { file, content } => {
             if !is_scene_name(&file) {
                 return Err((ResourceId::Scene { file }, "invalid scene name".into()));
             }
-            PreparedWrite {
-                resource: ResourceId::Scene { file: file.clone() },
-                path: project.join("game/scene").join(file),
-                baseline: Baseline::Missing,
-                content: content.into_bytes(),
-            }
+            PreparedWrite::new(
+                ResourceId::Scene { file: file.clone() },
+                project.join("game/scene").join(file),
+                Baseline::Missing,
+                content.into_bytes(),
+            )
         }
     })
 }
@@ -378,11 +417,48 @@ fn baseline_matches(write: &PreparedWrite) -> bool {
         Baseline::Text(expected) => std::fs::read_to_string(&write.path)
             .map(|current| current == *expected)
             .unwrap_or(false),
-        Baseline::Json(expected) => std::fs::read(&write.path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|current| current == *expected),
+        Baseline::Json(expected) => match std::fs::read(&write.path) {
+            Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
+                .is_ok_and(|current| current == *expected),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing_json_matches(&write.resource, expected)
+            }
+            Err(_) => false,
+        },
         Baseline::Missing => !write.path.exists(),
+    }
+}
+
+fn missing_json_matches(resource: &ResourceId, expected: &serde_json::Value) -> bool {
+    match resource {
+        ResourceId::Characters => serde_json::from_value::<
+            crate::characters::types::CharactersDocument,
+        >(expected.clone())
+        .is_ok_and(|document| document.version == 1 && document.characters.is_empty()),
+        ResourceId::ProjectMemory => {
+            serde_json::from_value::<crate::webgal::project::ProjectMemory>(expected.clone())
+                .is_ok_and(|memory| {
+                    memory.world_setting.is_empty()
+                        && memory.writing_style.is_empty()
+                        && memory.user_preferences.is_empty()
+                })
+        }
+        ResourceId::AssetMetadata => {
+            serde_json::from_value::<crate::assets::commands::AssetMetadata>(expected.clone())
+                .is_ok_and(|metadata| {
+                    metadata.aliases.is_empty()
+                        && metadata.descriptions.is_empty()
+                        && metadata.tags.is_empty()
+                        && metadata.references.is_empty()
+                        && metadata.scene_cards.is_empty()
+                        && metadata.cg_cards.is_empty()
+                        && metadata.voice_cards.is_empty()
+                        && metadata.deleted_scene_cards.is_empty()
+                        && metadata.deleted_cg_cards.is_empty()
+                        && metadata.deleted_voice_cards.is_empty()
+                })
+        }
+        _ => false,
     }
 }
 
@@ -491,6 +567,93 @@ mod tests {
             .unwrap(),
             serde_json::json!({"value":"metadata-before"})
         );
+    }
+
+    #[test]
+    fn change_set_commit_accepts_logical_empty_json_baselines_on_a_fresh_project() {
+        let project = temp_project("fresh_json_defaults");
+        let result = apply_change_set(ApplyChangeSetRequest {
+            project_path: project.to_string_lossy().into_owned(),
+            operations: vec![
+                ChangeSetOperation::Characters {
+                    baseline: serde_json::json!({"version":1,"characters":[]}),
+                    document: serde_json::json!({
+                        "version":1,
+                        "characters":[{"id":"hero","name":"Hero"}]
+                    }),
+                },
+                ChangeSetOperation::ProjectMemory {
+                    baseline: serde_json::json!({
+                        "worldSetting":"",
+                        "writingStyle":"",
+                        "userPreferences":"",
+                        "updatedAt":"fresh-client-timestamp"
+                    }),
+                    memory: serde_json::json!({
+                        "worldSetting":"Harbor",
+                        "writingStyle":"",
+                        "userPreferences":"",
+                        "updatedAt":"now"
+                    }),
+                },
+                ChangeSetOperation::AssetMetadata {
+                    baseline: serde_json::json!({}),
+                    metadata: serde_json::json!({"aliases":{"background/port.png":"Port"}}),
+                },
+            ],
+        });
+
+        assert_eq!(
+            result,
+            ApplyChangeSetResult::Committed {
+                resources: vec![
+                    ResourceId::Characters,
+                    ResourceId::ProjectMemory,
+                    ResourceId::AssetMetadata,
+                ]
+            }
+        );
+        assert!(project.join("game/config/characters.json").is_file());
+        assert!(project.join("game/ai-memory.json").is_file());
+        assert!(project.join("game/config/asset-metadata.json").is_file());
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn change_set_commit_fresh_json_failure_removes_created_files_and_directories() {
+        let project = temp_project("fresh_json_rollback");
+        let request = ApplyChangeSetRequest {
+            project_path: project.to_string_lossy().into_owned(),
+            operations: vec![
+                ChangeSetOperation::Characters {
+                    baseline: serde_json::json!({"version":1,"characters":[]}),
+                    document: serde_json::json!({"version":1,"characters":[{"id":"hero"}]}),
+                },
+                ChangeSetOperation::ProjectMemory {
+                    baseline: serde_json::json!({
+                        "worldSetting":"",
+                        "writingStyle":"",
+                        "userPreferences":"",
+                        "updatedAt":"fresh-client-timestamp"
+                    }),
+                    memory: serde_json::json!({"worldSetting":"Harbor"}),
+                },
+            ],
+        };
+
+        let result = apply_change_set_with_failures(
+            request,
+            FailurePlan::fail_write(ResourceId::ProjectMemory),
+        );
+
+        assert!(matches!(
+            result,
+            ApplyChangeSetResult::FailedAndRolledBack { .. }
+        ));
+        assert!(!project.join("game/config/characters.json").exists());
+        assert!(!project.join("game/ai-memory.json").exists());
+        assert!(!project.join("game/config").exists());
+        fs::remove_dir_all(project).unwrap();
     }
 
     #[test]
