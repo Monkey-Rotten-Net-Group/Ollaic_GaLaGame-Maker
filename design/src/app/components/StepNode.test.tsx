@@ -2,6 +2,8 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StepNode } from './StepNode';
 
+const AGENT_EXECUTOR = { type: 'agent' } as const;
+
 vi.mock('reactflow', () => ({
   Handle: ({ type, position, isConnectable, ...props }: Record<string, unknown>) => (
     <div
@@ -16,7 +18,7 @@ vi.mock('reactflow', () => ({
 
 describe('StepNode', () => {
   it('presents the step hierarchy and named connection targets', () => {
-    render(<StepNode data={{ id: 'outline', kind: 'outline', status: 'pending', attempt: 0, summary: '三章结构与共同路线' }} />);
+    render(<StepNode data={{ id: 'outline', kind: 'outline', executor: AGENT_EXECUTOR, status: 'pending', attempt: 0, summary: '三章结构与共同路线' }} />);
 
     expect(screen.getByRole('group', { name: 'outline 节点，章节大纲，待运行，未尝试' })).toBeInTheDocument();
     expect(screen.getByText('章节大纲')).toBeInTheDocument();
@@ -31,7 +33,7 @@ describe('StepNode', () => {
     render(
       <StepNode
         selected
-        data={{ id: 'scene-01', kind: 'scene', status: 'running', attempt: 2 }}
+        data={{ id: 'scene-01', kind: 'scene', executor: AGENT_EXECUTOR, status: 'running', attempt: 2 }}
       />,
     );
 
@@ -46,7 +48,7 @@ describe('StepNode', () => {
   it('clamps explicit progress and retains the failure treatment', () => {
     render(
       <StepNode
-        data={{ id: 'review', kind: 'review', status: 'failed', attempt: 3, progress: 125, selected: true }}
+        data={{ id: 'review', kind: 'review', executor: AGENT_EXECUTOR, status: 'failed', attempt: 3, progress: 125, selected: true }}
         isConnectable={false}
       />,
     );
@@ -60,7 +62,7 @@ describe('StepNode', () => {
   });
 
   it('keeps a downgraded success visibly distinct from a trusted success', () => {
-    render(<StepNode data={{ id: 'dialogist', kind: 'scene', status: 'succeeded', attempt: 1, downgraded: true }} />);
+    render(<StepNode data={{ id: 'dialogist', kind: 'scene', executor: AGENT_EXECUTOR, status: 'succeeded', attempt: 1, downgraded: true }} />);
     const node = screen.getByRole('group', { name: 'dialogist 节点，场景编排，已降级，尝试 1' });
     expect(node).toHaveAttribute('data-downgraded', 'true');
     expect(node).toHaveClass('border-amber-600/60');

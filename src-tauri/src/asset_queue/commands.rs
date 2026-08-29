@@ -2,17 +2,15 @@ use std::path::Path;
 
 use base64::Engine;
 
-use super::binder::bind_asset;
-use super::store::save_queue;
-use super::{load_queue, queue_path, AssetQueue, AssetTaskStatus};
+use super::transaction::{
+    delete_artifact, load_queue_consistent, promote_artifact, resolve_artifact,
+};
+use super::AssetQueue;
 
 #[tauri::command]
 pub fn asset_queue_get(project_path: String) -> Result<Option<AssetQueue>, String> {
     let project = Path::new(&project_path);
-    if !queue_path(project).is_file() {
-        return Ok(None);
-    }
-    load_queue(project).map(Some)
+    load_queue_consistent(project)
 }
 
 #[tauri::command]
@@ -22,7 +20,8 @@ pub fn asset_queue_preview_artifact(
     attempt: u32,
 ) -> Result<String, String> {
     let project = Path::new(&project_path);
-    let queue = load_queue(project)?;
+    let queue =
+        load_queue_consistent(project)?.ok_or_else(|| "asset queue not found".to_string())?;
     let artifact = resolve_artifact(project, &queue, &task_id, attempt)?;
     let bytes = std::fs::read(&artifact)
         .map_err(|error| format!("failed to read artifact {}: {error}", artifact.display()))?;
@@ -42,24 +41,7 @@ pub async fn asset_queue_delete_artifact(
 ) -> Result<AssetQueue, String> {
     let _guard = super::lock_queue_writes().await;
     let project = Path::new(&project_path);
-    let mut queue = load_queue(project)?;
-    let artifact = resolve_artifact(project, &queue, &task_id, attempt)?;
-    std::fs::remove_file(&artifact)
-        .map_err(|error| format!("failed to delete artifact {}: {error}", artifact.display()))?;
-    let record = queue
-        .tasks
-        .iter_mut()
-        .find(|task| task.id == task_id)
-        .and_then(|task| {
-            task.attempts
-                .iter_mut()
-                .find(|item| item.attempt == attempt)
-        })
-        .ok_or_else(|| format!("asset attempt not found: {task_id}/{attempt}"))?;
-    record.artifact = None;
-    queue.updated_at = now_ms();
-    save_queue(project, &queue)?;
-    Ok(queue)
+    delete_artifact(project, &task_id, attempt)
 }
 
 #[tauri::command]
@@ -70,76 +52,15 @@ pub async fn asset_queue_promote_artifact(
 ) -> Result<AssetQueue, String> {
     let _guard = super::lock_queue_writes().await;
     let project = Path::new(&project_path);
-    let mut queue = load_queue(project)?;
-    let task_index = queue
-        .tasks
-        .iter()
-        .position(|task| task.id == task_id)
-        .ok_or_else(|| format!("asset task not found: {task_id}"))?;
-    let selected = queue.tasks[task_index]
-        .attempts
-        .iter()
-        .find(|item| item.attempt == attempt && item.artifact.is_some())
-        .cloned()
-        .ok_or_else(|| format!("asset artifact not found: {task_id}/{attempt}"))?;
-    resolve_artifact(project, &queue, &task_id, attempt)?;
-    let mut candidate = queue.tasks[task_index].clone();
-    candidate.attempts = vec![selected];
-    candidate.used_local_fallback = candidate.attempts[0].used_local_fallback;
-    let filename = bind_asset(project, &candidate)?;
-    queue.tasks[task_index].status = AssetTaskStatus::Succeeded;
-    queue.tasks[task_index].asset_file = Some(filename);
-    queue.tasks[task_index].error = None;
-    queue.tasks[task_index].used_local_fallback = candidate.used_local_fallback;
-    queue.updated_at = now_ms();
-    save_queue(project, &queue)?;
-    Ok(queue)
-}
-
-fn resolve_artifact(
-    project: &Path,
-    queue: &AssetQueue,
-    task_id: &str,
-    attempt: u32,
-) -> Result<std::path::PathBuf, String> {
-    if task_id.is_empty()
-        || !task_id
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-    {
-        return Err(format!("invalid asset task id: {task_id}"));
-    }
-    let artifact = queue
-        .tasks
-        .iter()
-        .find(|task| task.id == task_id)
-        .and_then(|task| task.attempts.iter().find(|item| item.attempt == attempt))
-        .and_then(|item| item.artifact.as_deref())
-        .ok_or_else(|| format!("asset artifact not found: {task_id}/{attempt}"))?;
-    let root = project
-        .join(".ollaic/artifacts/assets")
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve artifact root: {error}"))?;
-    let artifact = Path::new(artifact)
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve artifact: {error}"))?;
-    if !artifact.starts_with(root.join(task_id)) || !artifact.is_file() {
-        return Err("artifact is outside the project task directory".to_string());
-    }
-    Ok(artifact)
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    promote_artifact(project, &task_id, attempt)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asset_queue::store::save_queue;
     use crate::asset_queue::types::{AssetAttempt, AssetKind, AssetTask};
+    use crate::asset_queue::AssetTaskStatus;
 
     #[tokio::test]
     async fn artifact_can_be_previewed_promoted_and_deleted() {

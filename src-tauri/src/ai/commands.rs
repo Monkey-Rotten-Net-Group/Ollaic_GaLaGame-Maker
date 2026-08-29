@@ -1,6 +1,8 @@
+use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
+use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
 use base64::Engine;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
@@ -9,8 +11,11 @@ use genai::chat::{
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
 #[cfg(test)]
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
@@ -19,6 +24,17 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
+const MEDIA_DNS_TIMEOUT_SECS: u64 = 10;
+const MAX_MEDIA_REDIRECTS: usize = 10;
+/// Hard cap on a single media download. Provider-generated images rarely exceed
+/// ~25 MB and audio clips rarely exceed ~50 MB; anything larger is almost
+/// certainly a misconfigured endpoint or an attack, so refuse to allocate the
+/// buffer before it lands in memory.
+const MAX_MEDIA_BYTES: u64 = 64 * 1024 * 1024;
+/// Allowlist of Content-Types we will actually base64-embed. The extension
+/// guesser accepts the same set, so anything else would land as an unknown
+/// file and confuse downstream tools.
+const MEDIA_ALLOWED_PREFIXES: &[&str] = &["image/", "audio/"];
 
 /// A reqwest client with the standard request timeout applied. Using this
 /// everywhere prevents media/TTS HTTP calls from hanging forever when a
@@ -268,7 +284,18 @@ pub fn get_ai_config() -> AiConfig {
 
 #[tauri::command]
 pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
+    capability_for_config(&config)?;
     config::save_config(&config)
+}
+
+/// Resolve the live provider capability for the saved config (or an override
+/// passed from the UI for preview). Re-reads from disk on every call so
+/// changes to provider, model, or `flow_step_deadline_ms` show up the moment a
+/// new Flow is created, without restarting the app.
+#[tauri::command]
+pub fn get_ai_provider_capability(config: Option<AiConfig>) -> Result<ProviderCapability, String> {
+    let config = config.unwrap_or_else(config::load_config);
+    capability_for_config(&config)
 }
 
 #[tauri::command]
@@ -660,6 +687,7 @@ fn find_audio_url(v: &serde_json::Value) -> Option<String> {
 #[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {
     validate_config_basics(&config)?;
+    capability_for_config(&config)?;
 
     let endpoint = effective_endpoint(&config);
     let request = ChatRequest::new(vec![ChatMessage::user("Reply with exactly OK.")]);
@@ -701,6 +729,7 @@ pub async fn ai_chat_stream(
 ) -> Result<(), String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    capability_for_config(&cfg)?;
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     let mut sys_text = config::default_system_prompt();
@@ -811,14 +840,20 @@ fn to_chat_messages(messages: Vec<AiMessageInput>) -> Vec<ChatMessage> {
 
 /// Single non-streaming turn used by the multi-step agent loop. Returns either
 /// the model's tool calls (to be executed by the frontend) or its final text.
-#[tauri::command]
-pub async fn ai_chat_turn(
+/// Internal helper. Not registered as a Tauri command. Callers must go
+/// through [`ai_chat_turn_owned`] so a single `run_id` is owned by the
+/// `ChatRunRegistry` and a Stop can revoke the in-flight provider work.
+pub(crate) async fn ai_chat_turn(
     messages: Vec<AiMessageInput>,
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    let capability = capability_for_config(&cfg)?;
+    if !tools.is_empty() {
+        capability.require(RequiredCapability::ChatTools)?;
+    }
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     if let Some(ctx) = character_context {
@@ -868,6 +903,31 @@ pub async fn ai_chat_turn(
     }
 }
 
+/// Public conversational entry point. Every awaited Provider turn runs
+/// through the [`ChatRunRegistry`] so a later Stop can revoke it; the
+/// unowned helper [`ai_chat_turn`] is **not** registered as a Tauri command.
+#[tauri::command]
+pub async fn ai_chat_turn_owned(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    run_id: String,
+    messages: Vec<AiMessageInput>,
+    tools: Vec<ToolDef>,
+    character_context: Option<String>,
+) -> Result<AiTurnResult, String> {
+    runs.run_cancellable(&run_id, ai_chat_turn(messages, tools, character_context))
+        .await
+}
+
+/// Frontend Stop signal. Returns `true` if a live Run was signalled, `false`
+/// if the id was already completed or never started. Idempotent.
+#[tauri::command]
+pub async fn ai_chat_cancel(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    run_id: String,
+) -> Result<bool, String> {
+    Ok(runs.cancel(&run_id).await)
+}
+
 /// Pipeline Agent entry point. `None` means no usable chat model is configured,
 /// so the caller may use an explicit local fallback. Provider failures remain
 /// errors and must not be silently downgraded.
@@ -879,12 +939,13 @@ pub(crate) async fn complete_agent_text(
     if validate_config_basics(&cfg).is_err() {
         return Ok(None);
     }
+    let capability = capability_for_config(&cfg)?;
     let request = ChatRequest::new(vec![
         ChatMessage::system(system_prompt),
         ChatMessage::user(user_prompt),
     ]);
     let endpoint = effective_endpoint(&cfg);
-    let options = if matches!(cfg.provider.as_str(), "openai" | "deepseek") {
+    let options = if capability.json_mode {
         chat_debug_options().with_response_format(ChatResponseFormat::JsonMode)
     } else {
         chat_debug_options()
@@ -2024,23 +2085,280 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("创建下载客户端失败: {e}"))?;
-    let bytes = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("下载生成媒体失败: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("读取生成媒体失败: {e}"))?;
+    // Refuse providers that have not declared they hand back usable media
+    // URLs. Otherwise a hostile or misconfigured provider can use this
+    // path to pivot the SSRF guard into a real network fetch — and a
+    // permissive `media_url_output` flag is exactly what we want to
+    // gate behind explicit acknowledgement. `AiProviderConfig` does not
+    // carry the optional `capabilities` declaration; the capability
+    // resolver falls back to the table default in that case.
+    let as_chat_config = AiConfig {
+        provider: cfg.provider.clone(),
+        model: cfg.model.clone(),
+        api_key: cfg.api_key.clone(),
+        base_url: cfg.base_url.clone(),
+        capabilities: None,
+    };
+    let capability = capability_for_config(&as_chat_config)?;
+    capability.require(RequiredCapability::MediaUrlOutput)?;
+    let bytes = fetch_media_bytes_with_policy(url, &SystemMediaDnsResolver, |_, ip| {
+        is_public_download_ip(ip)
+    })
+    .await?;
     log_provider_event(action, cfg, model, endpoint, true, "media generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
         extension: extension.to_string(),
     })
+}
+
+/// Reject SSRF-prone media download URLs: non-http(s) schemes and loopback/
+/// private/link-local/reserved hosts. A provider-returned media URL must point
+/// at a public endpoint, never the local machine or an internal network.
+fn validate_media_download_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("无效的下载 URL: {e}"))?;
+    match parsed.scheme() {
+        "https" | "http" => {}
+        other => return Err(format!("不允许的下载协议: {other}")),
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
+    if is_private_download_host(host) {
+        return Err(format!("拒绝下载内部/保留地址: {host}"));
+    }
+    Ok(())
+}
+
+fn is_private_download_host(host: &str) -> bool {
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") {
+        return true;
+    }
+    // host_str() brackets IPv6 literals; strip them before parsing.
+    let bare = lower.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return !is_public_download_ip(ip);
+    }
+    false
+}
+
+trait MediaDnsResolver: Send + Sync {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>>;
+}
+
+struct SystemMediaDnsResolver;
+
+impl MediaDnsResolver for SystemMediaDnsResolver {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let addresses = tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|error| {
+                    format!("解析媒体下载主机 {host} 失败：{error}。请检查网络后重试。")
+                })?
+                .collect::<Vec<_>>();
+            if addresses.is_empty() {
+                return Err(format!("媒体下载主机 {host} 没有可用地址，请稍后重试。"));
+            }
+            Ok(addresses)
+        })
+    }
+}
+
+async fn fetch_media_bytes_with_policy<P>(
+    initial_url: &str,
+    resolver: &dyn MediaDnsResolver,
+    allow_address: P,
+) -> Result<Vec<u8>, String>
+where
+    P: Fn(&reqwest::Url, IpAddr) -> bool,
+{
+    let mut current =
+        reqwest::Url::parse(initial_url).map_err(|error| format!("无效的下载 URL: {error}"))?;
+
+    for redirect_count in 0..=MAX_MEDIA_REDIRECTS {
+        validate_media_download_url(current.as_str())?;
+        let host = current
+            .host_str()
+            .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
+        let port = current
+            .port_or_known_default()
+            .ok_or_else(|| "下载 URL 缺少有效端口".to_string())?;
+        let bare_host = host.trim_start_matches('[').trim_end_matches(']');
+        let resolved = match bare_host.parse::<IpAddr>() {
+            Ok(ip) => vec![SocketAddr::new(ip, port)],
+            Err(_) => tokio::time::timeout(
+                Duration::from_secs(MEDIA_DNS_TIMEOUT_SECS),
+                resolver.resolve(host, port),
+            )
+            .await
+            .map_err(|_| {
+                format!(
+                    "媒体下载 DNS 解析 {host} 超时（{} 秒）。请检查网络后重试。",
+                    MEDIA_DNS_TIMEOUT_SECS
+                )
+            })??,
+        };
+        let mut public_addresses = resolved
+            .into_iter()
+            .filter(|address| allow_address(&current, address.ip()))
+            .collect::<Vec<_>>();
+        public_addresses.sort_unstable();
+        public_addresses.dedup();
+        if public_addresses.is_empty() {
+            return Err(format!("拒绝下载内部/保留地址: {host}"));
+        }
+
+        // Disable environment proxies and pin this hop's validated addresses.
+        // Otherwise a proxy or a second resolver lookup could bypass the DNS
+        // result that was just checked (DNS rebinding / TOCTOU).
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS));
+        if bare_host.parse::<IpAddr>().is_err() {
+            builder = builder.resolve_to_addrs(host, &public_addresses);
+        }
+        let client = builder
+            .build()
+            .map_err(|error| format!("创建安全下载客户端失败: {error}"))?;
+        let response = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|error| format!("下载生成媒体失败: {error}。可稍后重试。"))?;
+
+        if response.status().is_redirection() {
+            if redirect_count == MAX_MEDIA_REDIRECTS {
+                return Err("媒体下载重定向次数过多，请重试或检查供应商返回地址。".to_string());
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .ok_or_else(|| {
+                    "媒体下载返回重定向，但缺少 Location 地址。可稍后重试。".to_string()
+                })?
+                .to_str()
+                .map_err(|_| "媒体下载重定向地址不是有效文本。可稍后重试。".to_string())?;
+            current = current
+                .join(location)
+                .map_err(|error| format!("媒体下载重定向地址无效: {error}"))?;
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "媒体下载失败（HTTP {}）。可稍后重试。",
+                response.status()
+            ));
+        }
+        // Reject oversized responses before allocating the full buffer: a
+        // declared Content-Length above the cap is a hard failure; chunked
+        // / unknown-length responses are bounded by MAX_MEDIA_BYTES while
+        // streaming so the producer cannot OOM the process.
+        if let Some(declared) = response.content_length() {
+            if declared > MAX_MEDIA_BYTES {
+                return Err(format!(
+                    "媒体下载 Content-Length {} 超过上限 {} 字节",
+                    declared, MAX_MEDIA_BYTES
+                ));
+            }
+        }
+        if let Some(content_type) = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+        {
+            let mime = content_type.split(';').next().unwrap_or("").trim();
+            if !MEDIA_ALLOWED_PREFIXES
+                .iter()
+                .any(|prefix| mime.starts_with(prefix))
+            {
+                return Err(format!("媒体下载 Content-Type 不被接受: {mime}"));
+            }
+        }
+        let mut stream = response.bytes_stream();
+        let mut collected = Vec::new();
+        let mut received: u64 = 0;
+        while let Some(chunk) = stream
+            .try_next()
+            .await
+            .map_err(|error| format!("读取生成媒体失败: {error}。可稍后重试。"))?
+        {
+            // A single chunk larger than the cap (e.g. an attacker setting
+            // a huge Content-Length and never actually streaming it) would
+            // blow past the cumulative check on the next iteration, so
+            // fail fast on chunk size first.
+            if chunk.len() as u64 > MAX_MEDIA_BYTES {
+                return Err(format!(
+                    "媒体下载单个分块 {} 字节超过上限 {}",
+                    chunk.len(),
+                    MAX_MEDIA_BYTES
+                ));
+            }
+            received = received.saturating_add(chunk.len() as u64);
+            if received > MAX_MEDIA_BYTES {
+                return Err(format!("媒体下载实际大小超过上限 {} 字节", MAX_MEDIA_BYTES));
+            }
+            collected.extend_from_slice(&chunk);
+        }
+        return Ok(collected);
+    }
+
+    unreachable!("redirect loop returns at its configured bound")
+}
+
+fn is_public_download_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..=31).contains(&b))
+                || (a == 192 && b == 0 && c == 0)
+                || (a == 192 && b == 0 && c == 2)
+                || (a == 192 && b == 88 && c == 99)
+                || (a == 192 && b == 168)
+                || (a == 198 && (b == 18 || b == 19))
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113)
+                || a >= 224)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4() {
+                return is_public_download_ip(IpAddr::V4(mapped));
+            }
+            let segments = ip.segments();
+            let globally_allocated = segments[0] & 0xe000 == 0x2000;
+            let documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
+            let benchmarking = segments[0] == 0x2001 && segments[1] == 0x0002;
+            let teredo = segments[0] == 0x2001 && segments[1] == 0;
+            let orchid = segments[0] == 0x2001 && (0x0010..=0x002f).contains(&segments[1]);
+            let six_to_four = segments[0] == 0x2002;
+            let documentation_v2 = segments[0] & 0xfff0 == 0x3ff0;
+            let segment_routing = segments[0] == 0x5f00;
+            globally_allocated
+                && !documentation
+                && !benchmarking
+                && !teredo
+                && !orchid
+                && !six_to_four
+                && !documentation_v2
+                && !segment_routing
+        }
+    }
 }
 
 fn dashscope_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
@@ -2168,6 +2486,7 @@ fn log_provider_event(
         model: model.to_string(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
+        capabilities: None,
     };
     log_ai_event(action, &chat_cfg, endpoint, success, message);
 }
@@ -2380,15 +2699,15 @@ pub async fn generate_batch_tts(
     // (e.g. "vo_角色_场景_3"), so generated audio is easy for users to locate
     // instead of the opaque "vo_batch_<id>" naming.
     let stem_map: std::collections::HashMap<String, String> =
-        crate::assets::commands::read_asset_metadata(&project_path)
-            .map(|meta| {
+        crate::project_lock::with_project_lock(std::path::Path::new(&project_path), || {
+            crate::assets::commands::read_asset_metadata(&project_path).map(|meta| {
                 meta.voice_cards
                     .into_iter()
                     .filter(|(_, c)| !c.target_stem.trim().is_empty())
                     .map(|(id, c)| (id, c.target_stem))
-                    .collect()
+                    .collect::<std::collections::HashMap<_, _>>()
             })
-            .unwrap_or_default();
+        })?;
 
     for (index, item) in items.iter().enumerate() {
         let progress_start = BatchTtsProgress {
@@ -2467,25 +2786,42 @@ pub async fn generate_batch_tts(
                 };
 
                 // Update VoiceAssetCard
-                if let Ok(mut asset_meta) =
-                    crate::assets::commands::read_asset_metadata(&project_path)
-                {
-                    if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
-                        card.voice_asset = Some(asset_name.clone());
-                        // Update tags
-                        let tag_key = format!("vocal/{}", card.target_stem);
-                        let mut tags: Vec<String> =
-                            asset_meta.tags.get(&tag_key).cloned().unwrap_or_default();
-                        tags.retain(|t| !t.starts_with("status:"));
-                        tags.push("status:done".to_string());
-                        tags.retain(|t| !t.starts_with("source:"));
-                        tags.push("source:ai".to_string());
-                        asset_meta.tags.insert(tag_key, tags);
-                        let _ = crate::assets::commands::write_asset_metadata(
-                            &project_path,
-                            &asset_meta,
-                        );
-                    }
+                let metadata_update: Result<(), String> = crate::project_lock::with_project_lock(
+                    std::path::Path::new(&project_path),
+                    || {
+                        let mut asset_meta =
+                            crate::assets::commands::read_asset_metadata(&project_path)?;
+                        if let Some(card) = asset_meta.voice_cards.get_mut(&item.voice_card_id) {
+                            card.voice_asset = Some(asset_name.clone());
+                            // Update tags
+                            let tag_key = format!("vocal/{}", card.target_stem);
+                            let mut tags: Vec<String> =
+                                asset_meta.tags.get(&tag_key).cloned().unwrap_or_default();
+                            tags.retain(|t| !t.starts_with("status:"));
+                            tags.push("status:done".to_string());
+                            tags.retain(|t| !t.starts_with("source:"));
+                            tags.push("source:ai".to_string());
+                            asset_meta.tags.insert(tag_key, tags);
+                            crate::assets::commands::write_asset_metadata(
+                                &project_path,
+                                &asset_meta,
+                            )?;
+                        }
+                        Ok(())
+                    },
+                );
+                if let Err(error) = metadata_update {
+                    let err_progress = BatchTtsProgress {
+                        voice_card_id: item.voice_card_id.clone(),
+                        index,
+                        total,
+                        status: "error".to_string(),
+                        message: format!("更新音频素材信息失败: {error}"),
+                        asset_name: Some(asset_name),
+                    };
+                    let _ = app_handle.emit("batch-tts-progress", &err_progress);
+                    results.push(err_progress);
+                    continue;
                 }
 
                 let progress_done = BatchTtsProgress {

@@ -5,11 +5,11 @@
  *
  * Write tools never touch disk during the loop; they produce StagedWrite
  * payloads which this module turns into reviewable ChangeEdits (with diffs).
- * On accept the whole set is applied atomically (all-or-rollback).
+ * On accept the backend commits the whole set as one transaction and reports
+ * whether a failed commit was restored or needs manual snapshot recovery.
  */
 
-import type { AssetInfo } from './assets-ipc';
-import type { SceneAssetCard } from './assets-ipc';
+import type { AssetInfo, AssetMetadata, SceneAssetCard } from './assets-ipc';
 import type { Character } from './character-types';
 import { applyEditorPatches } from './editor-executor';
 import {
@@ -90,6 +90,14 @@ export interface PendingChangeSet {
   edits: ChangeEdit[];
 }
 
+/** In-turn staged state so create_scene/create_character are visible to later tools. */
+export interface StagingDraft {
+  /** scene file -> staged initial content ('' when the created scene starts empty). */
+  sceneFiles: Map<string, string>;
+  /** character id (tmp_ai_*) -> staged draft character. */
+  characters: Map<string, Character>;
+}
+
 /** Resources the staging functions read from (current editor state + lookups). */
 export interface StagingContext {
   currentSceneName: string;
@@ -108,6 +116,8 @@ export interface StagingContext {
   memory: ProjectMemory;
   /** Asset refs planned in the same AI turn and therefore allowed in script patches. */
   plannedAssetKeys?: Set<string>;
+  /** Read-your-writes overlay: staged creates visible to same-turn reads. */
+  draft?: StagingDraft;
 }
 
 /** A staging failure with a user-facing message (and optional missing-asset detail). */
@@ -499,11 +509,14 @@ export async function stageSceneEdit(
   const isCurrent = staged.file === ctx.currentSceneName;
   // Base content: an in-progress edit chains onto its own afterContent so that
   // multiple edit_scene calls on the same file compose.
+  const stagedContent = ctx.draft?.sceneFiles.get(staged.file);
   const beforeContent = existing
     ? existing.afterContent
     : isCurrent
       ? ctx.currentScriptSource
-      : await ctx.readSceneContent(staged.file);
+      : stagedContent !== undefined
+        ? stagedContent
+        : await ctx.readSceneContent(staged.file);
 
   // Resolve立绘意图（角色+表情）为真实文件名，再做格式/缺素材校验与应用。
   const patches = resolveFigurePatches(staged.patches, ctx);
@@ -659,6 +672,7 @@ export function stageCreateCharacterEdit(
     id: draft.id,
     colorTheme: draft.colorTheme,
   };
+  if (ctx.draft) ctx.draft.characters.set(draft.id, draft);
   return {
     kind: 'create_character',
     draft,
@@ -674,7 +688,8 @@ export function stageCharacterSpritesPlan(
   staged: Extract<StagedWrite, { tool: 'plan_character_sprites' }>,
   ctx: StagingContext,
 ): CharacterEdit {
-  const character = findCharacter(ctx.characters, staged.character);
+  const draftCharacters = ctx.draft ? Array.from(ctx.draft.characters.values()) : [];
+  const character = findCharacter([...ctx.characters, ...draftCharacters], staged.character);
   if (!character) throw new StageError(`找不到角色：${staged.character}`);
   const before = existing?.before ?? character;
   const baseAfter = existing?.after ?? before;
@@ -770,7 +785,7 @@ export function stageCharacterEdit(
   staged: Extract<StagedWrite, { tool: 'edit_character' }>,
   ctx: StagingContext,
 ): CharacterEdit {
-  const before = existing?.before ?? ctx.getCharacter(staged.id);
+  const before = existing?.before ?? ctx.draft?.characters.get(staged.id) ?? ctx.getCharacter(staged.id);
   if (!before) throw new StageError(`找不到角色 id：${staged.id}`);
   const baseAfter = existing?.after ?? before;
   const safePartial = sanitizePartial(staged.partial, CHARACTER_STRING_FIELDS, CHARACTER_STRING_ARRAY_FIELDS);
@@ -814,9 +829,13 @@ export async function stageCreateSceneEdit(
   const file = normalizeSceneFilename(staged.name);
   if (!file || file === '.txt') throw new StageError('create_scene 的场景名为空。');
   const existing = await ctx.listSceneFiles();
-  if (existing.some((f) => f.toLowerCase() === file.toLowerCase())) {
+  const stagedDuplicate = ctx.draft
+    ? Array.from(ctx.draft.sceneFiles.keys()).some((f) => f.toLowerCase() === file.toLowerCase())
+    : false;
+  if (existing.some((f) => f.toLowerCase() === file.toLowerCase()) || stagedDuplicate) {
     throw new StageError(`场景「${file}」已存在，换个名字，或用 edit_scene 修改它。`);
   }
+  if (ctx.draft) ctx.draft.sceneFiles.set(file, '');
   return { kind: 'create_scene', file, chapter: staged.chapter, outline: staged.outline };
 }
 
@@ -833,4 +852,79 @@ export function describeEdit(edit: ChangeEdit, sceneHeaders?: Record<string, Sce
 /** Whole-set summary for the assistant message bubble. */
 export function summarizeChangeSet(set: PendingChangeSet, sceneHeaders?: Record<string, SceneHeader>): string {
   return set.edits.map((e) => describeEdit(e, sceneHeaders)).join(' · ');
+}
+
+/** Inputs needed to confirm no resource changed since the change set was staged. */
+export interface ConflictCheckContext {
+  currentSceneName: string;
+  /** The live buffer for the currently-open scene (already-serialized text). */
+  currentScriptSource: string;
+  /** Re-read a non-current scene's current on-disk content. */
+  readSceneContent: (file: string) => Promise<string>;
+  /** Re-list scene files so a same-name create cannot race confirmation. */
+  listSceneFiles: () => Promise<string[]>;
+  /** Re-read canonical characters so creates/deletes cannot race confirmation. */
+  listCharacters: () => Promise<Character[]>;
+  /** Re-read asset cards so planned IDs/targets cannot overwrite live cards. */
+  loadAssetMetadata: () => Promise<AssetMetadata>;
+  /** Current project memory (after any user edits). */
+  memory: ProjectMemory;
+}
+
+/**
+ * Detect confirm-time conflicts: any edit whose underlying resource changed
+ * since the change set was staged. Scene edits compare the live buffer (current
+ * scene) or re-read on-disk content (other scenes) against the staged
+ * `beforeContent`; character and memory edits compare against their staged
+ * `before`. New scenes, characters, and asset plans are checked against live
+ * project indexes so confirmation cannot overwrite or duplicate resources.
+ */
+export async function detectConflicts(
+  set: PendingChangeSet,
+  ctx: ConflictCheckContext,
+): Promise<string[]> {
+  const conflicts: string[] = [];
+  for (const edit of set.edits) {
+    if (edit.kind === 'scene') {
+      if (edit.file === ctx.currentSceneName) {
+        const live = ctx.currentScriptSource;
+        if (live !== edit.afterContent && live !== edit.beforeContent) conflicts.push(edit.file);
+      } else {
+        const current = await ctx.readSceneContent(edit.file);
+        if (current !== edit.beforeContent) conflicts.push(edit.file);
+      }
+    } else if (edit.kind === 'create_scene') {
+      const files = await ctx.listSceneFiles();
+      if (files.some((file) => file.toLowerCase() === edit.file.toLowerCase())) {
+        conflicts.push(edit.file);
+      }
+    } else if (edit.kind === 'create_character') {
+      const expectedName = edit.draft.name.trim().toLocaleLowerCase();
+      const characters = await ctx.listCharacters();
+      if (characters.some((character) => character.name.trim().toLocaleLowerCase() === expectedName)) {
+        conflicts.push(`character:${edit.draft.name}`);
+      }
+    } else if (edit.kind === 'character') {
+      const characters = await ctx.listCharacters();
+      const current = characters.find((character) => character.id === edit.id);
+      if (!current || JSON.stringify(current) !== JSON.stringify(edit.before)) conflicts.push(edit.id);
+    } else if (edit.kind === 'asset_plan') {
+      const metadata = await ctx.loadAssetMetadata();
+      for (const card of edit.cards) {
+        const liveCards = Object.values(
+          card.category === 'cg' ? metadata.cgCards ?? {} : metadata.sceneCards ?? {},
+        );
+        const id = card.id.toLowerCase();
+        const targetStem = card.targetStem.toLowerCase();
+        if (liveCards.some((live) => (
+          live.id.toLowerCase() === id || live.targetStem.toLowerCase() === targetStem
+        ))) {
+          conflicts.push(`asset:${card.id}`);
+        }
+      }
+    } else if (edit.kind === 'memory') {
+      if (JSON.stringify(ctx.memory) !== JSON.stringify(edit.before)) conflicts.push('memory');
+    }
+  }
+  return conflicts;
 }

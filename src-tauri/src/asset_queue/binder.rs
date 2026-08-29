@@ -11,59 +11,97 @@ use super::types::{AssetKind, AssetTask};
 
 /// Promote the most recent generated artifact and bind it into playable project data.
 /// Callers serialize calls to this function because it rewrites shared JSON and scenes.
+#[cfg(test)]
 pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
-    let artifact_path = task
-        .attempts
-        .iter()
-        .rev()
-        .find_map(|attempt| attempt.artifact.as_deref())
-        .ok_or_else(|| format!("task {} has no generated artifact", task.id))?;
-    validate_stem(&task.id)?;
-    let artifact_root = project_path
-        .join(".ollaic/artifacts/assets")
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve artifact root: {error}"))?;
-    let artifact = PathBuf::from(artifact_path)
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve artifact {artifact_path}: {error}"))?;
-    if !artifact.starts_with(artifact_root.join(&task.id)) || !artifact.is_file() {
-        return Err(format!(
-            "artifact is outside task directory: {}",
-            artifact.display()
-        ));
-    }
-    let extension = artifact
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| value.chars().all(|ch| ch.is_ascii_alphanumeric()))
-        .ok_or_else(|| format!("artifact has no safe extension: {}", artifact.display()))?;
-    validate_stem(&task.target_stem)?;
-    let (filename, target) = available_target(project_path, task, extension)?;
-    let snapshots = snapshot_binding_files(project_path, &target)?;
-    let bytes = fs::read(&artifact)
-        .map_err(|error| format!("failed to read artifact {}: {error}", artifact.display()))?;
-    if task.kind == AssetKind::Figure {
-        validate_transparent_figure(extension, &bytes)?;
-    }
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create asset directory: {error}"))?;
-    }
-    crate::json_store::write_crash_safe(&target, &bytes)
-        .map_err(|error| format!("failed to promote asset {}: {error}", target.display()))?;
+    crate::project_lock::with_project_lock(project_path, || {
+        let transaction = BindingTransaction::apply_locked(project_path, task)?;
+        Ok(transaction.commit())
+    })
+}
 
-    let binding = apply_binding(project_path, task, &filename);
-    if let Err(error) = binding {
-        return match restore_binding_files(snapshots) {
-            Ok(()) => Err(error),
-            Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
-        };
+pub(crate) struct BindingTransaction {
+    filename: String,
+    snapshots: Vec<FileSnapshot>,
+}
+
+impl BindingTransaction {
+    pub(crate) fn apply_locked(project_path: &Path, task: &AssetTask) -> Result<Self, String> {
+        let artifact_path = task
+            .attempts
+            .iter()
+            .rev()
+            .find_map(|attempt| attempt.artifact.as_deref())
+            .ok_or_else(|| format!("task {} has no generated artifact", task.id))?;
+        validate_stem(&task.id)?;
+        let artifact_root = project_path
+            .join(".ollaic/artifacts/assets")
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve artifact root: {error}"))?;
+        let artifact = PathBuf::from(artifact_path)
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve artifact {artifact_path}: {error}"))?;
+        if !artifact.starts_with(artifact_root.join(&task.id)) || !artifact.is_file() {
+            return Err(format!(
+                "artifact is outside task directory: {}",
+                artifact.display()
+            ));
+        }
+        let extension = artifact
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| value.chars().all(|ch| ch.is_ascii_alphanumeric()))
+            .ok_or_else(|| format!("artifact has no safe extension: {}", artifact.display()))?;
+        validate_stem(&task.target_stem)?;
+        let (filename, target) = available_target(project_path, task, extension)?;
+        let snapshots = snapshot_binding_files(project_path, &target)?;
+        let binding = (|| {
+            let bytes = fs::read(&artifact).map_err(|error| {
+                format!("failed to read artifact {}: {error}", artifact.display())
+            })?;
+            if task.kind == AssetKind::Figure {
+                validate_transparent_figure(extension, &bytes)?;
+            }
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("failed to create asset directory: {error}"))?;
+            }
+            crate::json_store::write_crash_safe(&target, &bytes).map_err(|error| {
+                format!("failed to promote asset {}: {error}", target.display())
+            })?;
+            apply_binding(project_path, task, &filename)
+        })();
+        if let Err(error) = binding {
+            return match restore_binding_files(snapshots) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
+            };
+        }
+        Ok(Self {
+            filename,
+            snapshots,
+        })
     }
-    Ok(filename)
+
+    pub(crate) fn filename(&self) -> &str {
+        &self.filename
+    }
+
+    pub(crate) fn commit(mut self) -> String {
+        self.snapshots.clear();
+        self.filename
+    }
+
+    pub(crate) fn rollback(mut self) -> Result<(), String> {
+        restore_binding_files(std::mem::take(&mut self.snapshots))
+    }
 }
 
 /// Restore scene/config references to an already-promoted successful asset.
 pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
+    crate::project_lock::with_project_lock(project_path, || rebind_asset_locked(project_path, task))
+}
+
+fn rebind_asset_locked(project_path: &Path, task: &AssetTask) -> Result<String, String> {
     let filename = task
         .asset_file
         .as_deref()

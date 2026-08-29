@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, appendAiAgentTrace, getAiConfig, type AiChatMessage } from '../lib/ai-ipc';
+import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -12,15 +12,9 @@ import {
   type AiUploadContent,
 } from '../lib/ai-uploads-ipc';
 import { listAllAssets, type AssetInfo } from '../lib/assets-ipc';
-import {
-  extractSceneBackgroundAssets,
-  loadAssetMetadata,
-  saveAssetMetadata,
-  type AssetMetadata,
-  syncSceneCardsFromBackgrounds,
-} from '../lib/asset-metadata';
-import { createCharacter, deleteCharacter, updateCharacter } from '../lib/character-ipc';
+import { listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
+import { applyAiChangeSet, type ApplyChangeSetResult } from '../lib/ai-change-set-ipc';
 import {
   describeEdit,
   stageCharacterEdit,
@@ -34,7 +28,6 @@ import {
   stageAssetPlanEdit,
   stageSceneEdit,
   stageSceneHeaderEdit,
-  type AssetPlanEdit,
   summarizeChangeSet,
   type ChangeEdit,
   type CharacterEdit,
@@ -45,6 +38,7 @@ import {
   type SceneEdit,
   type StageError,
   type StagingContext,
+  type StagingDraft,
 } from '../lib/change-set';
 import { extractEditorResponse } from '../lib/editor-patch';
 import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
@@ -62,7 +56,7 @@ import {
   truncateContextMessages,
   type MissingAssetIssue,
 } from '../lib/story-agent';
-import { createScene, getScenePath, listScenes, parseScene, readFileText, saveScene, sceneDisplayName, updateSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import { getScenePath, listScenes, readFileText, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
@@ -74,6 +68,7 @@ export type AiPanelStatus =
   | 'accepted'
   | 'reverted'
   | 'conflict'
+  | 'missing_assets'
   | 'error';
 
 export interface AiErrorState {
@@ -82,8 +77,9 @@ export interface AiErrorState {
   retryable: boolean;
 }
 
-/** Providers with reliable native function-calling support. Others fall back. */
-const FC_PROVIDERS = new Set(['openai', 'anthropic', 'gemini', 'deepseek', 'groq', 'xai', 'cohere']);
+/** Maximum number of agent turns before the loop falls back to a closing
+ *  message. Mirrors the backend default; an explicit bounded value keeps a
+ *  misconfigured Provider from running an unbounded loop on the local UI. */
 const MAX_TURNS = 6;
 
 interface AiAgentTraceTool {
@@ -219,24 +215,6 @@ function isStageError(value: unknown): value is StageError {
   return typeof value === 'object' && value !== null && typeof (value as StageError).message === 'string';
 }
 
-function applyAssetPlanEdit(metadata: AssetMetadata, edit: AssetPlanEdit): AssetMetadata {
-  let changed = false;
-  const sceneCards = { ...(metadata.sceneCards ?? {}) };
-  const cgCards = { ...(metadata.cgCards ?? {}) };
-  for (const card of edit.cards) {
-    const { category, ...stored } = card;
-    const target = category === 'cg' ? cgCards : sceneCards;
-    const existing = target[card.id];
-    target[card.id] = {
-      ...existing,
-      ...stored,
-      imageAsset: existing?.imageAsset ?? stored.imageAsset ?? null,
-    };
-    changed = true;
-  }
-  return changed ? { ...metadata, sceneCards, cgCards } : metadata;
-}
-
 async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
   try {
     await appendAiAgentTrace(trace);
@@ -256,7 +234,6 @@ export function useAiAgent(params: UseAiAgentParams) {
     sceneHeaders,
     nodes,
     scriptSource,
-    dirty,
     characters,
     setNodes,
     setScriptSource,
@@ -282,10 +259,12 @@ export function useAiAgent(params: UseAiAgentParams) {
   } = useChatSession(projectId, INITIAL_AI_MESSAGE);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [status, setStatus] = useState<AiPanelStatus>('idle');
   const [stepLabel, setStepLabel] = useState('');
   const [pendingChangeSet, setPendingChangeSet] = useState<PendingChangeSet | null>(null);
   const [error, setError] = useState<AiErrorState | null>(null);
+  const [missingIssues, setMissingIssues] = useState<MissingAssetIssue[]>([]);
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [memory, setMemory] = useState<ProjectMemory | null>(null);
   // Reference uploads: author-attached local files the agent may read.
@@ -302,16 +281,25 @@ export function useAiAgent(params: UseAiAgentParams) {
   const cancelledRef = useRef(false);
   const streamingIdRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
-  // Snapshot of `dirty` taken right before a preview forces it to true, so a
-  // revert can restore the canvas to its real pre-preview modified state.
-  const dirtyBeforePreviewRef = useRef(false);
+  const commitInFlightRef = useRef(false);
   // Monotonic token identifying the in-flight request. A new prompt bumps this;
   // an old request's finally only touches shared UI state when its token still
   // matches, so a stale request can't clobber a newer one.
   const requestTokenRef = useRef(0);
+  /// Per-Run identity shared with the backend `ChatRunRegistry`. Every awaited
+  /// continuation funnels through [`ownsRun`] before applying any side effect
+  /// (write trace, set error/status, replace messages, execute tools, publish
+  /// Preview) so a late success or late error from Run A cannot mutate the
+  /// UI after Run B has started or after Stop has fired.
+  const currentRunIdRef = useRef<string | null>(null);
+  const ownsRun = useCallback((runId: string) => currentRunIdRef.current === runId, []);
   const currentSceneNameRef = useRef(currentSceneName);
+  const currentSceneRevisionRef = useRef(0);
   const projectPathRef = useRef(projectPath);
+  const previousProjectPathRef = useRef(projectPath);
+  const activeSessionIdRef = useRef(activeId);
   projectPathRef.current = projectPath;
+  activeSessionIdRef.current = activeId;
 
   // Sessions are shared across scenes, and a pending change set is cross-scene
   // (each edit carries its own file + before/after snapshots). So switching
@@ -320,8 +308,28 @@ export function useAiAgent(params: UseAiAgentParams) {
   // scene snapshot they started with; this ref is only used to decide whether a
   // finished preview should update the currently visible canvas.
   useLayoutEffect(() => {
+    if (currentSceneNameRef.current !== currentSceneName) currentSceneRevisionRef.current += 1;
     currentSceneNameRef.current = currentSceneName;
   }, [currentSceneName]);
+
+  useLayoutEffect(() => {
+    if (previousProjectPathRef.current === projectPath) return;
+    previousProjectPathRef.current = projectPath;
+    currentSceneRevisionRef.current += 1;
+    requestTokenRef.current += 1;
+    const staleRunId = currentRunIdRef.current;
+    currentRunIdRef.current = null;
+    cancelledRef.current = true;
+    inFlightRef.current = false;
+    streamingIdRef.current = null;
+    if (staleRunId) void aiChatCancel(staleRunId);
+    setBusy(false);
+    setStepLabel('');
+    setError(null);
+    setMissingIssues([]);
+    setPendingChangeSet(null);
+    setStatus('idle');
+  }, [projectPath]);
 
   useLayoutEffect(() => {
     setUploads([]);
@@ -458,25 +466,25 @@ export function useAiAgent(params: UseAiAgentParams) {
     const liveSceneName = currentSceneNameRef.current;
     const currentSceneEdit = edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === liveSceneName);
     if (currentSceneEdit) {
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
+      // The pending preview must NOT enter the live saveable buffer: autosave /
+      // Ctrl+S would persist un-accepted AI content to disk. The preview is
+      // rendered read-only from pendingChangeSet (aiPreviewEntries), so only
+      // view state changes here — never nodes/scriptSource/dirty.
       setSelectedNode(null);
       setShowScript(false);
-      dirtyBeforePreviewRef.current = dirty;
-      setDirty(true);
-      setSaveStatus('idle');
     }
     replaceAssistantMessage(sourceMessageId, `已生成修改预览：${summarizeChangeSet(changeSet, sceneHeaders)}`);
     setPendingChangeSet(changeSet);
     setStatus('pending');
     setError(null);
+    setMissingIssues([]);
     return true;
-  }, [dirty, sceneHeaders, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode, setShowScript]);
+  }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runAgentLoop = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
-      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      traceId: runId,
       createdAt: new Date().toISOString(),
       projectId,
       currentSceneName,
@@ -486,18 +494,25 @@ export function useAiAgent(params: UseAiAgentParams) {
       turns: [],
     };
     const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+    // A Stop or run-supersede arriving during the asset refresh must NOT leak
+    // stale assets onto the next prompt's canvas, nor count them on the trace.
+    if (!ownsRun(runId)) return;
+    if (cancelledRef.current) return;
     if (freshAssets !== assets) setAssets(freshAssets);
     trace.assetCount = freshAssets.length;
     const plannedAssetKeys = new Set<string>();
-    const stagingCtx = { ...buildStagingContext(freshAssets), plannedAssetKeys };
+    const draft: StagingDraft = { sceneFiles: new Map(), characters: new Map() };
+    const stagingCtx = { ...buildStagingContext(freshAssets), plannedAssetKeys, draft };
     const sceneEdits = new Map<string, SceneEdit>();
     const charEdits = new Map<string, CharacterEdit>();
     const createCharEdits = new Map<string, CreateCharacterEdit>();
     const createSceneEdits = new Map<string, CreateSceneEdit>();
     const assetPlanEdits: ReturnType<typeof stageAssetPlanEdit>[] = [];
+    const missingAssetsByScene = new Map<string, MissingAssetIssue[]>();
     let memEdit: MemoryEdit | undefined;
 
     const stage = async (staged: StagedWrite): Promise<{ content: string; ok: boolean; error?: string }> => {
+      const stagedSceneFile = 'file' in staged && typeof staged.file === 'string' ? staged.file : null;
       try {
         if (staged.tool === 'edit_scene') {
           sceneEdits.set(staged.file, await stageSceneEdit(sceneEdits.get(staged.file), staged, stagingCtx));
@@ -508,14 +523,20 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (staged.tool === 'create_branch') {
           const result = await stageBranchEdit(sceneEdits.get(staged.file), staged, stagingCtx);
           sceneEdits.set(staged.file, result.sourceEdit);
-          for (const edit of result.createSceneEdits) createSceneEdits.set(edit.file, edit);
+          for (const edit of result.createSceneEdits) {
+            createSceneEdits.set(edit.file, edit);
+            stagingCtx.draft?.sceneFiles.set(edit.file, edit.initialContent ?? '');
+          }
         } else if (staged.tool === 'insert_figure') {
           sceneEdits.set(staged.file, await stageFigureInsert(sceneEdits.get(staged.file), staged, stagingCtx));
         } else if (staged.tool === 'create_character') {
           const edit = stageCreateCharacterEdit(staged, stagingCtx);
           createCharEdits.set(edit.draft.name, edit);
         } else if (staged.tool === 'plan_character_sprites') {
-          const base = characters.find((c) =>
+          const draftCharacters = stagingCtx.draft
+            ? Array.from(stagingCtx.draft.characters.values())
+            : [];
+          const base = [...characters, ...draftCharacters].find((c) =>
             c.id === staged.character
             || c.name === staged.character
             || (c.aliases ?? []).includes(staged.character),
@@ -555,6 +576,9 @@ export function useAiAgent(params: UseAiAgentParams) {
         return { content: JSON.stringify({ staged: true, message: '已暂存，等待用户确认。' }), ok: true };
       } catch (e) {
         const msg = isStageError(e) ? e.message : String(e);
+        if (stagedSceneFile && isStageError(e) && e.missingAssets?.length) {
+          missingAssetsByScene.set(stagedSceneFile, e.missingAssets);
+        }
         return { content: JSON.stringify({ staged: false, error: msg }), ok: false, error: msg };
       }
     };
@@ -579,15 +603,26 @@ export function useAiAgent(params: UseAiAgentParams) {
     let finalText = '';
     const traceSummary: string[] = [];
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {
+      if (!ownsRun(runId)) return;
       if (cancelledRef.current) return;
       setStatus(turn === 0 ? 'generating' : 'tooling');
       setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
-      const res = await aiChatTurn(convo, toolDefs()).catch((e) => {
+      let res: Awaited<ReturnType<typeof aiChatTurn>>;
+      try {
+        res = await aiChatTurn(runId, convo, toolDefs());
+      } catch (e) {
+        // Late reject (e.g. Provider returned *after* Stop, or after Run B
+        // started): never write trace or surface an error unless this loop
+        // still owns the run. Dropping the rejection (rather than
+        // re-rejecting) also avoids an unhandled rejection when no one is
+        // awaiting this loop anymore.
+        if (!ownsRun(runId)) return;
         trace.outcome = 'error';
         trace.error = String(e);
         void writeAgentTrace(trace);
         throw e;
-      });
+      }
+      if (!ownsRun(runId)) return;
       if (cancelledRef.current) return;
       const turnText = res.text ?? '';
       const turnTrace: AiAgentTraceTurn = {
@@ -608,6 +643,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       convo.push({ role: 'assistant', content: turnText, toolCalls: res.toolCalls });
       const stepCalls: StepToolCall[] = [];
       for (const call of res.toolCalls) {
+        if (!ownsRun(runId)) return;
         const label = stepLabelForTool(call.name, call.arguments, sceneHeaders);
         setStepLabel(label);
         const tool = getTool(call.name);
@@ -623,7 +659,9 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else if (tool.kind === 'write') {
           try {
             const staged = (await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds })) as StagedWrite;
+            if (!ownsRun(runId)) return;
             const result = await stage(staged);
+            if (!ownsRun(runId)) return;
             resultPayload = JSON.parse(result.content) as unknown;
             content = result.content;
             ok = result.ok;
@@ -631,6 +669,7 @@ export function useAiAgent(params: UseAiAgentParams) {
           } catch (e) {
             // Arg validation failure — feed the explicit message back so the
             // model can fix its patch instead of aborting the whole loop.
+            if (!ownsRun(runId)) return;
             resultPayload = { staged: false, error: String(e) };
             content = JSON.stringify(resultPayload);
             ok = false;
@@ -639,14 +678,17 @@ export function useAiAgent(params: UseAiAgentParams) {
         } else {
           try {
             resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
+            if (!ownsRun(runId)) return;
             content = JSON.stringify(resultPayload);
           } catch (e) {
+            if (!ownsRun(runId)) return;
             resultPayload = { error: String(e) };
             content = JSON.stringify(resultPayload);
             ok = false;
             errMsg = String(e);
           }
         }
+        if (!ownsRun(runId)) return;
         turnTrace.toolCalls.push({
           id: call.id,
           name: call.name,
@@ -661,6 +703,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         traceSummary.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
         convo.push({ role: 'tool', content, toolCallId: call.id });
       }
+      if (!ownsRun(runId)) return;
       pushStep({ text: turnText || undefined, toolCalls: stepCalls });
 
       if (turn === MAX_TURNS - 1) {
@@ -669,6 +712,34 @@ export function useAiAgent(params: UseAiAgentParams) {
         finalText = turnText
           || `已达到最大工具调用轮数（${MAX_TURNS}）仍未生成可确认的修改。工具调用轨迹：${recent || '无'}。`;
       }
+    }
+
+    // A resource created in this turn has no durable identity/path yet. Fold
+    // all dependent edits into the create request so acceptance never tries to
+    // update a temporary character id or save a scene before it exists.
+    for (const [file, createEdit] of createSceneEdits) {
+      const sceneEdit = sceneEdits.get(file);
+      if (!sceneEdit) continue;
+      createSceneEdits.set(file, {
+        ...createEdit,
+        initialContent: sceneEdit.afterContent,
+        initialNodes: sceneEdit.afterNodes,
+      });
+      sceneEdits.delete(file);
+    }
+    for (const [name, createEdit] of createCharEdits) {
+      const characterEdit = charEdits.get(createEdit.draft.id);
+      if (!characterEdit) continue;
+      createCharEdits.set(name, {
+        ...createEdit,
+        draft: characterEdit.after,
+        changedFields: Array.from(new Set([
+          ...createEdit.changedFields,
+          ...characterEdit.changedFields,
+        ])),
+      });
+      charEdits.delete(createEdit.draft.id);
+      stagingCtx.draft?.characters.set(createEdit.draft.id, characterEdit.after);
     }
 
     const edits: ChangeEdit[] = [
@@ -682,6 +753,16 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStepLabel('');
     trace.finalText = finalText;
     trace.edits = edits.map((edit) => describeEdit(edit, sceneHeaders));
+    const unresolvedMissingAssets = Array.from(missingAssetsByScene.values()).flat();
+    if (unresolvedMissingAssets.length > 0) {
+      trace.outcome = 'missing_assets';
+      trace.error = '修改方案引用了素材库中不存在的文件';
+      setMissingIssues(unresolvedMissingAssets);
+      setError(null);
+      setStatus('missing_assets');
+      void writeAgentTrace(trace);
+      return;
+    }
     if (!finalizeChangeSet(edits, assistantId)) {
       // No change set: ensure a closing text is visible. If the loop produced
       // no terminal text at all, fall back to a short note (steps still shown).
@@ -703,12 +784,12 @@ export function useAiAgent(params: UseAiAgentParams) {
       trace.outcome = 'pending_preview';
     }
     void writeAgentTrace(trace);
-  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
+  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- Legacy single-shot for providers without function calling ----------
-  const runLegacyTurn = useCallback(async (text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runLegacyTurn = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[]) => {
     const trace: AiAgentTrace = {
-      traceId: `trace-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      traceId: runId,
       createdAt: new Date().toISOString(),
       projectId,
       currentSceneName,
@@ -724,21 +805,36 @@ export function useAiAgent(params: UseAiAgentParams) {
     const inlineUploads = projectPath && attachedUploadIds.length > 0
       ? await buildInlineUploadContext(projectPath, uploads, attachedUploadIds).catch(() => '')
       : '';
+    // Stop or run-supersede during attachment inlining must NOT continue into
+    // a Provider turn that will see stale uploads (or worse, use the inline
+    // text after Stop).
+    if (!ownsRun(runId)) return;
+    if (cancelledRef.current) return;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads) },
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
-    const res = await aiChatTurn(convo, []).catch((e) => {
+    let res: Awaited<ReturnType<typeof aiChatTurn>>;
+    try {
+      res = await aiChatTurn(runId, convo, []);
+    } catch (e) {
+      // Late reject: do not mutate the trace or UI for a Stopped run or for
+      // a run that has been superseded by Run B. Without this guard a
+      // Provider that does not honor transport cancellation would still
+      // flip the UI from `idle` back to `error` minutes later.
+      if (!ownsRun(runId)) return;
       trace.outcome = 'error';
       trace.error = String(e);
       void writeAgentTrace(trace);
       throw e;
-    });
+    }
+    if (!ownsRun(runId)) return;
     if (cancelledRef.current) return;
     setStepLabel('');
     trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
     const parsed = res.text ? extractEditorResponse(res.text) : null;
+    if (!ownsRun(runId)) return;
     if (!parsed) {
       trace.outcome = 'invalid_legacy_response';
       trace.finalText = res.text ?? '';
@@ -758,6 +854,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     }
     try {
       const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+      if (!ownsRun(runId)) return;
       if (freshAssets !== assets) setAssets(freshAssets);
       trace.assetCount = freshAssets.length;
       const edit = await stageSceneEdit(
@@ -765,6 +862,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
         buildStagingContext(freshAssets),
       );
+      if (!ownsRun(runId)) return;
       trace.edits = [describeEdit(edit, sceneHeaders)];
       if (!finalizeChangeSet([edit], assistantId)) {
         trace.outcome = 'no_executable_changes';
@@ -776,18 +874,29 @@ export function useAiAgent(params: UseAiAgentParams) {
         void writeAgentTrace(trace);
       }
     } catch (e) {
+      // Stage/edit failure must not flip UI to `error` once this run has
+      // been Stopped or superseded. Without this guard a Provider that
+      // races a Stop request would still write a stale trace row and a
+      // misleading error banner.
+      if (!ownsRun(runId)) return;
       const msg = isStageError(e) ? e.message : String(e);
       trace.outcome = 'stage_error';
       trace.error = msg;
       void writeAgentTrace(trace);
-      setStatus('error');
-      setError({ kind: 'other', retryable: true, message: msg });
+      if (isStageError(e) && e.missingAssets?.length) {
+        setMissingIssues(e.missingAssets);
+        setError(null);
+        setStatus('missing_assets');
+      } else {
+        setStatus('error');
+        setError({ kind: 'other', retryable: true, message: msg });
+      }
     }
-  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
+  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
-    if (!text || busy || inFlightRef.current) return;
+    if (!text || busy || inFlightRef.current || commitInFlightRef.current) return;
     if (pendingChangeSet?.status === 'pending') {
       setError({ kind: 'other', retryable: false, message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。' });
       return;
@@ -796,7 +905,15 @@ export function useAiAgent(params: UseAiAgentParams) {
     cancelledRef.current = false;
     const myToken = requestTokenRef.current + 1;
     requestTokenRef.current = myToken;
+    // Install the per-Run identity before any awaited IPC can resolve. Every
+    // awaited continuation in runAgentLoop / runLegacyTurn reads this ref
+    // through `ownsRun(runId)`. Replacing it on a new prompt instantly
+    // invalidates every in-flight callback for the previous Run, so late
+    // success/error cannot reach the UI.
+    const myRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    currentRunIdRef.current = myRunId;
     setError(null);
+    setMissingIssues([]);
     setPendingChangeSet(null);
     setStatus('generating');
 
@@ -824,12 +941,19 @@ export function useAiAgent(params: UseAiAgentParams) {
     setBusy(true);
 
     try {
-      const cfg = await getAiConfig();
-      const useFc = FC_PROVIDERS.has(cfg.provider);
-      if (useFc) await runAgentLoop(text, assistantId, sentIds);
-      else await runLegacyTurn(text, assistantId, sentIds);
+      // Ask the backend for the resolved capability rather than routing off the
+      // provider string locally, so settings (custom-endpoint tools flag, JSON
+      // mode, streaming cancellation, media URL output, Flow/media deadlines)
+      // and the conversational router share one source of truth. A Stop fired
+      // between invoke and resolve must not flip a stale result into the UI.
+      const capability = await getAiProviderCapability();
+      if (!ownsRun(myRunId)) return;
+      if (cancelledRef.current) return;
+      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds);
+      else await runLegacyTurn(myRunId, text, assistantId, sentIds);
       setRetryCount(0);
     } catch (e) {
+      if (!ownsRun(myRunId)) return;
       if (!cancelledRef.current) {
         setStatus('error');
         const classified = classifyAiError(String(e));
@@ -845,6 +969,10 @@ export function useAiAgent(params: UseAiAgentParams) {
         streamingIdRef.current = null;
         setBusy(false);
         setStepLabel('');
+        // Release the per-Run identity so any *late* Provider response that
+        // arrives after this finally runs is correctly classified as
+        // "superseded" by ownsRun checks inside runAgentLoop / runLegacyTurn.
+        if (currentRunIdRef.current === myRunId) currentRunIdRef.current = null;
       }
     }
   }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
@@ -858,121 +986,86 @@ export function useAiAgent(params: UseAiAgentParams) {
     void sendPrompt(lastRequest.prompt, lastRequest.attachmentIds);
   }, [busy, cooldown, lastRequest, retryCount, sendPrompt]);
 
-  const syncSceneBackgroundCard = useCallback(async (sceneFile: string, sceneNodes: WebGalNode[]) => {
+  const persistChangeSet = useCallback(async (
+    set: PendingChangeSet,
+    options: { force: boolean; historyNodes?: WebGalNode[] },
+  ) => {
     if (!projectPath) return;
-    try {
-      const backgroundAssets = (await listAllAssets(projectPath)).filter((asset) => asset.category === 'background');
-      const availableBackgrounds = new Set(backgroundAssets.map((asset) => asset.name));
-      const backgroundFilenames = extractSceneBackgroundAssets(sceneNodes);
-      if (backgroundFilenames.length === 0) return;
-      const metadata = await loadAssetMetadata(projectPath, projectId);
-      const next = syncSceneCardsFromBackgrounds(
-        metadata,
-        sceneFile,
-        backgroundFilenames,
-        availableBackgrounds,
-      );
-      if (next !== metadata) await saveAssetMetadata(projectPath, next);
-    } catch (e) {
-      console.warn('[asset] sync scene background card failed:', e);
-    }
-  }, [projectId, projectPath]);
-
-  // Persist all edits atomically (all-or-rollback). No conflict guard — callers
-  // decide whether the current scene's live buffer is allowed to differ.
-  const persistChangeSet = useCallback(async (set: PendingChangeSet) => {
-    if (!projectPath) return;
+    const operationProjectPath = projectPath;
+    const operationSessionId = activeId;
+    const sceneRevision = currentSceneRevisionRef.current;
     const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    // Create scenes last so a failure in earlier edits never leaves an orphan
-    // file (no delete_scene IPC to roll it back with). New characters can be
-    // deleted during rollback, so they do not need special ordering.
-    const ordered = [...set.edits].sort((a, b) => (a.kind === 'create_scene' ? 1 : 0) - (b.kind === 'create_scene' ? 1 : 0));
-    let createdScene = false;
-    let changedCharacters = false;
-    const applied: ChangeEdit[] = [];
-    const createdCharacterIds = new Map<CreateCharacterEdit, string>();
-    const assetMetadataBefore = new Map<AssetPlanEdit, AssetMetadata>();
+    let result: ApplyChangeSetResult;
     try {
-      for (const edit of ordered) {
-        if (edit.kind === 'scene') {
-          const path = await getScenePath(projectPath, edit.file);
-          await saveScene(path, edit.afterNodes);
-          await syncSceneBackgroundCard(edit.file, edit.afterNodes);
-        } else if (edit.kind === 'create_character') {
-          const saved = await createCharacter(projectPath, edit.draft);
-          createdCharacterIds.set(edit, saved.id);
-          changedCharacters = true;
-        } else if (edit.kind === 'character') {
-          await updateCharacter(projectPath, edit.after);
-          changedCharacters = true;
-        } else if (edit.kind === 'memory') {
-          await saveProjectMemory(projectPath, edit.after);
-          setMemory(edit.after);
-        } else if (edit.kind === 'asset_plan') {
-          const before = await loadAssetMetadata(projectPath, projectId);
-          const after = applyAssetPlanEdit(before, edit);
-          assetMetadataBefore.set(edit, before);
-          if (after !== before) await saveAssetMetadata(projectPath, after);
-        } else {
-          // create_scene: make the file, then set its header if provided.
-          await createScene(projectPath, edit.file);
-          if (edit.chapter || edit.outline) {
-            const path = await getScenePath(projectPath, edit.file);
-            await updateSceneHeader(path, { chapter: edit.chapter, outline: edit.outline });
-          }
-          if (edit.initialNodes) {
-            const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.initialNodes);
-            await syncSceneBackgroundCard(edit.file, edit.initialNodes);
-          }
-          createdScene = true;
-        }
-        applied.push(edit);
-      }
+      result = await applyAiChangeSet(
+        operationProjectPath,
+        set,
+        { file: currentSceneName, content: scriptSource },
+        options.force,
+      );
     } catch (e) {
-      // Roll back everything already written, in reverse order. create_scene runs
-      // last, so if we're here it never succeeded — nothing to delete.
-      for (const edit of applied.reverse()) {
-        try {
-          if (edit.kind === 'scene') {
-            const path = await getScenePath(projectPath, edit.file);
-            await saveScene(path, edit.beforeNodes);
-          } else if (edit.kind === 'create_character') {
-            const savedId = createdCharacterIds.get(edit);
-            if (savedId) await deleteCharacter(projectPath, savedId);
-          } else if (edit.kind === 'character') {
-            await updateCharacter(projectPath, edit.before);
-          } else if (edit.kind === 'memory') {
-            await saveProjectMemory(projectPath, edit.before);
-            setMemory(edit.before);
-          } else if (edit.kind === 'asset_plan') {
-            const before = assetMetadataBefore.get(edit);
-            if (before) await saveAssetMetadata(projectPath, before);
-          }
-        } catch { /* best-effort rollback */ }
-      }
+      if (projectPathRef.current !== operationProjectPath || activeSessionIdRef.current !== operationSessionId) return;
       setStatus('error');
-      setError({ kind: 'other', retryable: false, message: `落盘失败，已回滚全部修改：${String(e)}` });
-      setPendingChangeSet({ ...set, status: 'failed' });
+      setError({
+        kind: 'other',
+        retryable: true,
+        message: `无法确认修改是否提交成功。请重新打开项目核对磁盘内容后再重试：${String(e)}`,
+      });
       return;
     }
 
-    if (currentSceneEdit) {
-      pushHistory(currentSceneEdit.beforeNodes);
+    if (projectPathRef.current !== operationProjectPath || activeSessionIdRef.current !== operationSessionId) return;
+
+    if (result.outcome === 'conflict') {
+      setStatus('conflict');
+      return;
+    }
+    if (result.outcome === 'failed') {
+      setStatus('error');
+      if (result.recovery.status === 'not_needed') {
+        setError({
+          kind: 'other',
+          retryable: true,
+          message: `修改在「${result.resource}」处提交前失败，项目尚未写入。请检查该资源后重试：${result.message}`,
+        });
+        return;
+      }
+      setPendingChangeSet({ ...set, status: 'failed' });
+      if (result.recovery.status === 'restored') {
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: `修改在「${result.resource}」处写入失败，项目已恢复到提交前状态。请排除写入问题后重新生成修改：${result.message}`,
+        });
+      } else {
+        setError({
+          kind: 'other',
+          retryable: false,
+          message: `修改在「${result.resource}」处写入失败，自动恢复也失败，项目可能只写入了一部分。恢复快照「${result.recovery.snapshotId}」已保留；请先在快照管理中恢复它。写入错误：${result.message}；恢复错误：${result.recovery.message}`,
+        });
+      }
+      return;
+    }
+
+    if (currentSceneEdit && currentSceneRevisionRef.current === sceneRevision) {
+      pushHistory(options.historyNodes ?? currentSceneEdit.beforeNodes);
       setNodes(currentSceneEdit.afterNodes);
       setScriptSource(currentSceneEdit.afterContent);
       setSelectedNode(null);
       setDirty(false);
       setSaveStatus('saved');
     }
-    if (createdScene) onScenesChanged?.();
-    if (changedCharacters) onCharactersChanged?.();
+    if (set.edits.some((edit) => edit.kind === 'create_scene')) onScenesChanged?.();
+    if (set.edits.some((edit) => edit.kind === 'character' || edit.kind === 'create_character')) onCharactersChanged?.();
+    const memoryEdit = set.edits.find((edit): edit is MemoryEdit => edit.kind === 'memory');
+    if (memoryEdit) setMemory(memoryEdit.after);
     replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
       diff: currentSceneEdit?.diff,
     });
     setPendingChangeSet({ ...set, status: 'accepted' });
     setStatus('accepted');
   }, [
+    activeId,
     currentSceneName,
     sceneHeaders,
     onScenesChanged,
@@ -985,57 +1078,45 @@ export function useAiAgent(params: UseAiAgentParams) {
     setSaveStatus,
     setScriptSource,
     setSelectedNode,
-    syncSceneBackgroundCard,
+    scriptSource,
   ]);
+
+  const commitChangeSet = useCallback(async (
+    set: PendingChangeSet,
+    options: { force: boolean; historyNodes?: WebGalNode[] },
+  ) => {
+    if (commitInFlightRef.current) return;
+    commitInFlightRef.current = true;
+    setCommitting(true);
+    try {
+      await persistChangeSet(set, options);
+    } finally {
+      commitInFlightRef.current = false;
+      setCommitting(false);
+    }
+  }, [persistChangeSet]);
 
   const acceptChange = useCallback(async () => {
     if (!pendingChangeSet || pendingChangeSet.status !== 'pending' || !projectPath) return;
-    // Conflict guard only applies when the edited scene is the one open now.
-    // If the request finished while the user was on another scene, the buffer
-    // may still be the original content; accepting should still apply the
-    // preview. Anything else means the user changed the scene after staging.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (
-      currentSceneEdit &&
-      scriptSource !== currentSceneEdit.afterContent &&
-      scriptSource !== currentSceneEdit.beforeContent
-    ) {
-      setStatus('conflict');
-      return;
-    }
-    await persistChangeSet(pendingChangeSet);
-  }, [currentSceneName, pendingChangeSet, persistChangeSet, projectPath, scriptSource]);
+    await commitChangeSet(pendingChangeSet, { force: false });
+  }, [commitChangeSet, pendingChangeSet, projectPath]);
 
   const revertChange = useCallback(() => {
-    if (!pendingChangeSet) return;
-    // Only restore the live canvas if the edited scene is the one open now.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (currentSceneEdit) {
-      setNodes(currentSceneEdit.beforeNodes);
-      setScriptSource(currentSceneEdit.beforeContent);
-      setSelectedNode(null);
-      setDirty(dirtyBeforePreviewRef.current);
-      setSaveStatus('idle');
-    }
+    if (!pendingChangeSet || commitInFlightRef.current) return;
+    // The preview never entered the live buffer (see finalizeChangeSet), so
+    // rejecting only marks the set reverted — no buffer/disk restore needed.
     replaceAssistantMessage(pendingChangeSet.sourceMessageId, `已拒绝：${summarizeChangeSet(pendingChangeSet, sceneHeaders)}`);
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('reverted');
-  }, [currentSceneName, sceneHeaders, pendingChangeSet, replaceAssistantMessage, setDirty, setNodes, setSaveStatus, setScriptSource, setSelectedNode]);
+  }, [sceneHeaders, pendingChangeSet, replaceAssistantMessage]);
 
   const forceApplyChange = useCallback(async () => {
     if (!pendingChangeSet) return;
-    // User chose to overwrite their manual edits with the AI preview.
-    const currentSceneEdit = pendingChangeSet.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
-    if (currentSceneEdit) {
-      pushHistory(nodes);
-      setNodes(currentSceneEdit.afterNodes);
-      setScriptSource(currentSceneEdit.afterContent);
-    }
-    await persistChangeSet(pendingChangeSet);
-  }, [currentSceneName, nodes, pendingChangeSet, persistChangeSet, pushHistory, setNodes, setScriptSource]);
+    await commitChangeSet(pendingChangeSet, { force: true, historyNodes: nodes });
+  }, [commitChangeSet, nodes, pendingChangeSet]);
 
   const regenerateAfterConflict = useCallback(() => {
-    if (!pendingChangeSet) return;
+    if (!pendingChangeSet || commitInFlightRef.current) return;
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('idle');
     setInput('请基于我当前最新的脚本内容，重新生成一个不覆盖我手动修改的方案。');
@@ -1045,34 +1126,49 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (projectId) navigate(`/editor/${projectId}/assets`);
   }, [navigate, projectId]);
 
+  const useFallbackAssets = useCallback(() => {
+    setMissingIssues([]);
+    setError(null);
+    setStatus('idle');
+    void sendPrompt('请把缺失素材替换为素材库中已有的同类素材，然后重新生成修改方案。');
+  }, [sendPrompt]);
+
+  const retryWithExistingAssets = useCallback(() => {
+    setMissingIssues([]);
+    setError(null);
+    setStatus('idle');
+    setInput(lastRequest?.prompt ?? '');
+  }, [lastRequest]);
+
   // Reset transient UI state shared by all session-switching actions.
   const resetTransient = useCallback(() => {
     if (pendingChangeSet?.status === 'pending') revertChange();
     setInput('');
     setError(null);
+    setMissingIssues([]);
     setStatus('idle');
     setPendingChangeSet(null);
   }, [pendingChangeSet, revertChange]);
 
   const startNewSession = useCallback(() => {
-    if (busy) return;
+    if (busy || committing) return;
     resetTransient();
     newSession();
-  }, [busy, newSession, resetTransient]);
+  }, [busy, committing, newSession, resetTransient]);
 
   const selectSession = useCallback((id: string) => {
-    if (busy) return;
+    if (busy || committing) return;
     resetTransient();
     switchSession(id);
-  }, [busy, resetTransient, switchSession]);
+  }, [busy, committing, resetTransient, switchSession]);
 
   // Deletion confirmation and rename input are handled by in-app dialogs in the
   // UI layer (Tauri has no native prompt/confirm command). These just apply.
   const removeSession = useCallback((id: string) => {
-    if (busy) return;
+    if (busy || committing) return;
     if (id === activeId) resetTransient();
     deleteSession(id);
-  }, [activeId, busy, deleteSession, resetTransient]);
+  }, [activeId, busy, committing, deleteSession, resetTransient]);
 
   // --- Reference uploads ---------------------------------------------------
   // Import is per-file so one rejected file (unsupported type, too large,
@@ -1164,6 +1260,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     const stoppedId = streamingIdRef.current;
     streamingIdRef.current = null;
     inFlightRef.current = false;
+    // Revoke the active Run on the backend first; local ownership is also
+    // flipped so any later Provider response (whether the transport honored
+    // cancellation or not) is dropped by `ownsRun` checks before mutating UI.
+    const stoppingRunId = currentRunIdRef.current;
+    currentRunIdRef.current = null;
+    if (stoppingRunId) {
+      void aiChatCancel(stoppingRunId);
+    }
     if (stoppedId) {
       setMessages(prev => prev.map(message => (message.id === stoppedId ? { ...message, stopped: true } : message)));
     }
@@ -1177,10 +1281,12 @@ export function useAiAgent(params: UseAiAgentParams) {
     input,
     setInput,
     busy,
+    committing,
     status,
     stepLabel,
     pendingChangeSet,
     error,
+    missingIssues,
     cooldown,
     hasAssetTruncation: hasAssetContextTruncation(assets),
     memory,
@@ -1207,7 +1313,9 @@ export function useAiAgent(params: UseAiAgentParams) {
     revertChange,
     forceApplyChange,
     regenerateAfterConflict,
+    useFallbackAssets,
     openAssets,
+    retryWithExistingAssets,
     retry,
     saveMemory,
     stop,

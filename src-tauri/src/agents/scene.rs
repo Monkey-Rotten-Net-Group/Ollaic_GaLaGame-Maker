@@ -8,7 +8,7 @@ use crate::story_plan::types::{
 };
 
 use super::router::contract_error;
-use super::{Agent, AgentContext, AgentError, AgentOutput, SceneScript};
+use super::{Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload, SceneScript};
 
 /// Deterministically compiles structured Dialogist output into editable WebGAL.
 pub struct SceneAgent;
@@ -110,10 +110,7 @@ impl Agent for SceneAgent {
                     content,
                 });
             }
-            Ok(AgentOutput {
-                scenes: Some(scripts),
-                ..AgentOutput::default()
-            })
+            Ok(AgentOutput::new(AgentOutputPayload::Scenes(scripts)))
         })
     }
 }
@@ -415,6 +412,7 @@ mod tests {
         ];
         let agent = SceneAgent;
         let ctx = AgentContext {
+            chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
             synopsis: "",
@@ -449,7 +447,9 @@ mod tests {
             ],
             allow_local_fallback: true,
         };
-        let scripts = agent.run(&ctx).await.unwrap().scenes.unwrap();
+        let AgentOutputPayload::Scenes(scripts) = agent.run(&ctx).await.unwrap().payload else {
+            panic!("Scene Agent must return scene files")
+        };
         assert_eq!(scripts.len(), 2);
         assert!(scripts[0].content.contains("林夏:你终于来了。;"));
         assert!(scripts[0]

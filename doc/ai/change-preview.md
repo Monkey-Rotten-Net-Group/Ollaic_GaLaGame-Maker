@@ -1,6 +1,6 @@
 # 修改预览与应用
 
-AI 的所有写操作不会直接改动磁盘,而是聚合成一个**待确认变更集(PendingChangeSet)**,由用户在卡片中预览、同意或拒绝后才原子应用。
+AI 的所有写操作不会直接改动磁盘,而是聚合成一个**待确认变更集(PendingChangeSet)**,由用户在卡片中预览、同意或拒绝。确认后,前端通过一个后端命令提交整个变更集。
 
 ## 变更集聚合
 
@@ -15,7 +15,7 @@ AI 的所有写操作不会直接改动磁盘,而是聚合成一个**待确认�
 
 ## 同意 / 拒绝 / 冲突
 
-- **同意**:`acceptChange` 触发原子落盘。
+- **同意**:`acceptChange` 把类型化变更集交给后端。后端在项目锁内重新检查冲突并提交;前端仅在后端确认成功后更新画布、历史和内存状态。
 - **拒绝**:`revertChange` 丢弃暂存。
 - **冲突**:若在变更待确认期间用户手动改了当前场景,会出现冲突卡 `ConflictCard`,提供三选项:保留手动修改 / 应用 AI(覆盖)/ 基于最新状态重新生成(`regenerateAfterConflict` 会预填提示词)。
 
@@ -29,13 +29,29 @@ AI 的所有写操作不会直接改动磁盘,而是聚合成一个**待确认�
 AI 生成的修改是以行为单位的补丁（`EditorPatch`）。为了防止在用户打字和 AI 响应并行时造成的行号漂移问题，编辑器引入了**基于锚点的执行引擎**（`editor-executor.ts`）。
 该引擎在应用补丁时不仅依赖于 `startLine`/`endLine`，还会利用 `anchorText` 结合上下文自动寻找匹配的目标行。如果精确行号无法匹配，引擎会在行号前后容错搜索相同的 `anchorText` 从而解决跨端并发写入引发的覆盖错行问题。
 
-## 原子落盘
+## 原子落盘与恢复
 
-`persistChangeSet` 按「场景 → 角色 → 记忆」顺序写入;任一步失败则回滚之前的修改;新建场景(会产生新文件)放在最后,避免失败时残留孤儿文件。
-- 实现:`persistChangeSet`(`useAiAgent.ts`)。
+`apply_ai_change_set` 是变更集提交的唯一边界。它在同一把项目锁内完成以下流程:
+
+```text
+重新读取冲突基线 -> 创建项目恢复快照 -> 写入全部资源 -> 删除恢复快照
+                                  |
+                                  +-- 任一步失败 -> 恢复快照
+```
+
+场景、角色、项目记忆、素材元数据和新建场景使用类型化请求,不通过松散 JSON 对象传递。场景写入产生的背景素材卡也在事务内同步。现有的对应独立写命令复用同一把项目锁,避免它们插入冲突检查与提交之间。
+
+后端返回三类结果:
+
+- `applied`:全部资源已提交。此时前端才更新可保存的编辑缓冲。
+- `conflict`:资源已在预览后变化,磁盘未写入。普通同意会停在冲突卡;强制应用只跳过冲突检查,不会提前修改画布。
+- `failed`:同时说明失败资源和恢复状态。`not_needed` 表示提交前失败、项目未写入;`restored` 表示项目已恢复到提交前状态;`recovery.failed` 表示可能存在部分写入,自动恢复快照会保留并显示其 ID,用户应先在快照管理中手动恢复。
+
+实现入口:`src-tauri/src/ai/change_set.rs` 中的 `apply_ai_change_set`,前端调用位于 `design/src/app/lib/ai-change-set-ipc.ts`。
 
 ## 相关源码
 - `design/src/app/lib/change-set.ts`、`design/src/app/lib/editor-patch.ts`、`design/src/app/lib/editor-executor.ts`（锚点定位与补丁执行）
 - `design/src/app/hooks/useAiAgent.ts`(`finalizeChangeSet` / `acceptChange` / `revertChange` / `forceApplyChange` / `persistChangeSet`)
+- `src-tauri/src/ai/change_set.rs`(`apply_ai_change_set`)
 - `design/src/app/components/AiPendingCard.tsx`、`AiStatusCard.tsx`、`MiniNodeCard.tsx`、`PreviewNodeCard.tsx`
 - `design/src/app/lib/node-diff.ts`(节点级 diff)

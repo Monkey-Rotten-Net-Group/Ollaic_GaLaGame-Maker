@@ -31,20 +31,15 @@ impl AssetKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AssetTaskStatus {
+    #[default]
     Pending,
     Running,
     Retrying,
     Succeeded,
     Failed,
-}
-
-impl Default for AssetTaskStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

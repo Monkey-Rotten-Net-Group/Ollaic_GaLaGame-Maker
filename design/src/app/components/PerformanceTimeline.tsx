@@ -1,9 +1,5 @@
 import { useMemo } from 'react';
-import {
-  Music,
-  Image as ImageIcon,
-  MessageCircle,
-} from 'lucide-react';
+import { MessageCircle } from 'lucide-react';
 import type { WebGalNode } from '../lib/webgal-types';
 import { isMetadataComment } from '../lib/webgal-types';
 

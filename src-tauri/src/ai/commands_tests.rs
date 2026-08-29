@@ -1261,3 +1261,539 @@ fn escape_choice_part(value: &str) -> String {
         .trim()
         .to_string()
 }
+
+#[test]
+fn media_download_url_rejects_ssrf_targets() {
+    // Non-http(s) schemes are rejected outright.
+    assert!(validate_media_download_url("file:///etc/passwd").is_err());
+    assert!(validate_media_download_url("ftp://example.com/x.png").is_err());
+    // Loopback / private / link-local hosts are rejected (SSRF).
+    assert!(validate_media_download_url("http://127.0.0.1:8080/x.png").is_err());
+    assert!(validate_media_download_url("http://localhost/x.png").is_err());
+    assert!(validate_media_download_url("http://169.254.169.254/latest/meta-data").is_err());
+    assert!(validate_media_download_url("http://10.0.0.1/x.png").is_err());
+    assert!(validate_media_download_url("http://192.168.1.1/x.png").is_err());
+    assert!(validate_media_download_url("http://172.16.0.5/x.png").is_err());
+    assert!(validate_media_download_url("http://[::1]/x.png").is_err());
+    // Public endpoints pass.
+    assert!(validate_media_download_url("https://example.com/image.png").is_ok());
+    assert!(
+        validate_media_download_url("https://oaidalleapiprodscus.blob.core.windows.net/x.png")
+            .is_ok()
+    );
+}
+
+struct StaticMediaResolver {
+    host: String,
+    addresses: Vec<std::net::SocketAddr>,
+}
+
+/// Resolver that maps a small set of hostnames to addresses. Used by the
+/// redirect-loop test, where one hop points at host A and the next at host
+/// B; the production single-host resolver would error out on the second hop.
+struct MultiHostMediaResolver {
+    hosts: std::collections::HashMap<String, Vec<std::net::SocketAddr>>,
+}
+
+impl MediaDnsResolver for MultiHostMediaResolver {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        _port: u16,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<std::net::SocketAddr>, String>> + Send + 'a,
+        >,
+    > {
+        let addresses = self.hosts.get(host).cloned().unwrap_or_default();
+        Box::pin(async move {
+            if addresses.is_empty() {
+                Err(format!("unexpected DNS host: {host}"))
+            } else {
+                Ok(addresses)
+            }
+        })
+    }
+}
+
+struct HangingMediaResolver {
+    started: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl MediaDnsResolver for HangingMediaResolver {
+    fn resolve<'a>(
+        &'a self,
+        _host: &'a str,
+        _port: u16,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<std::net::SocketAddr>, String>> + Send + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            self.started.add_permits(1);
+            std::future::pending().await
+        })
+    }
+}
+
+impl MediaDnsResolver for StaticMediaResolver {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        _port: u16,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<std::net::SocketAddr>, String>> + Send + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            if host == self.host {
+                Ok(self.addresses.clone())
+            } else {
+                Err(format!("unexpected DNS host: {host}"))
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn media_download_rejects_custom_dns_resolution_to_loopback() {
+    let resolver = StaticMediaResolver {
+        host: "media.example".to_string(),
+        addresses: vec!["127.0.0.1:80".parse().unwrap()],
+    };
+
+    let error =
+        fetch_media_bytes_with_policy("http://media.example/image.png", &resolver, |_, ip| {
+            is_public_download_ip(ip)
+        })
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("内部/保留地址"), "unexpected error: {error}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn media_download_dns_resolution_has_a_retryable_deadline() {
+    let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let resolver = HangingMediaResolver {
+        started: started.clone(),
+    };
+    let task = tokio::spawn(async move {
+        fetch_media_bytes_with_policy("https://media.example/image.png", &resolver, |_, ip| {
+            is_public_download_ip(ip)
+        })
+        .await
+    });
+
+    started.acquire().await.unwrap().forget();
+    tokio::time::advance(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        task.is_finished(),
+        "DNS resolution remained outside the media deadline"
+    );
+
+    let error = task.await.unwrap().unwrap_err();
+    assert!(error.contains("DNS") && error.contains("超时") && error.contains("重试"));
+}
+
+#[tokio::test]
+async fn media_download_validates_each_local_http_redirect_hop() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 1024];
+        let _ = stream.read(&mut request).await.unwrap();
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{}/private.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            address.port()
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    let initial = format!("http://public-media.test:{}/start", address.port());
+
+    // The initial loopback connection is permitted only by this test seam so
+    // a real local server can emit the redirect. The redirect target itself
+    // still goes through the production public-address policy and is rejected.
+    let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("内部/保留地址"), "unexpected error: {error}");
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("local redirect server was never contacted")
+        .unwrap();
+}
+
+#[test]
+fn media_download_ip_policy_rejects_reserved_ranges() {
+    for address in [
+        "0.0.0.1",
+        "100.64.0.1",
+        "192.0.2.1",
+        "198.18.0.1",
+        "224.0.0.1",
+        "240.0.0.1",
+        "::1",
+        "fc00::1",
+        "fe80::1",
+        "2001:db8::1",
+        "ff00::1",
+        "::ffff:127.0.0.1",
+    ] {
+        let ip: std::net::IpAddr = address.parse().unwrap();
+        assert!(!is_public_download_ip(ip), "{address} must be rejected");
+    }
+    assert!(is_public_download_ip("8.8.8.8".parse().unwrap()));
+    assert!(is_public_download_ip(
+        "2606:4700:4700::1111".parse().unwrap()
+    ));
+}
+
+// ── Integration tests for safe_media_fetch ───────────────────────────────────
+//
+// These tests spin up a real local TCP listener that speaks HTTP/1.1, point
+// the production fetcher at it via a `StaticMediaResolver`, and exercise the
+// end-to-end behaviour: redirects, content-type, body cap, DNS pinning, and
+// deadline pressure. Each server is single-shot because the fetcher issues
+// one connection per redirect hop and we want to assert on the exact bytes.
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+/// Reply with a fixed HTTP/1.1 response, optionally writing the body in
+/// chunks so the fetcher sees `Transfer-Encoding: chunked`. Keeps the
+/// connection open until the caller drops the server handle.
+async fn reply_once(
+    stream: &mut tokio::net::TcpStream,
+    status: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) {
+    let mut response = format!("HTTP/1.1 {}\r\nConnection: close\r\n", status);
+    let mut user_supplied_length = false;
+    for (name, value) in headers {
+        response.push_str(&format!("{name}: {value}\r\n"));
+        if name.eq_ignore_ascii_case("content-length") {
+            user_supplied_length = true;
+        }
+    }
+    if !user_supplied_length {
+        response.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    response.push_str("\r\n");
+    stream.write_all(response.as_bytes()).await.unwrap();
+    if !body.is_empty() {
+        stream.write_all(body).await.unwrap();
+    }
+    stream.shutdown().await.ok();
+}
+
+/// Spawn a one-shot HTTP server that always replies with the same status,
+/// headers, and body. Returns the bound address and a JoinHandle so the test
+/// can `tokio::time::timeout` waiting for the server to receive its request.
+async fn spawn_static_server(
+    status: &'static str,
+    headers: Vec<(&'static str, &'static str)>,
+    body: Vec<u8>,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            // Discard the request line + headers; we only care that the
+            // body is delivered verbatim.
+            let mut scratch = [0_u8; 4096];
+            let _ = stream.read(&mut scratch).await;
+            reply_once(&mut stream, status, &headers, &body).await;
+        }
+    });
+    (address, handle)
+}
+
+#[tokio::test]
+async fn media_download_accepts_bounded_image_with_correct_content_type() {
+    let body = b"\x89PNG\r\n\x1a\nfake-png-bytes".to_vec();
+    let (address, server) =
+        spawn_static_server("200 OK", vec![("Content-Type", "image/png")], body.clone()).await;
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    // Test seam permits the loopback server address; production allow_address
+    // would reject it. Mirrors the existing redirect test.
+    let initial = format!("http://public-media.test:{}/image.png", address.port());
+    let received = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .expect("small image with correct content-type should pass");
+
+    assert_eq!(received, body);
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server never received the request")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn media_download_rejects_response_with_unexpected_content_type() {
+    let (address, server) = spawn_static_server(
+        "200 OK",
+        vec![("Content-Type", "text/html")],
+        b"<html>not media</html>".to_vec(),
+    )
+    .await;
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    let initial = format!("http://public-media.test:{}/image.png", address.port());
+    let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .unwrap_err();
+
+    assert!(
+        error.contains("Content-Type") && error.contains("text/html"),
+        "unexpected error: {error}"
+    );
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server never received the request")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn media_download_rejects_oversized_content_length_before_buffering() {
+    // Declare a body far above MAX_MEDIA_BYTES (64 MiB) but never send it:
+    // the fetcher must short-circuit on Content-Length alone and avoid
+    // allocating the full buffer.
+    let (address, server) = spawn_static_server(
+        "200 OK",
+        vec![
+            ("Content-Type", "image/png"),
+            ("Content-Length", "1073741824"),
+        ],
+        Vec::new(),
+    )
+    .await;
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    let initial = format!("http://public-media.test:{}/big.png", address.port());
+    let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .unwrap_err();
+
+    assert!(
+        error.contains("Content-Length") && error.contains("超过上限"),
+        "unexpected error: {error}"
+    );
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server never received the request")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn media_download_caps_chunked_unknown_length_body_while_streaming() {
+    // No Content-Length header → the fetcher must enforce the cap as bytes
+    // arrive. MAX_MEDIA_BYTES is 64 MiB; send 33 × 2 MiB chunks so the
+    // cumulative total crosses the cap mid-stream and the fetcher aborts
+    // before all bytes have been delivered.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut scratch = [0_u8; 4096];
+        let _ = stream.read(&mut scratch).await;
+        let chunk = vec![0xAB_u8; 2 * 1024 * 1024];
+        let header =
+            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nTransfer-Encoding: chunked\r\n\r\n";
+        stream.write_all(header.as_bytes()).await.unwrap();
+        for _ in 0..33 {
+            stream
+                .write_all(format!("{:X}\r\n", chunk.len()).as_bytes())
+                .await
+                .unwrap();
+            stream.write_all(&chunk).await.unwrap();
+            stream.write_all(b"\r\n").await.unwrap();
+            // Let the client actually read between writes; otherwise it
+            // might coalesce and the cap could land on the first big read.
+            tokio::task::yield_now().await;
+        }
+        // Best-effort termination chunk; the client will have errored by now.
+        stream.write_all(b"0\r\n\r\n").await.ok();
+        stream.shutdown().await.ok();
+    });
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![address],
+    };
+    let initial = format!("http://public-media.test:{}/chunked.bin", address.port());
+    let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .unwrap_err();
+
+    assert!(
+        error.contains("超过上限"),
+        "expected streaming cap to trigger, got: {error}"
+    );
+    // The fetcher should abort before we write the trailing terminator; if
+    // it didn't, the server task is still alive and could hang the test
+    // process. Abort unconditionally.
+    server.abort();
+}
+
+#[tokio::test]
+async fn media_download_redirect_loop_terminates_after_cap() {
+    // Two listeners that bounce Location back and forth between two host
+    // names forever: the fetcher must give up at MAX_MEDIA_REDIRECTS
+    // instead of looping indefinitely. The MultiHostMediaResolver hands
+    // out the right loopback address for each hostname so every hop
+    // passes the policy check; the only thing that can stop the loop is
+    // the redirect cap.
+    let listener_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address_a = listener_a.local_addr().unwrap();
+    let address_b = listener_b.local_addr().unwrap();
+
+    async fn bounce(listener: TcpListener, peer_host: &'static str, peer_port: u16) {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let mut scratch = [0_u8; 4096];
+            let _ = stream.read(&mut scratch).await;
+            let response = format!(
+                "HTTP/1.1 302 Found\r\nLocation: http://{peer_host}:{peer_port}/loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.ok();
+        }
+    }
+    let server_a = tokio::spawn(bounce(listener_a, "public-media-b.test", address_b.port()));
+    let server_b = tokio::spawn(bounce(listener_b, "public-media-a.test", address_a.port()));
+    let resolver = MultiHostMediaResolver {
+        hosts: [
+            ("public-media-a.test".to_string(), vec![address_a]),
+            ("public-media-b.test".to_string(), vec![address_b]),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let initial = format!("http://public-media-a.test:{}/loop", address_a.port());
+    let error = fetch_media_bytes_with_policy(&initial, &resolver, |url, _| {
+        matches!(
+            url.host_str(),
+            Some("public-media-a.test" | "public-media-b.test")
+        )
+    })
+    .await
+    .unwrap_err();
+
+    assert!(
+        error.contains("重定向次数过多"),
+        "expected redirect cap, got: {error}"
+    );
+    server_a.abort();
+    server_b.abort();
+}
+
+#[tokio::test]
+async fn media_download_filters_mixed_public_private_dns_resolution() {
+    // The resolver returns two addresses. The production allow_address keeps
+    // only the public one — we verify that by giving only the public address
+    // a listener and watching the fetcher land on it. The private address
+    // is intentionally left unbound; if the fetcher ever tried it, the test
+    // would surface as a connection failure rather than the expected body.
+    let public_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let public_addr = public_listener.local_addr().unwrap();
+    let private_addr: std::net::SocketAddr = "127.0.0.1:9".parse().unwrap();
+    let server = tokio::spawn(async move {
+        if let Ok((mut stream, _)) = public_listener.accept().await {
+            let mut scratch = [0_u8; 4096];
+            let _ = stream.read(&mut scratch).await;
+            reply_once(
+                &mut stream,
+                "200 OK",
+                &[("Content-Type", "image/png")],
+                b"\x89PNG\r\nfake",
+            )
+            .await;
+        }
+    });
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![private_addr, public_addr],
+    };
+    let initial = format!("http://public-media.test:{}/image.png", public_addr.port());
+    let bytes = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .expect("fetcher should filter to the public address and succeed");
+    assert!(bytes.starts_with(b"\x89PNG"));
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("server never received the request")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn media_download_pins_dns_resolution_across_the_connection() {
+    // DNS pinning: reqwest is told via resolve_to_addrs that the hostname
+    // resolves to this exact address. Any other resolver lookup (e.g. a
+    // stale cache, a TOCTOU race with a hostile DNS) would route the
+    // connection elsewhere; we verify the fetcher honors the override by
+    // binding only the override address.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let pinned = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut scratch = [0_u8; 4096];
+            let _ = stream.read(&mut scratch).await;
+            reply_once(
+                &mut stream,
+                "200 OK",
+                &[("Content-Type", "audio/mpeg")],
+                b"ID3fake",
+            )
+            .await;
+        }
+    });
+    let resolver = StaticMediaResolver {
+        host: "public-media.test".to_string(),
+        addresses: vec![pinned],
+    };
+    let initial = format!("http://public-media.test:{}/clip.mp3", pinned.port());
+    let bytes = fetch_media_bytes_with_policy(&initial, &resolver, |url, ip| {
+        url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+    })
+    .await
+    .expect("fetcher must connect via the pinned address");
+    assert_eq!(bytes, b"ID3fake");
+    tokio::time::timeout(Duration::from_secs(1), server)
+        .await
+        .expect("pinned-address listener never received the request")
+        .unwrap();
+}

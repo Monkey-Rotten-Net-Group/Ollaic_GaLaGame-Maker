@@ -4,8 +4,7 @@
 //! `scheduler.rs` and is tested there; these commands are not unit-tested,
 //! matching the codebase convention (e.g. `ai::commands`).
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -13,9 +12,13 @@ use tauri::Emitter;
 
 use crate::pipeline::dsl::default_recipe;
 use crate::pipeline::events::{EventSink, PipelineEvent};
-use crate::pipeline::scheduler::{
-    cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids, Pipeline,
+use crate::pipeline::project_state::record_run_summary;
+use crate::pipeline::recovery::{
+    cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids,
 };
+use crate::pipeline::registry::{ManagedRun, RunRegistry};
+use crate::pipeline::run_control::RunHandle;
+use crate::pipeline::scheduler::{Pipeline, RunCreation};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus, SystemClock};
 use crate::pipeline::store;
 use crate::story_plan::{self, StoryPlan};
@@ -36,19 +39,10 @@ fn make_sink(app: &tauri::AppHandle) -> TauriEventSink {
     TauriEventSink { app: app.clone() }
 }
 
-struct ManagedRun {
-    handle: Arc<crate::pipeline::scheduler::RunHandle>,
-    project_path: PathBuf,
-    /// True while an `execute` task is currently driving this run (including
-    /// while it is paused-and-waiting). Commands use it to decide whether to
-    /// (re-)spawn the driver after a retry/skip on a finished run.
-    driving: Arc<AtomicBool>,
-}
-
 /// Tauri-managed state: the pipeline plus its active runs.
 pub struct Orchestrator {
     pipeline: Arc<Pipeline>,
-    runs: tokio::sync::Mutex<HashMap<String, ManagedRun>>,
+    runs: RunRegistry,
 }
 
 impl Orchestrator {
@@ -57,8 +51,31 @@ impl Orchestrator {
             pipeline: Arc::new(Pipeline::with_default_agents_and_matting(
                 crate::matting::commands::resolve_model_path(app),
             )),
-            runs: tokio::sync::Mutex::new(HashMap::new()),
+            runs: RunRegistry::new(),
         }
+    }
+
+    /// Compute the deadline the next new Flow should use, by reading the
+    /// live Provider capability from disk. Capability is NOT cached at app
+    /// startup, so changing provider/model/custom `flow_step_deadline_ms`
+    /// after one Flow is in flight still affects the next new Flow, while
+    /// the in-flight Run keeps its creation-time snapshot.
+    pub fn flow_step_timeout_for_new_run(&self) -> Option<std::time::Duration> {
+        let capability = crate::ai::provider_capability::capability_for_config(
+            &crate::ai::config::load_config(),
+        )
+        .ok()?;
+        Some(capability.flow_step_timeout())
+    }
+
+    /// Validate that the live Provider capability can resolve to a bounded
+    /// Step deadline. A parse failure (unknown provider, zero/excessive
+    /// deadline, malformed custom declaration) must NOT silently degrade
+    /// into an unbounded run; the caller must reject the Flow start so the
+    /// user fixes the config rather than starting a run with no timeout.
+    pub fn validate_flow_step_capability(&self) -> Result<(), String> {
+        crate::ai::provider_capability::capability_for_config(&crate::ai::config::load_config())
+            .map(|_| ())
     }
 }
 
@@ -76,7 +93,7 @@ fn new_run_id() -> String {
 /// Drive a run to completion (or pause). Clears `driving` when done.
 async fn drive(
     pipeline: Arc<Pipeline>,
-    handle: Arc<crate::pipeline::scheduler::RunHandle>,
+    handle: Arc<RunHandle>,
     driving: Arc<AtomicBool>,
     project_path: PathBuf,
     app: tauri::AppHandle,
@@ -90,7 +107,7 @@ async fn drive(
 
 fn spawn_driver(
     pipeline: Arc<Pipeline>,
-    handle: Arc<crate::pipeline::scheduler::RunHandle>,
+    handle: Arc<RunHandle>,
     driving: Arc<AtomicBool>,
     project_path: PathBuf,
     app: tauri::AppHandle,
@@ -110,76 +127,68 @@ pub async fn pipeline_start(
     if !crate::ai::commands::has_agent_chat_config() && allow_local_fallback != Some(true) {
         return Err("未配置可用的对话模型。请先配置 AI，或明确允许本地内容降级。".to_string());
     }
+    // Parse failure (unknown provider, zero/excessive deadline, malformed
+    // custom declaration) must not silently downgrade into an unbounded Run.
+    orchestrator.validate_flow_step_capability()?;
     let project_path = PathBuf::from(project_path);
-    if super::scheduler::project_has_story_content(&project_path)? {
-        return Err(
-            "项目已有故事内容；请使用 AI 聊天的可审阅 patch 工作流修改，Agent Flow 仅用于新建故事。"
-                .to_string(),
-        );
-    }
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
-    let handle = orchestrator
-        .pipeline
-        .create_run_with_options(
-            &project_path,
-            &run_id,
-            &prompt,
-            &recipe,
-            allow_local_fallback == Some(true),
-            &SystemClock,
-            &sink,
-        )
-        .map_err(|e| e.to_string())?;
-    handle
+    // Read the live Provider capability on every new Flow so a settings edit
+    // (provider/model/custom `flow_step_deadline_ms`) takes effect immediately
+    // for the next run. The in-flight run keeps its own creation-time snapshot
+    // so mid-flight changes cannot shift semantics on a live step.
+    let step_timeout = orchestrator.flow_step_timeout_for_new_run();
+    let entry = orchestrator
+        .runs
+        .insert_active_with(&run_id, &project_path, || {
+            let handle = orchestrator
+                .pipeline
+                .create_new_story_run_with_timeout(RunCreation {
+                    project_path: &project_path,
+                    run_id: &run_id,
+                    prompt: &prompt,
+                    recipe: &recipe,
+                    allow_local_fallback: allow_local_fallback == Some(true),
+                    step_timeout,
+                    clock: &SystemClock,
+                    sink: &sink,
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(ManagedRun {
+                handle,
+                project_path: project_path.clone(),
+                driving: Arc::new(AtomicBool::new(false)),
+            })
+        })
+        .await?;
+    entry
+        .handle
         .pause(&project_path, &sink, &SystemClock)
         .await
         .map_err(|e| e.to_string())?;
-    let driving = Arc::new(AtomicBool::new(false));
-    orchestrator.runs.lock().await.insert(
-        run_id.clone(),
-        ManagedRun {
-            handle: handle.clone(),
-            project_path: project_path.clone(),
-            driving: driving.clone(),
-        },
-    );
     Ok(run_id)
-}
-
-async fn with_run<F, R>(orchestrator: &Orchestrator, run_id: &str, f: F) -> Result<R, String>
-where
-    F: FnOnce(&ManagedRun) -> Result<R, String>,
-{
-    let guard = orchestrator.runs.lock().await;
-    let entry = guard
-        .get(run_id)
-        .ok_or_else(|| format!("run not found: {}", run_id))?;
-    f(entry)
 }
 
 async fn attach_run_if_needed(
     orchestrator: &Orchestrator,
-    project_path: &PathBuf,
+    project_path: &Path,
     run_id: &str,
 ) -> Result<(), String> {
-    let mut runs = orchestrator.runs.lock().await;
-    if !runs.contains_key(run_id) {
-        let handle = orchestrator
-            .pipeline
-            .attach_run(project_path, run_id, &SystemClock)
-            .map_err(|error| error.to_string())?;
-        runs.insert(
-            run_id.to_string(),
-            ManagedRun {
+    orchestrator
+        .runs
+        .attach_if_needed(run_id, project_path, || {
+            let handle = orchestrator
+                .pipeline
+                .attach_run(project_path, run_id, &SystemClock)
+                .map_err(|error| error.to_string())?;
+            Ok(ManagedRun {
                 handle,
-                project_path: project_path.clone(),
+                project_path: project_path.to_path_buf(),
                 driving: Arc::new(AtomicBool::new(false)),
-            },
-        );
-    }
-    Ok(())
+            })
+        })
+        .await
 }
 
 #[tauri::command]
@@ -187,11 +196,11 @@ pub async fn pipeline_pause(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     run_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |e| {
-        Ok((e.handle.clone(), e.project_path.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .pause(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -206,11 +215,15 @@ pub async fn pipeline_resume(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     run_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |e| {
-        Ok((e.handle.clone(), e.project_path.clone(), e.driving.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     handle
         .resume(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -235,19 +248,16 @@ pub async fn pipeline_stop(
     orchestrator: tauri::State<'_, Orchestrator>,
     app: tauri::AppHandle,
     run_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .stop(&project_path, &make_sink(&app), &SystemClock)
         .await
         .map_err(|error| error.to_string())?;
-    orchestrator
-        .pipeline
-        .record_run_summary(&project_path, &run_id, &SystemClock)
-        .map_err(|error| error.to_string())
+    record_run_summary(&project_path, &run_id, &SystemClock).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -259,14 +269,12 @@ pub async fn pipeline_step_once(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path, driving) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((
-            entry.handle.clone(),
-            entry.project_path.clone(),
-            entry.driving.clone(),
-        ))
-    })
-    .await?;
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     handle
         .step_once(&project_path, &make_sink(&app), &SystemClock)
         .await
@@ -296,21 +304,23 @@ pub async fn pipeline_retry_step(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path, driving) = {
-        let guard = orchestrator.runs.lock().await;
-        let entry = guard
-            .get(&run_id)
-            .ok_or_else(|| format!("run not found: {}", run_id))?;
-        (
-            entry.handle.clone(),
-            entry.project_path.clone(),
-            entry.driving.clone(),
-        )
-    };
-    handle
-        .retry_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
-        .await
-        .map_err(|e| e.to_string())?;
+    let sink = make_sink(&app);
+    let entry = orchestrator
+        .runs
+        .with_project_activation(&run_id, &requested_path, |entry| async move {
+            entry
+                .handle
+                .retry_step(&entry.project_path, &step_id, &sink, &SystemClock)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(entry)
+        })
+        .await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     // Atomically claim the driver role. If a driver is already running
     // (incl. paused-and-waiting), it picks up the retried step via the notify
     // sent by retry_step. Otherwise the run was terminal and we start one.
@@ -335,22 +345,26 @@ pub async fn pipeline_skip_step(
     app: tauri::AppHandle,
     run_id: String,
     step_id: String,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path, driving) = {
-        let guard = orchestrator.runs.lock().await;
-        let entry = guard
-            .get(&run_id)
-            .ok_or_else(|| format!("run not found: {}", run_id))?;
-        (
-            entry.handle.clone(),
-            entry.project_path.clone(),
-            entry.driving.clone(),
-        )
-    };
-    handle
-        .skip_step(&project_path, &step_id, &make_sink(&app), &SystemClock)
-        .await
-        .map_err(|e| e.to_string())?;
+    let requested_path = PathBuf::from(project_path);
+    let sink = make_sink(&app);
+    let entry = orchestrator
+        .runs
+        .with_project_activation(&run_id, &requested_path, |entry| async move {
+            entry
+                .handle
+                .skip_step(&entry.project_path, &step_id, &sink, &SystemClock)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(entry)
+        })
+        .await?;
+    let (handle, project_path, driving) = (
+        entry.handle.clone(),
+        entry.project_path.clone(),
+        entry.driving.clone(),
+    );
     if driving
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
@@ -372,11 +386,11 @@ pub async fn pipeline_update_dependencies(
     run_id: String,
     step_id: String,
     depends_on: Vec<String>,
+    project_path: String,
 ) -> Result<(), String> {
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    })
-    .await?;
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .update_dependencies(&project_path, &step_id, depends_on, &SystemClock)
         .await
@@ -393,10 +407,8 @@ pub async fn pipeline_update_step_prompt(
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
     attach_run_if_needed(&orchestrator, &requested_path, &run_id).await?;
-    let (handle, project_path) = with_run(&orchestrator, &run_id, |entry| {
-        Ok((entry.handle.clone(), entry.project_path.clone()))
-    })
-    .await?;
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let (handle, project_path) = (entry.handle.clone(), entry.project_path.clone());
     handle
         .update_step_prompt(&project_path, &step_id, prompt, &SystemClock)
         .await
@@ -411,13 +423,14 @@ pub async fn pipeline_set_run_pinned(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some((handle, project_path)) = {
-        let runs = orchestrator.runs.lock().await;
-        runs.get(&run_id)
-            .map(|entry| (entry.handle.clone(), entry.project_path.clone()))
-    } {
-        return handle
-            .set_pinned(&project_path, pinned, &SystemClock)
+    if let Some(entry) = orchestrator
+        .runs
+        .resolve_if_present(&run_id, &requested_path)
+        .await?
+    {
+        return entry
+            .handle
+            .set_pinned(&entry.project_path, pinned, &SystemClock)
             .await
             .map_err(|error| error.to_string());
     }
@@ -436,13 +449,14 @@ pub async fn pipeline_clear_run_history(
     project_path: String,
 ) -> Result<(), String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some((handle, project_path)) = {
-        let runs = orchestrator.runs.lock().await;
-        runs.get(&run_id)
-            .map(|entry| (entry.handle.clone(), entry.project_path.clone()))
-    } {
-        return handle
-            .clear_history(&project_path, &SystemClock)
+    if let Some(entry) = orchestrator
+        .runs
+        .resolve_if_present(&run_id, &requested_path)
+        .await?
+    {
+        return entry
+            .handle
+            .clear_history(&entry.project_path, &SystemClock)
             .await
             .map_err(|error| error.to_string());
     }
@@ -474,11 +488,12 @@ pub async fn pipeline_export_run_history(
     project_path: String,
 ) -> Result<String, String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some(handle) = {
-        let runs = orchestrator.runs.lock().await;
-        runs.get(&run_id).map(|entry| entry.handle.clone())
-    } {
-        let state = handle.state().lock().await;
+    if let Some(entry) = orchestrator
+        .runs
+        .resolve_if_present(&run_id, &requested_path)
+        .await?
+    {
+        let state = entry.handle.state().lock().await;
         return serde_json::to_string_pretty(&*state).map_err(|error| error.to_string());
     }
     let state = store::load_run_state(&requested_path, &run_id)
@@ -491,9 +506,11 @@ pub async fn pipeline_export_run_history(
 pub async fn pipeline_get_state(
     orchestrator: tauri::State<'_, Orchestrator>,
     run_id: String,
+    project_path: String,
 ) -> Result<Option<RunState>, String> {
-    let handle = with_run(&orchestrator, &run_id, |e| Ok(e.handle.clone())).await?;
-    let state = handle.state().lock().await.clone();
+    let requested_path = PathBuf::from(project_path);
+    let entry = orchestrator.runs.resolve(&run_id, &requested_path).await?;
+    let state = entry.handle.state().lock().await.clone();
     Ok(Some(state))
 }
 
@@ -504,38 +521,28 @@ pub async fn pipeline_resume_run(
     project_path: String,
     run_id: String,
 ) -> Result<(), String> {
-    // Crash-recovery entry point: load a persisted run from disk and drive
-    // it. Refuse if the run is already in memory (use pipeline_resume to
-    // unpause a live run) - otherwise two drivers would race on the same
-    // logical run with divergent in-memory state copies.
-    {
-        let runs = orchestrator.runs.lock().await;
-        if runs.contains_key(&run_id) {
-            return Err(format!(
-                "run {} is already in memory; use pipeline_resume to unpause it",
-                run_id
-            ));
-        }
-    }
     let project_path = PathBuf::from(project_path);
     let sink = make_sink(&app);
-    let handle = orchestrator
-        .pipeline
-        .resume_run(&project_path, &run_id, &sink, &SystemClock)
-        .map_err(|e| e.to_string())?;
-    let driving = Arc::new(AtomicBool::new(false));
-    orchestrator.runs.lock().await.insert(
-        run_id.clone(),
-        ManagedRun {
-            handle: handle.clone(),
-            project_path: project_path.clone(),
-            driving: driving.clone(),
-        },
-    );
+    // The registry owns the atomic crash-recovery boundary so two resumes,
+    // or a resume racing a new start, cannot publish divergent live handles.
+    let entry = orchestrator
+        .runs
+        .insert_active_with(&run_id, &project_path, || {
+            let handle = orchestrator
+                .pipeline
+                .resume_run(&project_path, &run_id, &sink, &SystemClock)
+                .map_err(|error| error.to_string())?;
+            Ok(ManagedRun {
+                handle,
+                project_path: project_path.clone(),
+                driving: Arc::new(AtomicBool::new(false)),
+            })
+        })
+        .await?;
     spawn_driver(
         orchestrator.pipeline.clone(),
-        handle,
-        driving,
+        entry.handle,
+        entry.driving,
         project_path,
         app,
     );

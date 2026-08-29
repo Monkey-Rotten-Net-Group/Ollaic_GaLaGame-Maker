@@ -68,6 +68,8 @@ pub struct SnapshotInfo {
     #[serde(default)]
     pub metadata_included: Option<bool>,
     #[serde(default)]
+    pub story_plan_included: Option<bool>,
+    #[serde(default)]
     pub file_count: Option<usize>,
 }
 
@@ -213,6 +215,11 @@ pub fn open_project(app: AppHandle, path: String) -> Result<ProjectInfo, String>
 /// Update config.txt for a project.
 #[tauri::command]
 pub fn save_config(project_path: String, config: HashMap<String, String>) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || save_config_locked(&project_path, config))
+}
+
+fn save_config_locked(project_path: &str, config: HashMap<String, String>) -> Result<(), String> {
     let config_path = PathBuf::from(&project_path).join("game").join("config.txt");
     fs::write(&config_path, serialize_config(&config))
         .map_err(|e| format!("Failed to write config.txt: {}", e))
@@ -231,6 +238,14 @@ pub fn get_scene_path(project_path: String, scene_name: String) -> Result<String
 /// Create a new scene file in the project.
 #[tauri::command]
 pub fn create_scene(project_path: String, scene_name: String) -> Result<String, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || create_scene_locked(&project_path, scene_name))
+}
+
+pub(crate) fn create_scene_locked(
+    project_path: &str,
+    scene_name: String,
+) -> Result<String, String> {
     let scene_dir = PathBuf::from(&project_path).join("game").join("scene");
     fs::create_dir_all(&scene_dir).map_err(|e| format!("Failed to create scene dir: {}", e))?;
 
@@ -245,7 +260,7 @@ pub fn create_scene(project_path: String, scene_name: String) -> Result<String, 
         return Err(format!("Scene {} already exists", name));
     }
 
-    fs::write(&path, format!("; {}\n", name))
+    crate::json_store::write_crash_safe(&path, format!("; {}\n", name).as_bytes())
         .map_err(|e| format!("Failed to create scene: {}", e))?;
 
     Ok(path.to_string_lossy().to_string())
@@ -253,14 +268,21 @@ pub fn create_scene(project_path: String, scene_name: String) -> Result<String, 
 
 #[tauri::command]
 pub fn read_project_memory(project_path: String) -> Result<Option<ProjectMemory>, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || read_project_memory_locked(&project_path))
+}
+
+pub(crate) fn read_project_memory_locked(
+    project_path: &str,
+) -> Result<Option<ProjectMemory>, String> {
     let path = PathBuf::from(&project_path)
         .join("game")
         .join("ai-memory.json");
-    if !path.exists() {
+    if !path.exists() && !crate::json_store::backup_path(&path).exists() {
         return Ok(None);
     }
-    let text =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read ai-memory.json: {}", e))?;
+    let text = crate::json_store::read_to_string_recovering(&path)
+        .map_err(|e| format!("Failed to read ai-memory.json: {}", e))?;
     let memory = serde_json::from_str::<ProjectMemory>(&text)
         .map_err(|e| format!("Failed to parse ai-memory.json: {}", e))?;
     Ok(Some(memory))
@@ -268,6 +290,16 @@ pub fn read_project_memory(project_path: String) -> Result<Option<ProjectMemory>
 
 #[tauri::command]
 pub fn save_project_memory(project_path: String, memory: ProjectMemory) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        save_project_memory_locked(&project_path, memory)
+    })
+}
+
+pub(crate) fn save_project_memory_locked(
+    project_path: &str,
+    memory: ProjectMemory,
+) -> Result<(), String> {
     let game_dir = PathBuf::from(&project_path).join("game");
     if !game_dir.is_dir() {
         return Err(format!("Invalid project: {}/game/ not found", project_path));
@@ -275,7 +307,8 @@ pub fn save_project_memory(project_path: String, memory: ProjectMemory) -> Resul
     let path = game_dir.join("ai-memory.json");
     let text = serde_json::to_string_pretty(&memory)
         .map_err(|e| format!("Failed to serialize ai-memory.json: {}", e))?;
-    fs::write(&path, text).map_err(|e| format!("Failed to write ai-memory.json: {}", e))
+    crate::json_store::write_crash_safe(&path, text.as_bytes())
+        .map_err(|e| format!("Failed to write ai-memory.json: {}", e))
 }
 
 #[tauri::command]
@@ -296,12 +329,27 @@ pub fn save_project_metadata(
     project_path: String,
     metadata: ProjectMetadata,
 ) -> Result<(), String> {
-    write_project_metadata(&project_path, &metadata)
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        write_project_metadata(&project_path, &metadata)
+    })
 }
 
 #[tauri::command]
 pub fn create_project_snapshot(
     project_path: String,
+    label: Option<String>,
+    kind: Option<String>,
+    description: Option<String>,
+) -> Result<SnapshotInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        create_project_snapshot_locked(&project_path, label, kind, description)
+    })
+}
+
+pub(crate) fn create_project_snapshot_locked(
+    project_path: &str,
     label: Option<String>,
     kind: Option<String>,
     description: Option<String>,
@@ -317,14 +365,14 @@ pub fn create_project_snapshot(
     let kind = normalize_snapshot_kind(kind);
     let description = normalize_snapshot_description(description);
     let id_label = snapshot_id_label(&label);
-    let (id, snapshot_dir) =
-        unique_snapshot_dir(&project_path, &format!("{created_at}-{id_label}"));
+    let (id, snapshot_dir) = unique_snapshot_dir(project_path, &format!("{created_at}-{id_label}"));
     fs::create_dir_all(&snapshot_dir)
         .map_err(|e| format!("Failed to create snapshot directory: {e}"))?;
 
     let snapshot_result = (|| {
         copy_dir_recursive(&game_dir, &snapshot_dir.join("game"))?;
         let metadata_included = copy_project_metadata_to_snapshot(&root, &snapshot_dir)?;
+        let story_plan_included = copy_story_plan_to_snapshot(&root, &snapshot_dir)?;
         let copied_editor_state = copy_editor_state_to_snapshot(&root, &snapshot_dir)?;
         let file_count = count_files_recursive(&snapshot_dir)?;
 
@@ -337,6 +385,7 @@ pub fn create_project_snapshot(
             description,
             includes_editor_state: copied_editor_state,
             metadata_included: Some(metadata_included),
+            story_plan_included: Some(story_plan_included),
             file_count: Some(file_count),
         };
         let manifest = serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?;
@@ -353,7 +402,12 @@ pub fn create_project_snapshot(
 
 #[tauri::command]
 pub fn list_project_snapshots(project_path: String) -> Result<Vec<SnapshotInfo>, String> {
-    let dir = snapshots_dir(&project_path);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || list_project_snapshots_locked(&project_path))
+}
+
+fn list_project_snapshots_locked(project_path: &str) -> Result<Vec<SnapshotInfo>, String> {
+    let dir = snapshots_dir(project_path);
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -383,8 +437,19 @@ pub fn rename_project_snapshot(
     snapshot_id: String,
     label: String,
 ) -> Result<SnapshotInfo, String> {
-    validate_snapshot_id(&snapshot_id)?;
-    let snapshot_dir = snapshots_dir(&project_path).join(&snapshot_id);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        rename_project_snapshot_locked(&project_path, &snapshot_id, label)
+    })
+}
+
+fn rename_project_snapshot_locked(
+    project_path: &str,
+    snapshot_id: &str,
+    label: String,
+) -> Result<SnapshotInfo, String> {
+    validate_snapshot_id(snapshot_id)?;
+    let snapshot_dir = snapshots_dir(project_path).join(snapshot_id);
     if !snapshot_dir.is_dir() {
         return Err(format!("Snapshot not found: {snapshot_id}"));
     }
@@ -395,15 +460,25 @@ pub fn rename_project_snapshot(
         .map_err(|e| format!("Failed to parse {}: {e}", manifest_path.display()))?;
     info.label = normalize_snapshot_label(Some(label));
     let manifest = serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?;
-    fs::write(&manifest_path, manifest)
+    crate::json_store::write_crash_safe(&manifest_path, manifest.as_bytes())
         .map_err(|e| format!("Failed to write {}: {e}", manifest_path.display()))?;
     Ok(info)
 }
 
 #[tauri::command]
 pub fn delete_project_snapshot(project_path: String, snapshot_id: String) -> Result<(), String> {
-    validate_snapshot_id(&snapshot_id)?;
-    let snapshot_dir = snapshots_dir(&project_path).join(&snapshot_id);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        delete_project_snapshot_locked(&project_path, &snapshot_id)
+    })
+}
+
+pub(crate) fn delete_project_snapshot_locked(
+    project_path: &str,
+    snapshot_id: &str,
+) -> Result<(), String> {
+    validate_snapshot_id(snapshot_id)?;
+    let snapshot_dir = snapshots_dir(project_path).join(snapshot_id);
     if !snapshot_dir.is_dir() {
         return Err(format!("Snapshot not found: {snapshot_id}"));
     }
@@ -413,9 +488,23 @@ pub fn delete_project_snapshot(project_path: String, snapshot_id: String) -> Res
 
 #[tauri::command]
 pub fn restore_project_snapshot(project_path: String, snapshot_id: String) -> Result<(), String> {
-    validate_snapshot_id(&snapshot_id)?;
     let root = PathBuf::from(&project_path);
-    let snapshot_dir = snapshots_dir(&project_path).join(&snapshot_id);
+    crate::project_lock::with_project_lock(&root, || {
+        crate::flow_edit_lock::ensure_editable(
+            &root,
+            crate::flow_edit_lock::FlowResource::StoryPlan,
+        )?;
+        restore_project_snapshot_locked(&project_path, &snapshot_id)
+    })
+}
+
+pub(crate) fn restore_project_snapshot_locked(
+    project_path: &str,
+    snapshot_id: &str,
+) -> Result<(), String> {
+    validate_snapshot_id(snapshot_id)?;
+    let root = PathBuf::from(&project_path);
+    let snapshot_dir = snapshots_dir(project_path).join(snapshot_id);
     let snapshot_game = snapshot_dir.join("game");
     if !snapshot_game.is_dir() {
         return Err(format!("Snapshot not found: {snapshot_id}"));
@@ -433,6 +522,7 @@ pub fn restore_project_snapshot(project_path: String, snapshot_id: String) -> Re
     let restore_result = (|| {
         copy_dir_recursive(&snapshot_game, &staging_dir.join("game"))?;
         copy_snapshot_metadata_to_staging(&snapshot_dir, &staging_dir)?;
+        copy_snapshot_story_plan_to_staging(&snapshot_dir, &staging_dir)?;
         copy_snapshot_editor_state_to_staging(&snapshot_dir, &staging_dir)?;
         validate_staged_restore(manifest.as_ref(), &staging_dir)?;
         activate_staged_project_state(&root, &staging_dir, manifest.as_ref())?;
@@ -906,6 +996,17 @@ fn copy_project_metadata_to_snapshot(
     Ok(true)
 }
 
+fn copy_story_plan_to_snapshot(project_root: &Path, snapshot_dir: &Path) -> Result<bool, String> {
+    let Some(plan) = crate::story_plan::load_plan(project_root)
+        .map_err(|e| format!("Failed to load StoryPlan for snapshot: {e}"))?
+    else {
+        return Ok(false);
+    };
+    crate::story_plan::save_plan(snapshot_dir, &plan)
+        .map_err(|e| format!("Failed to write StoryPlan snapshot: {e}"))?;
+    Ok(true)
+}
+
 fn copy_editor_state_to_snapshot(project_root: &Path, snapshot_dir: &Path) -> Result<bool, String> {
     let src = editor_dir(project_root);
     if !src.is_dir() {
@@ -1029,6 +1130,26 @@ fn copy_snapshot_metadata_to_staging(
     Ok(())
 }
 
+fn copy_snapshot_story_plan_to_staging(
+    snapshot_dir: &Path,
+    staging_dir: &Path,
+) -> Result<(), String> {
+    let src = snapshot_dir.join(".ollaic").join("plan.json");
+    if src.exists() {
+        let dst = staging_dir.join(".ollaic").join("plan.json");
+        fs::create_dir_all(dst.parent().expect("staged StoryPlan has a parent"))
+            .map_err(|e| format!("Failed to create staged StoryPlan directory: {e}"))?;
+        fs::copy(&src, &dst).map_err(|e| {
+            format!(
+                "Failed to stage snapshot StoryPlan {} -> {}: {e}",
+                src.display(),
+                dst.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn copy_snapshot_editor_state_to_staging(
     snapshot_dir: &Path,
     staging_dir: &Path,
@@ -1051,6 +1172,29 @@ fn validate_staged_restore(
     if manifest.and_then(|info| info.metadata_included) == Some(true) && !staged_metadata.is_file()
     {
         return Err("Snapshot manifest says metadata exists, but it is missing".to_string());
+    }
+    let staged_story_plan = staging_dir.join(".ollaic").join("plan.json");
+    match (
+        manifest.and_then(|info| info.story_plan_included),
+        staged_story_plan.is_file(),
+    ) {
+        (Some(true), false) => {
+            return Err("Snapshot manifest says StoryPlan exists, but it is missing".to_string())
+        }
+        (Some(false), true) => {
+            return Err(
+                "Snapshot manifest says StoryPlan is absent, but the snapshot contains one"
+                    .to_string(),
+            )
+        }
+        (_, true) => {
+            let plan = crate::story_plan::load_plan(staging_dir)
+                .map_err(|e| format!("Snapshot StoryPlan is invalid: {e}"))?
+                .ok_or_else(|| "Snapshot StoryPlan disappeared during validation".to_string())?;
+            crate::story_plan::save_plan(staging_dir, &plan)
+                .map_err(|e| format!("Failed to normalize snapshot StoryPlan: {e}"))?;
+        }
+        (_, false) => {}
     }
     Ok(())
 }
@@ -1092,17 +1236,36 @@ fn activate_staged_project_state(
         return Err(e);
     }
 
-    let editor_result = restore_staged_editor_state(project_root, staging_dir, manifest);
-    if let Err(e) = editor_result {
+    let story_plan_backup = match backup_current_story_plan(project_root, staging_dir, manifest) {
+        Ok(backup) => backup,
+        Err(e) => {
+            rollback_metadata_backup(project_root, metadata_backup.as_ref());
+            rollback_game_restore(&game_dir, &game_backup);
+            return Err(e);
+        }
+    };
+    let story_plan_result = restore_staged_story_plan(project_root, staging_dir, manifest);
+    if let Err(e) = story_plan_result {
+        rollback_story_plan_backup(project_root, story_plan_backup.as_ref());
         rollback_metadata_backup(project_root, metadata_backup.as_ref());
         rollback_game_restore(&game_dir, &game_backup);
         return Err(e);
     }
 
-    cleanup_metadata_backup(metadata_backup)?;
+    let editor_result = restore_staged_editor_state(project_root, staging_dir, manifest);
+    if let Err(e) = editor_result {
+        rollback_story_plan_backup(project_root, story_plan_backup.as_ref());
+        rollback_metadata_backup(project_root, metadata_backup.as_ref());
+        rollback_game_restore(&game_dir, &game_backup);
+        return Err(e);
+    }
+
+    // Activation is already committed. Cleanup failures leave recoverable
+    // backup files behind, but must not report that the restore itself failed.
+    let _ = cleanup_story_plan_backup(story_plan_backup);
+    let _ = cleanup_metadata_backup(metadata_backup);
     if game_backup.exists() {
-        fs::remove_dir_all(&game_backup)
-            .map_err(|e| format!("Failed to remove restore backup: {e}"))?;
+        let _ = fs::remove_dir_all(&game_backup);
     }
     Ok(())
 }
@@ -1194,6 +1357,106 @@ fn cleanup_metadata_backup(backup: Option<MetadataBackup>) -> Result<(), String>
     Ok(())
 }
 
+struct StoryPlanBackup {
+    directory: PathBuf,
+    had_primary: bool,
+    had_legacy_backup: bool,
+}
+
+fn backup_current_story_plan(
+    project_root: &Path,
+    staging_dir: &Path,
+    manifest: Option<&SnapshotInfo>,
+) -> Result<Option<StoryPlanBackup>, String> {
+    let should_touch = staging_dir.join(".ollaic").join("plan.json").exists()
+        || manifest.and_then(|info| info.story_plan_included).is_some();
+    if !should_touch {
+        return Ok(None);
+    }
+
+    let current = crate::story_plan::plan_path(project_root);
+    let current_backup = crate::json_store::backup_path(&current);
+    let backup_dir = editor_dir(project_root).join(format!("restore-backup-plan-{}", now_millis()));
+    fs::create_dir_all(&backup_dir)
+        .map_err(|e| format!("Failed to create StoryPlan restore backup: {e}"))?;
+
+    let had_primary = current.exists();
+    let had_legacy_backup = current_backup.exists();
+    if had_primary {
+        if let Err(e) = fs::rename(&current, backup_dir.join("plan.json")) {
+            let _ = fs::remove_dir_all(&backup_dir);
+            return Err(format!("Failed to backup current StoryPlan: {e}"));
+        }
+    }
+    if had_legacy_backup {
+        if let Err(e) = fs::rename(&current_backup, backup_dir.join("plan.json.bak")) {
+            if had_primary {
+                let _ = fs::rename(backup_dir.join("plan.json"), &current);
+            }
+            let _ = fs::remove_dir_all(&backup_dir);
+            return Err(format!("Failed to backup current StoryPlan fallback: {e}"));
+        }
+    }
+
+    Ok(Some(StoryPlanBackup {
+        directory: backup_dir,
+        had_primary,
+        had_legacy_backup,
+    }))
+}
+
+fn restore_staged_story_plan(
+    project_root: &Path,
+    staging_dir: &Path,
+    manifest: Option<&SnapshotInfo>,
+) -> Result<(), String> {
+    let staged = staging_dir.join(".ollaic").join("plan.json");
+    if !staged.exists() {
+        if manifest.and_then(|info| info.story_plan_included) == Some(true) {
+            return Err("Snapshot manifest says StoryPlan exists, but it is missing".to_string());
+        }
+        return Ok(());
+    }
+
+    let current = crate::story_plan::plan_path(project_root);
+    fs::create_dir_all(current.parent().expect("StoryPlan has a parent"))
+        .map_err(|e| format!("Failed to create StoryPlan directory: {e}"))?;
+    fs::rename(&staged, &current).map_err(|e| format!("Failed to activate restored StoryPlan: {e}"))
+}
+
+fn rollback_story_plan_backup(project_root: &Path, backup: Option<&StoryPlanBackup>) {
+    let Some(backup) = backup else {
+        return;
+    };
+    let current = crate::story_plan::plan_path(project_root);
+    let current_backup = crate::json_store::backup_path(&current);
+    if current.exists() {
+        let _ = fs::remove_file(&current);
+    }
+    if current_backup.exists() {
+        let _ = fs::remove_file(&current_backup);
+    }
+    if backup.had_primary {
+        let _ = fs::rename(backup.directory.join("plan.json"), &current);
+    }
+    if backup.had_legacy_backup {
+        let _ = fs::rename(backup.directory.join("plan.json.bak"), &current_backup);
+    }
+    if backup.directory.exists() {
+        let _ = fs::remove_dir_all(&backup.directory);
+    }
+}
+
+fn cleanup_story_plan_backup(backup: Option<StoryPlanBackup>) -> Result<(), String> {
+    if let Some(backup) = backup {
+        if backup.directory.exists() {
+            fs::remove_dir_all(&backup.directory)
+                .map_err(|e| format!("Failed to remove StoryPlan restore backup: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn restore_staged_editor_state(
     project_root: &Path,
     staging_dir: &Path,
@@ -1223,8 +1486,7 @@ fn restore_staged_editor_state(
     }
 
     if backup_dir.exists() {
-        fs::remove_dir_all(&backup_dir)
-            .map_err(|e| format!("Failed to remove editor state restore backup: {e}"))?;
+        let _ = fs::remove_dir_all(&backup_dir);
     }
     Ok(())
 }
@@ -1415,7 +1677,37 @@ fn add_dir_to_zip<W: Write + std::io::Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::story_plan::{ChapterPlan, StoryPlan};
     use std::fs;
+
+    fn save_test_plan(project: &Path, prompt: &str) {
+        crate::story_plan::save_plan(project, &StoryPlan::new(prompt)).unwrap();
+    }
+
+    fn load_test_plan(project: &Path) -> StoryPlan {
+        crate::story_plan::load_plan(project).unwrap().unwrap()
+    }
+
+    #[test]
+    fn project_memory_read_restores_a_missing_primary_from_backup() {
+        let tmp =
+            std::env::temp_dir().join(format!("ollaic_memory_backup_read_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game")).unwrap();
+        let path = tmp.join("game/ai-memory.json");
+        fs::write(
+            crate::json_store::backup_path(&path),
+            r#"{"worldSetting":"old","writingStyle":"style","userPreferences":"prefs","updatedAt":"then"}"#,
+        )
+        .unwrap();
+
+        let memory = read_project_memory(tmp.to_string_lossy().into_owned())
+            .unwrap()
+            .unwrap();
+        assert_eq!(memory.world_setting, "old");
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn default_config_enables_appreciation_gallery() {
@@ -1737,6 +2029,293 @@ mod tests {
         let restored =
             fs::read_to_string(tmp.join("game").join("scene").join("start.txt")).unwrap();
         assert_eq!(restored, ":Before;");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn snapshots_restore_previous_story_plan() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_restore_story_plan");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(tmp.join("game").join("scene").join("start.txt"), ":Before;").unwrap();
+        save_test_plan(&tmp, "before");
+
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("before-plan-change".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        save_test_plan(&tmp, "after");
+
+        restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id).unwrap();
+
+        assert_eq!(load_test_plan(&tmp).prompt, "before");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn snapshot_creation_uses_a_valid_story_plan_backup_when_primary_is_corrupt() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_story_plan_backup");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(tmp.join("game").join("scene").join("start.txt"), ":Before;").unwrap();
+        let plan_path = crate::story_plan::plan_path(&tmp);
+        fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
+        fs::write(&plan_path, "{not valid json").unwrap();
+        fs::write(
+            crate::json_store::backup_path(&plan_path),
+            serde_json::to_vec_pretty(&StoryPlan::new("valid backup")).unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("recovered-plan".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+
+        let snapshotted = crate::story_plan::load_plan(Path::new(&snapshot.path))
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshotted.prompt, "valid backup");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_snapshot_manifest_restores_an_embedded_story_plan() {
+        let tmp = std::env::temp_dir().join("webgal_test_legacy_snapshot_story_plan");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            ":Snapshot;",
+        )
+        .unwrap();
+        save_test_plan(&tmp, "legacy snapshot plan");
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("legacy-manifest".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        let manifest_path = PathBuf::from(&snapshot.path).join("snapshot.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("storyPlanIncluded");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        save_test_plan(&tmp, "current plan");
+
+        restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id).unwrap();
+
+        assert_eq!(load_test_plan(&tmp).prompt, "legacy snapshot plan");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn snapshot_restore_persists_the_migrated_story_plan() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_story_plan_migration");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            ":Snapshot;",
+        )
+        .unwrap();
+        let mut plan = StoryPlan::new("legacy plan");
+        plan.synopsis = "A synopsis used by the legacy summary migration.".to_string();
+        plan.chapters.push(ChapterPlan {
+            id: "chapter-1".to_string(),
+            title: "Opening".to_string(),
+            summary: "Original summary".to_string(),
+        });
+        crate::story_plan::save_plan(&tmp, &plan).unwrap();
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("legacy-plan".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        let snapshot_plan_path = PathBuf::from(&snapshot.path).join(".ollaic/plan.json");
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(&snapshot_plan_path).unwrap()).unwrap();
+        legacy["chapters"][0]["summary"] = serde_json::Value::String(String::new());
+        fs::write(
+            &snapshot_plan_path,
+            serde_json::to_vec_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
+        save_test_plan(&tmp, "current plan");
+
+        restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id).unwrap();
+
+        let restored_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(crate::story_plan::plan_path(&tmp)).unwrap()).unwrap();
+        assert!(!restored_json["chapters"][0]["summary"]
+            .as_str()
+            .unwrap()
+            .is_empty());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn active_flow_story_plan_scope_rejects_public_snapshot_restore() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_restore_flow_guard");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            ":Snapshot;",
+        )
+        .unwrap();
+        save_test_plan(&tmp, "snapshot plan");
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("guarded-plan".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            ":Current;",
+        )
+        .unwrap();
+        save_test_plan(&tmp, "current plan");
+        let guard = crate::flow_edit_lock::FlowEditGuard::acquire(
+            &tmp,
+            &[crate::flow_edit_lock::FlowResource::StoryPlan],
+        )
+        .unwrap();
+
+        let error =
+            restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id).unwrap_err();
+
+        assert!(error.contains("故事计划"));
+        assert_eq!(
+            fs::read_to_string(tmp.join("game").join("scene").join("start.txt")).unwrap(),
+            ":Current;"
+        );
+        assert_eq!(load_test_plan(&tmp).prompt, "current plan");
+        drop(guard);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn snapshots_restore_the_absence_of_a_story_plan() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_restore_no_story_plan");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(tmp.join("game").join("scene").join("start.txt"), ":Before;").unwrap();
+
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("before-plan-exists".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        fs::create_dir_all(tmp.join(".ollaic")).unwrap();
+        fs::write(
+            tmp.join(".ollaic").join("plan.json"),
+            r#"{"version":"new"}"#,
+        )
+        .unwrap();
+
+        restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id).unwrap();
+
+        assert!(!tmp.join(".ollaic").join("plan.json").exists());
+        assert!(!tmp.join(".ollaic").join("plan.json.bak").exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn missing_snapshot_story_plan_does_not_partially_restore_project() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_missing_story_plan_is_safe");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(tmp.join("game").join("scene").join("start.txt"), ":Before;").unwrap();
+        save_test_plan(&tmp, "before");
+
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("complete-state".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        fs::remove_file(
+            PathBuf::from(&snapshot.path)
+                .join(".ollaic")
+                .join("plan.json"),
+        )
+        .unwrap();
+        fs::write(tmp.join("game").join("scene").join("start.txt"), ":After;").unwrap();
+        save_test_plan(&tmp, "after");
+
+        let result = restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id);
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(tmp.join("game").join("scene").join("start.txt")).unwrap(),
+            ":After;"
+        );
+        assert_eq!(load_test_plan(&tmp).prompt, "after");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn corrupt_snapshot_story_plan_does_not_partially_restore_project() {
+        let tmp = std::env::temp_dir().join("webgal_test_snapshot_corrupt_story_plan_is_safe");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game").join("scene")).unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            ":Snapshot;",
+        )
+        .unwrap();
+        save_test_plan(&tmp, "snapshot plan");
+        let snapshot = create_project_snapshot(
+            tmp.to_string_lossy().to_string(),
+            Some("corrupt-plan".to_string()),
+            Some("auto".to_string()),
+            None,
+        )
+        .unwrap();
+        fs::write(
+            PathBuf::from(&snapshot.path)
+                .join(".ollaic")
+                .join("plan.json"),
+            "{not valid json",
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("game").join("scene").join("start.txt"),
+            ":Current;",
+        )
+        .unwrap();
+        save_test_plan(&tmp, "current plan");
+
+        let result = restore_project_snapshot(tmp.to_string_lossy().to_string(), snapshot.id);
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(tmp.join("game").join("scene").join("start.txt")).unwrap(),
+            ":Current;"
+        );
+        assert_eq!(load_test_plan(&tmp).prompt, "current plan");
         let _ = fs::remove_dir_all(&tmp);
     }
 

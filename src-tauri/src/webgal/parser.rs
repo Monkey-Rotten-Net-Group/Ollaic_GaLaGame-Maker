@@ -157,8 +157,8 @@ fn parse_line(line: &str, index: usize) -> Option<WebGalNode> {
     }
 
     // Comment line
-    if trimmed.starts_with(';') {
-        let comment = trimmed[1..].trim().to_string();
+    if let Some(comment) = trimmed.strip_prefix(';') {
+        let comment = comment.trim().to_string();
         return Some(WebGalNode::new(
             (index + 1).to_string(),
             CommandType::Comment,

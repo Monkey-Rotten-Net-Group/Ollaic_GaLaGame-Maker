@@ -8,6 +8,7 @@ interface MissingAssetCardProps {
 }
 
 interface ConflictCardProps {
+  committing?: boolean;
   onKeepManual: () => void;
   onApplyAi: () => void;
   onRegenerate: () => void;
@@ -56,7 +57,7 @@ export function MissingAssetCard({ issues, onUseFallback, onOpenAssets, onRetryP
   );
 }
 
-export function ConflictCard({ onKeepManual, onApplyAi, onRegenerate }: ConflictCardProps) {
+export function ConflictCard({ committing = false, onKeepManual, onApplyAi, onRegenerate }: ConflictCardProps) {
   return (
     <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs">
       <div className="font-medium text-foreground">检测到内容冲突</div>
@@ -64,13 +65,13 @@ export function ConflictCard({ onKeepManual, onApplyAi, onRegenerate }: Conflict
         你在 AI 方案待确认期间手动修改了脚本。当前有两份内容：AI 方案与手动修改。
       </p>
       <div className="mt-3 space-y-2">
-        <button type="button" onClick={onKeepManual} className="w-full rounded-md bg-secondary px-3 py-2 hover:bg-secondary/70">
+        <button type="button" onClick={onKeepManual} disabled={committing} className="w-full rounded-md bg-secondary px-3 py-2 hover:bg-secondary/70 disabled:opacity-40">
           丢弃 AI 方案，保留手动修改
         </button>
-        <button type="button" onClick={onApplyAi} className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground">
-          丢弃手动修改，应用 AI 方案
+        <button type="button" onClick={onApplyAi} disabled={committing} className="w-full rounded-md bg-primary px-3 py-2 text-primary-foreground disabled:opacity-40">
+          {committing ? '提交中...' : '丢弃手动修改，应用 AI 方案'}
         </button>
-        <button type="button" onClick={onRegenerate} className="w-full rounded-md border border-border bg-background/60 px-3 py-2 hover:bg-secondary/70">
+        <button type="button" onClick={onRegenerate} disabled={committing} className="w-full rounded-md border border-border bg-background/60 px-3 py-2 hover:bg-secondary/70 disabled:opacity-40">
           重新生成（基于你的最新内容）
         </button>
       </div>

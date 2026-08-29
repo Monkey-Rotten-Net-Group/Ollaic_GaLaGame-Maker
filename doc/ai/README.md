@@ -7,7 +7,7 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 | 文档 | 内容 |
 |------|------|
 | [对话编辑 Agent](./conversational-agent.md) | 多步 function-calling 循环、可用工具、legacy 单轮兜底、状态机、流式与重试 |
-| [修改预览与应用](./change-preview.md) | 变更集(change-set)、节点级 diff、冲突处理、缺失素材、原子落盘 |
+| [修改预览与应用](./change-preview.md) | 变更集(change-set)、节点级 diff、冲突处理、缺失素材、事务落盘与恢复 |
 | [会话与记忆](./sessions-and-memory.md) | 多会话(按项目持久化)、历史截断、项目记忆(世界观/文风/偏好) |
 | [参考资料上传](./reference-uploads.md) | 上传本地文本供 AI 取材、存储位置与安全边界、只读参考工具 |
 | [AI 素材与立绘生成](./media-generation.md) | 图像生成、TTS 语音生成、进度反馈、分模态配置 |

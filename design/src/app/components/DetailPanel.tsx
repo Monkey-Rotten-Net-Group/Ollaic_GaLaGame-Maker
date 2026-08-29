@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { Image, Loader2, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
+import { Image, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandLabels } from '../lib/webgal-types';
 import { AssetPickerButton } from './AssetPicker';
@@ -11,7 +11,7 @@ import {
   loadAssetMetadata,
   type AssetMetadata,
 } from '../lib/asset-metadata';
-import { listScenes, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
+import { sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import { listAssets, type AssetInfo } from '../lib/assets-ipc';
 import { figureFileTail, spritePrefix, resolveSpriteFile } from '../lib/figure-resolve';
 import {
@@ -1074,88 +1074,6 @@ function CharacterEmotionDialog({
                 )}
               </div>
             )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-function ScenePickerButton({
-  projectPath,
-  currentValue,
-  aliases,
-  onSelect,
-}: {
-  projectPath: string;
-  currentValue: string;
-  aliases: Record<string, string>;
-  onSelect: (scene: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [scenes, setScenes] = useState<string[]>([]);
-  const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    listScenes(`${projectPath}/game/scene`)
-      .then(setScenes)
-      .catch(() => setScenes([]))
-      .finally(() => setLoading(false));
-  }, [open, projectPath]);
-
-  const filtered = scenes.filter((scene) => {
-    const q = search.toLowerCase();
-    return scene.toLowerCase().includes(q) || (aliases[scene] || '').toLowerCase().includes(q);
-  });
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="px-2 py-1.5 text-xs rounded bg-secondary hover:bg-secondary/70 transition-colors border border-border flex items-center gap-1"
-      >
-        浏览
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg p-0 overflow-hidden">
-          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
-            <DialogTitle className="text-base font-display-family">选择场景文件</DialogTitle>
-            <DialogDescription className="text-xs">读取 game/scene/ 下的 .txt 场景。</DialogDescription>
-          </DialogHeader>
-          <div className="px-5 py-3 border-b border-border">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索场景..."
-                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
-                aria-label="搜索场景"
-              />
-            </div>
-          </div>
-          <div className="max-h-[55vh] overflow-y-auto p-3">
-            {loading ? (
-              <div className="flex justify-center py-10"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
-            ) : filtered.length === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">暂无场景文件</div>
-            ) : filtered.map((scene) => (
-              <button
-                key={scene}
-                type="button"
-                onClick={() => { onSelect(scene); setOpen(false); }}
-                className={`w-full px-3 py-2 rounded-md text-left hover:bg-secondary/50 transition-colors ${
-                  currentValue === scene ? 'bg-primary/10 text-primary' : ''
-                }`}
-              >
-                <div className="text-sm truncate">{aliases[scene] || scene}</div>
-                {aliases[scene] && <div className="mt-0.5 text-xs text-muted-foreground truncate font-mono-family">{scene}</div>}
-              </button>
-            ))}
           </div>
         </DialogContent>
       </Dialog>

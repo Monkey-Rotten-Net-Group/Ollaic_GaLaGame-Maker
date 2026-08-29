@@ -15,11 +15,9 @@ import {
   Pause,
   Trash2,
   Edit3,
-  Plus,
   Sparkles,
   Loader2,
   AlertTriangle,
-  Copy,
   X,
   Award,
   Eye,
@@ -1015,13 +1013,6 @@ export function AssetManager() {
     setAiGenerateOpen(true);
   };
 
-  const handleEditSceneCard = useCallback((card: SceneAssetCard) => {
-    setSelectedSceneCard(card);
-    setEditingSceneCard(card);
-    setSelectedAsset(null);
-    setSelectedVoiceCard(null);
-  }, []);
-
   const handleSaveSceneCard = useCallback((card: SceneAssetCard) => {
     const currentMetadata = metadataRef.current;
     persistMetadata({
@@ -1132,21 +1123,6 @@ export function AssetManager() {
       setEditingSceneCard(null);
     }
   }, [persistMetadata, selectedSceneCard]);
-
-  const handleDeleteVoiceCard = useCallback((card: VoiceAssetCard) => {
-    if (!confirm(`确定删除 "${card.character || '旁白'}：${card.text}"？`)) return;
-    const currentMetadata = metadataRef.current;
-    const nextVoiceCards = { ...(currentMetadata.voiceCards ?? {}) };
-    delete nextVoiceCards[card.id];
-    const deletedVoiceCards = Array.from(new Set([...(currentMetadata.deletedVoiceCards ?? []), card.id]));
-    persistMetadata({
-      ...currentMetadata,
-      voiceCards: nextVoiceCards,
-      deletedVoiceCards,
-    });
-    setVoiceCards((current) => current.filter((item) => item.id !== card.id));
-    if (selectedVoiceCard?.id === card.id) setSelectedVoiceCard(null);
-  }, [persistMetadata, selectedVoiceCard]);
 
   const applySceneBackgroundReference = useCallback(async (sceneFile: string, assetName: string) => {
     if (!projectPath) return;

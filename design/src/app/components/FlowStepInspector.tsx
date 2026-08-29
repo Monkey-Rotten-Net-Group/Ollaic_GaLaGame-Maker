@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import type { FlowStepView } from '../lib/flow-state';
+import { isAssetQueueStep } from '../lib/pipeline-types';
 import type { AssetQueueState, AssetTaskStatus, StepStatus } from '../lib/pipeline-types';
 import type { PipelineEventRecord } from './PipelineEventLedger';
 import { Button } from './ui/button';
@@ -128,8 +129,7 @@ export function FlowStepInspector({
   const stepEvents = events.filter((record) => (
     'stepId' in record.event && record.event.stepId === selected.id
   ));
-  const showAssetQueue = selected.kind === 'asset'
-    && (selected.id === 'assetQueue' || selected.agent === 'assetQueue');
+  const showAssetQueue = selected.kind === 'asset' && isAssetQueueStep(selected);
   const runArtifactAction = async (key: string, action: () => Promise<void>) => {
     setArtifactBusy(key);
     setArtifactError(null);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialFlowState, reduceFlowEvent } from './flow-state';
+import { initialFlowState, recordsFromSnapshot, reduceFlowEvent } from './flow-state';
 import type { PipelineEvent, RunState } from './pipeline-types';
 
 const ev = (e: PipelineEvent) => e;
@@ -47,6 +47,35 @@ describe('flow-state reducer', () => {
     expect(s.runStatus).toBe('failed');
     // Downstream outline was never started.
     expect(statusOf(s, 'outline')).toBe('pending');
+  });
+
+  it('keeps a live timeout distinct from a generic failure', () => {
+    let s = initialFlowState();
+    s = reduceFlowEvent(s, ev({ type: 'runStarted', runId: 'run_1' }));
+    s = reduceFlowEvent(s, ev({ type: 'runTimedOut', runId: 'run_1', error: 'step timed out' }));
+
+    expect(s.runStatus).toBe('timeout');
+  });
+
+  it('restores a timeout event from a persisted snapshot', () => {
+    const snapshot: RunState = {
+      runId: 'run_timeout',
+      projectPath: '/tmp/project',
+      prompt: 'brief',
+      status: 'timeout',
+      startedAt: 10,
+      updatedAt: 20,
+      pinned: false,
+      allowLocalFallback: false,
+      steps: [],
+    };
+
+    const records = recordsFromSnapshot(snapshot);
+    expect(records[records.length - 1]?.event).toEqual({
+      type: 'runTimedOut',
+      runId: 'run_timeout',
+      error: '流程执行超时',
+    });
   });
 
   it('pauses and resumes', () => {

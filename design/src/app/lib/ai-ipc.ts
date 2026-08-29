@@ -96,6 +96,29 @@ export async function setAiConfig(config: AiConfig): Promise<void> {
   return invoke<void>('set_ai_config', { config });
 }
 
+/// Resolved Provider capability for the saved (or supplied) AI config. Single
+/// source of truth shared by conversational routing (`chat_tools`), settings UI,
+/// Flow Step deadline (`flowStepDeadlineMs`), and the media-fetch policy
+/// (`mediaFetchDeadlineMs`). Re-read on the backend every call so a config edit
+/// applies on the next new Flow without restarting the app.
+export interface ProviderCapability {
+  chatTools: boolean;
+  jsonMode: boolean;
+  streamingCancellation: boolean;
+  mediaUrlOutput: boolean;
+  chatDeadlineMs: number;
+  flowStepDeadlineMs: number;
+  mediaFetchDeadlineMs: number;
+}
+
+export async function getAiProviderCapability(
+  config?: AiConfig,
+): Promise<ProviderCapability> {
+  return invoke<ProviderCapability>('get_ai_provider_capability', {
+    config: config ?? null,
+  });
+}
+
 export async function getAiImageConfig(): Promise<AiProviderConfig> {
   return invoke<AiProviderConfig>('get_ai_image_config');
 }
@@ -281,8 +304,15 @@ export async function aiChatStream(
  * One non-streaming agent turn. Sends conversation + available tools to the
  * model and returns either tool calls (to execute) or final text. Used by the
  * multi-step agent loop; pure-chat streaming still goes through aiChatStream.
+ *
+ * `runId` ties the IPC to the [`ChatRunRegistry`] on the backend so Stop can
+ * revoke the in-flight Provider future. Frontend ownership checks must run
+ * in every awaited continuation before any side effect is applied locally;
+ * the backend ownership alone does not stop local state mutations when a
+ * Provider transport does not honor cancellation.
  */
 export async function aiChatTurn(
+  runId: string,
   messages: AiChatMessage[],
   tools: ToolDef[],
   characterContext?: string,
@@ -293,9 +323,15 @@ export async function aiChatTurn(
     tool_calls: m.toolCalls?.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) ?? null,
     tool_call_id: m.toolCallId ?? null,
   }));
-  return invoke<AiTurnResult>('ai_chat_turn', {
+  return invoke<AiTurnResult>('ai_chat_turn_owned', {
+    runId,
     messages: wireMessages,
     tools,
     characterContext,
   });
+}
+
+/** Tell the backend to cancel the chat run with this id. Idempotent. */
+export async function aiChatCancel(runId: string): Promise<boolean> {
+  return invoke<boolean>('ai_chat_cancel', { runId });
 }

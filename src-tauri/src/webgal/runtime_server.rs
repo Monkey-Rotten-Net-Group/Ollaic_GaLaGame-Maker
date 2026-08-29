@@ -10,7 +10,11 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use percent_encoding::percent_decode_str;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::{
     net::TcpListener,
     sync::{broadcast, RwLock},
@@ -175,7 +179,7 @@ fn forbidden(msg: &str) -> Response {
     (StatusCode::FORBIDDEN, msg.to_string()).into_response()
 }
 
-fn missing_template_response(base: &PathBuf) -> Response {
+fn missing_template_response(base: &Path) -> Response {
     let html = format!(
         r#"<!doctype html>
 <html lang="zh-CN">

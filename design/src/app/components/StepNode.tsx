@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Handle, Position } from 'reactflow';
 import { cn } from './ui/utils';
-import type { StepStatus } from '../lib/pipeline-types';
+import type { StepExecutor, StepStatus } from '../lib/pipeline-types';
 
 const KIND_LABEL: Record<string, string> = {
   plan: '故事规划',
@@ -88,6 +88,7 @@ const STATUS: Record<StepStatus, StatusStyle> = {
 export interface StepNodeData {
   id: string;
   kind: string;
+  executor: StepExecutor;
   status: StepStatus;
   attempt?: number;
   progress?: number;
@@ -121,7 +122,7 @@ function StepNodeComponent({ data, selected = false, isConnectable = true }: Ste
     ? defaultProgress(data.status)
     : Math.min(100, Math.max(0, explicitProgress));
   const progressWidth = progress == null ? '42%' : `${progress}%`;
-  const kindLabel = data.id === 'assetQueue' ? '资产生产' : KIND_LABEL[data.kind] ?? data.kind;
+  const kindLabel = data.executor.type === 'assetQueue' ? '资产生产' : KIND_LABEL[data.kind] ?? data.kind;
   const cost = Number.isFinite(data.cost) ? Math.max(0, data.cost ?? 0) : null;
 
   return (

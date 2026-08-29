@@ -17,7 +17,6 @@ import {
   Save,
   FileText,
   Upload,
-  Check,
 } from 'lucide-react';
 import type { Character, CharacterSprite } from '../lib/character-types';
 import {
@@ -145,7 +144,6 @@ function spritePrefix(characterPart: string, emotion: string): string {
 // - 本次提示词放在质量前缀之后第一位，扩散模型对靠前 token 更敏感。
 // - 有参考图时外观一致性交给参考图，本次提示词决定姿势/表情/镜头等本次内容。
 function buildSpritePrompt(
-  character: Character,
   sprite: CharacterSprite,
   isReference: boolean,
   instruction: string,
@@ -640,7 +638,7 @@ export function CharacterPanel({
         }
       }
       const media = await aiGenerateImage(
-        buildSpritePrompt(persisted, effectiveSprite, target.kind === 'reference', trimmedInstruction),
+        buildSpritePrompt(effectiveSprite, target.kind === 'reference', trimmedInstruction),
         model,
         referenceImagePath,
       );

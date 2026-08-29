@@ -157,9 +157,10 @@ function EditRow({ edit, sceneHeaders }: { edit: ChangeEdit; sceneHeaders?: Reco
 }
 
 /** Approval card for a multi-edit change set (scenes + characters + memory). */
-export function ChangeSetCard({ changeSet, sceneHeaders, onAccept, onRevert }: {
+export function ChangeSetCard({ changeSet, sceneHeaders, committing = false, onAccept, onRevert }: {
   changeSet: PendingChangeSet;
   sceneHeaders?: Record<string, SceneHeader>;
+  committing?: boolean;
   onAccept: () => void;
   onRevert: () => void;
 }) {
@@ -180,10 +181,10 @@ export function ChangeSetCard({ changeSet, sceneHeaders, onAccept, onRevert }: {
       {edits.map((edit, index) => <EditRow key={`${edit.kind}-${index}`} edit={edit} sceneHeaders={sceneHeaders} />)}
       {status === 'pending' && (
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <button type="button" onClick={onAccept} className="rounded-md bg-primary px-3 py-2 text-primary-foreground transition-all hover:opacity-90">
-            同意
+          <button type="button" onClick={onAccept} disabled={committing} className="rounded-md bg-primary px-3 py-2 text-primary-foreground transition-all hover:opacity-90 disabled:opacity-40">
+            {committing ? '提交中...' : '同意'}
           </button>
-          <button type="button" onClick={onRevert} className="rounded-md bg-secondary px-3 py-2 transition-colors hover:bg-secondary/70">
+          <button type="button" onClick={onRevert} disabled={committing} className="rounded-md bg-secondary px-3 py-2 transition-colors hover:bg-secondary/70 disabled:opacity-40">
             拒绝
           </button>
         </div>

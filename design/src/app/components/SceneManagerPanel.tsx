@@ -13,7 +13,6 @@ export interface SceneManagerPanelProps {
   sceneHeaders: Record<string, SceneHeader>;
   onSwitchScene: (name: string) => void;
   onHeaderUpdated: (name: string, header: SceneHeader) => void;
-  onRefreshProject: () => Promise<void>;
   onNewScene: () => Promise<void>;
   onDeleteScene: (name: string) => Promise<void>;
 }
@@ -27,7 +26,6 @@ export function SceneManagerPanel({
   sceneHeaders,
   onSwitchScene,
   onHeaderUpdated,
-  onRefreshProject,
   onNewScene,
   onDeleteScene,
 }: SceneManagerPanelProps) {

@@ -15,18 +15,18 @@ export async function pipelineStart(projectPath: string, prompt: string, allowLo
 }
 
 /** Pause a live (in-memory) run before the next step. */
-export async function pipelinePause(runId: string): Promise<void> {
-  return invoke<void>('pipeline_pause', { runId });
+export async function pipelinePause(runId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_pause', { runId, projectPath });
 }
 
 /** Resume an in-memory paused run. */
-export async function pipelineResume(runId: string): Promise<void> {
-  return invoke<void>('pipeline_resume', { runId });
+export async function pipelineResume(runId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_resume', { runId, projectPath });
 }
 
 /** Cancel a live run. Any in-flight agent output is discarded. */
-export async function pipelineStop(runId: string): Promise<void> {
-  return invoke<void>('pipeline_stop', { runId });
+export async function pipelineStop(runId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_stop', { runId, projectPath });
 }
 
 /** Execute exactly one ready step, then return the run to paused state. */
@@ -46,16 +46,17 @@ export async function pipelineRetryStep(runId: string, stepId: string, projectPa
 }
 
 /** Skip a pending step; downstream steps whose only dep is it become ready. */
-export async function pipelineSkipStep(runId: string, stepId: string): Promise<void> {
-  return invoke<void>('pipeline_skip_step', { runId, stepId });
+export async function pipelineSkipStep(runId: string, stepId: string, projectPath: string): Promise<void> {
+  return invoke<void>('pipeline_skip_step', { runId, stepId, projectPath });
 }
 
 export async function pipelineUpdateDependencies(
   runId: string,
   stepId: string,
   dependsOn: string[],
+  projectPath: string,
 ): Promise<void> {
-  return invoke<void>('pipeline_update_dependencies', { runId, stepId, dependsOn });
+  return invoke<void>('pipeline_update_dependencies', { runId, stepId, dependsOn, projectPath });
 }
 
 export async function pipelineUpdateStepPrompt(
@@ -84,8 +85,8 @@ export async function pipelineExportRunHistory(runId: string, projectPath: strin
 }
 
 /** Snapshot of a run's current state. */
-export async function pipelineGetState(runId: string): Promise<RunState | null> {
-  return invoke<RunState | null>('pipeline_get_state', { runId });
+export async function pipelineGetState(runId: string, projectPath: string): Promise<RunState | null> {
+  return invoke<RunState | null>('pipeline_get_state', { runId, projectPath });
 }
 
 /** The project's StoryPlan (`.ollaic/plan.json`), if one exists. */

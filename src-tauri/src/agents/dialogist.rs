@@ -8,7 +8,7 @@ use crate::story_plan::types::{
 };
 
 use super::router::{contract_error, generate_structured_validated};
-use super::{Agent, AgentContext, AgentError, AgentOutput};
+use super::{Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload};
 
 pub struct DialogistAgent;
 
@@ -51,6 +51,7 @@ impl Agent for DialogistAgent {
                 "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。必须用 figureCues 显式决定镜头需要的角色何时 show/hide；show 必须给项目已有 characterId、left/center/right position 和安全英文 emotion 标签，hide 只需 characterId。可根据演出需要补充 scenePlan 未列出的已有角色，但不要把全部角色默认上屏。对白要推进冲突、体现人物口吻。"
             });
             if let Some(routed) = generate_structured_validated::<DialogistResponse, _>(
+                ctx.chat,
                 "Dialogist / 场景对白",
                 "把场景卡扩写成可编译的结构化旁白、对白和演出。JSON 格式：{\"sceneDrafts\":[{\"sceneId\":\"...\",\"title\":\"...\",\"beats\":[{\"speaker\":null,\"text\":\"...\",\"figureCues\":[{\"action\":\"show\",\"characterId\":\"heroine\",\"position\":\"right\",\"emotion\":\"default\"}]}]}]}。",
                 &input,
@@ -67,13 +68,14 @@ impl Agent for DialogistAgent {
                     validate_drafts(ctx.scene_plans, ctx.characters, &response.scene_drafts)
                 },
             ).await? {
-                return Ok(AgentOutput {
-                    scene_drafts: Some(routed.value.scene_drafts),
-                    model: Some(routed.model),
-                    prompt_tokens: routed.prompt_tokens,
-                    completion_tokens: routed.completion_tokens,
-                    ..AgentOutput::default()
-                });
+                return Ok(AgentOutput::new(AgentOutputPayload::SceneDrafts(
+                    routed.value.scene_drafts,
+                ))
+                .with_model(
+                    routed.model,
+                    routed.prompt_tokens,
+                    routed.completion_tokens,
+                ));
             }
 
             let drafts = ctx
@@ -81,11 +83,7 @@ impl Agent for DialogistAgent {
                 .iter()
                 .map(|scene| local_draft(scene, ctx.characters))
                 .collect();
-            Ok(AgentOutput {
-                scene_drafts: Some(drafts),
-                ..AgentOutput::default()
-            }
-            .local_fallback())
+            Ok(AgentOutput::new(AgentOutputPayload::SceneDrafts(drafts)).local_fallback())
         })
     }
 }

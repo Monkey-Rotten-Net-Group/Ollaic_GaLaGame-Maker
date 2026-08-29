@@ -4,7 +4,55 @@
  * is presentation on top of this state.
  */
 
-import type { PipelineEvent, RunState, RunStatus, StepRunHistory, StepStatus } from './pipeline-types';
+import type { PipelineEvent, PipelineEventRecord, RunState, RunStatus, StepRunHistory, StepStatus } from './pipeline-types';
+
+export function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
+  const events: PipelineEventRecord[] = [{
+    event: { type: 'runStarted', runId: snapshot.runId },
+    receivedAt: snapshot.startedAt,
+  }];
+
+  for (const step of snapshot.steps) {
+    if (step.startedAt != null) {
+      events.push({
+        event: { type: 'stepStarted', runId: snapshot.runId, stepId: step.def.id, kind: step.def.kind },
+        receivedAt: step.startedAt,
+      });
+    }
+    if (step.status === 'succeeded') {
+      events.push({
+        event: { type: 'stepSucceeded', runId: snapshot.runId, stepId: step.def.id, output: step.output ?? null },
+        receivedAt: step.finishedAt ?? snapshot.updatedAt,
+      });
+    } else if (step.status === 'failed') {
+      events.push({
+        event: { type: 'stepFailed', runId: snapshot.runId, stepId: step.def.id, error: step.error ?? '未知错误' },
+        receivedAt: step.finishedAt ?? snapshot.updatedAt,
+      });
+    } else if (step.status === 'skipped') {
+      events.push({
+        event: { type: 'stepSkipped', runId: snapshot.runId, stepId: step.def.id },
+        receivedAt: step.finishedAt ?? snapshot.updatedAt,
+      });
+    }
+  }
+
+  const terminalEvent: PipelineEvent | null = snapshot.status === 'completed'
+    ? { type: 'runCompleted', runId: snapshot.runId }
+    : snapshot.status === 'failed'
+      ? { type: 'runFailed', runId: snapshot.runId, error: snapshot.steps.find((step) => step.error)?.error ?? '流程失败' }
+      : snapshot.status === 'timeout'
+        ? { type: 'runTimedOut', runId: snapshot.runId, error: snapshot.steps.find((step) => step.error)?.error ?? '流程执行超时' }
+        : snapshot.status === 'persistenceFailed'
+          ? { type: 'runPersistenceFailed', runId: snapshot.runId, error: '流程状态保存失败。请重新打开项目，从上次已保存的进度恢复。' }
+          : snapshot.status === 'cancelled'
+            ? { type: 'runStopped', runId: snapshot.runId }
+            : snapshot.status === 'paused'
+              ? { type: 'runPaused', runId: snapshot.runId }
+              : null;
+  if (terminalEvent) events.push({ event: terminalEvent, receivedAt: snapshot.updatedAt });
+  return events;
+}
 
 export interface FlowStepView {
   id: string;
@@ -81,7 +129,7 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       steps: event.state.steps.map((step) => ({
         id: step.def.id,
         kind: step.def.kind,
-        agent: step.def.agent ?? null,
+        agent: step.def.agent,
         status: step.status,
         dependsOn: step.def.dependsOn,
         attempt: step.attempt,
@@ -131,6 +179,10 @@ export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState 
       return { ...state, runStatus: 'completed' };
     case 'runFailed':
       return { ...state, runStatus: 'failed' };
+    case 'runTimedOut':
+      return { ...state, runStatus: 'timeout' };
+    case 'runPersistenceFailed':
+      return { ...state, runStatus: 'persistenceFailed' };
     case 'runStopped':
       return { ...state, runStatus: 'cancelled' };
     default:

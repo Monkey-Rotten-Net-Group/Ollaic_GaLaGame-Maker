@@ -193,7 +193,7 @@ fn guided_filter(guide: &GrayImage, input: &GrayImage, radius: u32, eps: f64) ->
     let mut out = GrayImage::new(w, h);
     for i in 0..n {
         let v = (mean_a[i] * gi[i] + mean_b[i]) * 255.0;
-        out.as_mut().as_mut()[i] = v.round().clamp(0.0, 255.0) as u8;
+        out.as_mut()[i] = v.round().clamp(0.0, 255.0) as u8;
     }
     out
 }
@@ -360,7 +360,7 @@ mod tests {
 
         for entry in std::fs::read_dir(&raw_dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().map_or(true, |e| e != "png") {
+            if path.extension().is_none_or(|e| e != "png") {
                 continue;
             }
             let name = path.file_stem().unwrap().to_str().unwrap().to_string();

@@ -67,4 +67,14 @@ describe('PipelineEventLedger', () => {
 
     expect(screen.getAllByText('导出')).toHaveLength(2);
   });
+
+  it('distinguishes timeout and persistence failure terminal events', () => {
+    render(<PipelineEventLedger events={[
+      record({ type: 'runTimedOut', runId: 'run-1', error: '步骤超过 3 分钟' }, at(10, 1)),
+      record({ type: 'runPersistenceFailed', runId: 'run-2', error: '磁盘空间不足，请清理后重新打开项目' }, at(10, 2)),
+    ]} />);
+
+    expect(screen.getByText('生产流程已超时：步骤超过 3 分钟')).toBeInTheDocument();
+    expect(screen.getByText('流程状态保存失败：磁盘空间不足，请清理后重新打开项目')).toBeInTheDocument();
+  });
 });

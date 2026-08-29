@@ -270,7 +270,8 @@ pub(crate) fn write_asset_metadata(
         fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
     }
     let source = serde_json::to_string_pretty(metadata).map_err(|e| e.to_string())?;
-    fs::write(&path, source).map_err(|e| format!("写入素材元数据失败 {}: {e}", path.display()))
+    crate::json_store::write_crash_safe(&path, source.as_bytes())
+        .map_err(|e| format!("写入素材元数据失败 {}: {e}", path.display()))
 }
 
 fn asset_metadata_key(category: &str, filename: &str) -> String {
@@ -371,20 +372,27 @@ fn rename_scene_asset_references(
 
 #[tauri::command]
 pub fn load_asset_metadata(project_path: String) -> Result<AssetMetadata, String> {
-    read_asset_metadata(&project_path)
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || read_asset_metadata(&project_path))
 }
 
 #[tauri::command]
 pub fn save_asset_metadata(project_path: String, metadata: AssetMetadata) -> Result<(), String> {
-    write_asset_metadata(&project_path, &metadata)
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || write_asset_metadata(&project_path, &metadata))
 }
 
 /// List all media files in a project's asset subdirectory.
 /// `category` maps to one of the `game/` subdirs: background, figure, bgm, vocal, video, animation, tex.
 #[tauri::command]
 pub fn list_assets(project_path: String, category: String) -> Result<Vec<AssetInfo>, String> {
-    let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
-    let dir = PathBuf::from(&project_path).join("game").join(&subdir);
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || list_assets_locked(&project_path, &category))
+}
+
+fn list_assets_locked(project_path: &str, category: &str) -> Result<Vec<AssetInfo>, String> {
+    let subdir = category_to_dir(category).ok_or_else(|| format!("未知素材类型: {category}"))?;
+    let dir = PathBuf::from(project_path).join("game").join(&subdir);
 
     if !dir.exists() {
         return Ok(Vec::new());
@@ -423,6 +431,11 @@ pub fn list_assets(project_path: String, category: String) -> Result<Vec<AssetIn
 /// List assets across all subdirectories (used for "all" view).
 #[tauri::command]
 pub fn list_all_assets(project_path: String) -> Result<Vec<AssetInfo>, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || list_all_assets_locked(&project_path))
+}
+
+fn list_all_assets_locked(project_path: &str) -> Result<Vec<AssetInfo>, String> {
     let dirs = [
         "background",
         "figure",
@@ -434,7 +447,7 @@ pub fn list_all_assets(project_path: String) -> Result<Vec<AssetInfo>, String> {
     ];
     let mut all = Vec::new();
     for d in &dirs {
-        let dir = PathBuf::from(&project_path).join("game").join(d);
+        let dir = PathBuf::from(project_path).join("game").join(d);
         if !dir.exists() {
             continue;
         }
@@ -450,6 +463,17 @@ pub fn list_all_assets(project_path: String) -> Result<Vec<AssetInfo>, String> {
 /// Copy an external file into the project's asset directory.
 #[tauri::command]
 pub fn import_asset(
+    source_path: String,
+    project_path: String,
+    category: String,
+) -> Result<AssetInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        import_asset_locked(source_path, project_path, category)
+    })
+}
+
+fn import_asset_locked(
     source_path: String,
     project_path: String,
     category: String,
@@ -504,6 +528,18 @@ pub fn save_generated_asset(
     filename: String,
     base64_data: String,
 ) -> Result<AssetInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        save_generated_asset_locked(project_path, category, filename, base64_data)
+    })
+}
+
+fn save_generated_asset_locked(
+    project_path: String,
+    category: String,
+    filename: String,
+    base64_data: String,
+) -> Result<AssetInfo, String> {
     validate_asset_filename(&filename)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let target_dir = PathBuf::from(&project_path).join("game").join(&subdir);
@@ -543,6 +579,26 @@ pub fn delete_asset(
     category: String,
     filename: String,
 ) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        delete_asset_locked(project_path, category, filename)
+    })
+}
+
+fn delete_asset_locked(
+    project_path: String,
+    category: String,
+    filename: String,
+) -> Result<(), String> {
+    delete_asset_locked_with_checkpoint(project_path, category, filename, |_| Ok(()))
+}
+
+fn delete_asset_locked_with_checkpoint(
+    project_path: String,
+    category: String,
+    filename: String,
+    mut checkpoint: impl FnMut(&'static str) -> Result<(), String>,
+) -> Result<(), String> {
     validate_asset_filename(&filename)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let path = PathBuf::from(&project_path)
@@ -563,15 +619,19 @@ pub fn delete_asset(
         return Err("不允许删除项目目录外的文件".to_string());
     }
 
-    fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
-    if let Some(reference_dir) = reference_dir_for_asset(&project_path, &subdir, &filename) {
-        if reference_dir.exists() {
-            fs::remove_dir_all(&reference_dir)
-                .map_err(|e| format!("删除素材参考目录失败 {}: {e}", reference_dir.display()))?;
+    crate::assets::transaction::run_locked(&project_path, || {
+        fs::remove_file(&path).map_err(|e| format!("删除失败: {e}"))?;
+        checkpoint("asset")?;
+        if let Some(reference_dir) = reference_dir_for_asset(&project_path, &subdir, &filename) {
+            if reference_dir.exists() {
+                fs::remove_dir_all(&reference_dir).map_err(|e| {
+                    format!("删除素材参考目录失败 {}: {e}", reference_dir.display())
+                })?;
+            }
         }
-    }
-    delete_asset_metadata(&project_path, &subdir, &filename)?;
-    Ok(())
+        checkpoint("references")?;
+        delete_asset_metadata(&project_path, &subdir, &filename)
+    })
 }
 
 /// Rename an asset file.
@@ -581,6 +641,28 @@ pub fn rename_asset(
     category: String,
     old_name: String,
     new_name: String,
+) -> Result<AssetInfo, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        rename_asset_locked(project_path, category, old_name, new_name)
+    })
+}
+
+fn rename_asset_locked(
+    project_path: String,
+    category: String,
+    old_name: String,
+    new_name: String,
+) -> Result<AssetInfo, String> {
+    rename_asset_locked_with_checkpoint(project_path, category, old_name, new_name, |_| Ok(()))
+}
+
+fn rename_asset_locked_with_checkpoint(
+    project_path: String,
+    category: String,
+    old_name: String,
+    new_name: String,
+    mut checkpoint: impl FnMut(&'static str) -> Result<(), String>,
 ) -> Result<AssetInfo, String> {
     validate_asset_filename(&old_name)?;
     validate_asset_filename(&new_name)?;
@@ -608,36 +690,41 @@ pub fn rename_asset(
         }
     }
 
-    fs::rename(&old_path, &new_path).map_err(|e| format!("重命名失败: {e}"))?;
-    if let (Some(old_reference_dir), Some(new_reference_dir)) =
-        (old_reference_dir, new_reference_dir)
-    {
-        if old_reference_dir.exists() {
-            fs::rename(&old_reference_dir, &new_reference_dir).map_err(|e| {
-                format!(
-                    "迁移素材参考目录失败 {} -> {}: {e}",
-                    old_reference_dir.display(),
-                    new_reference_dir.display()
-                )
-            })?;
+    crate::assets::transaction::run_locked(&project_path, || {
+        fs::rename(&old_path, &new_path).map_err(|e| format!("重命名失败: {e}"))?;
+        checkpoint("asset")?;
+        if let (Some(old_reference_dir), Some(new_reference_dir)) =
+            (old_reference_dir, new_reference_dir)
+        {
+            if old_reference_dir.exists() {
+                fs::rename(&old_reference_dir, &new_reference_dir).map_err(|e| {
+                    format!(
+                        "迁移素材参考目录失败 {} -> {}: {e}",
+                        old_reference_dir.display(),
+                        new_reference_dir.display()
+                    )
+                })?;
+            }
         }
-    }
-    rename_scene_asset_references(&project_path, &subdir, &old_name, &new_name)?;
-    rename_asset_metadata(&project_path, &subdir, &old_name, &new_name)?;
+        checkpoint("references")?;
+        rename_scene_asset_references(&project_path, &subdir, &old_name, &new_name)?;
+        checkpoint("scenes")?;
+        rename_asset_metadata(&project_path, &subdir, &old_name, &new_name)?;
 
-    let metadata = new_path.metadata().map_err(|e| e.to_string())?;
-    let ext = new_path
-        .extension()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
+        let metadata = new_path.metadata().map_err(|e| e.to_string())?;
+        let ext = new_path
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
-    Ok(AssetInfo {
-        name: new_name,
-        path: new_path.to_string_lossy().to_string(),
-        category: subdir.to_string(),
-        size: metadata.len(),
-        extension: ext,
+        Ok(AssetInfo {
+            name: new_name,
+            path: new_path.to_string_lossy().to_string(),
+            category: subdir.to_string(),
+            size: metadata.len(),
+            extension: ext,
+        })
     })
 }
 
@@ -647,7 +734,18 @@ pub async fn find_asset_usages(
     filename: String,
     category: Option<String>,
 ) -> Result<Vec<AssetUsage>, String> {
-    let scene_dir = PathBuf::from(&project_path).join("game").join("scene");
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        find_asset_usages_locked(&project_path, &filename, category.as_deref())
+    })
+}
+
+fn find_asset_usages_locked(
+    project_path: &str,
+    filename: &str,
+    category: Option<&str>,
+) -> Result<Vec<AssetUsage>, String> {
+    let scene_dir = PathBuf::from(project_path).join("game").join("scene");
     if !scene_dir.exists() {
         return Ok(Vec::new());
     }
@@ -672,9 +770,7 @@ pub async fn find_asset_usages(
 
         for reference in references::find_asset_references(&content) {
             if reference.filename != filename
-                || category
-                    .as_deref()
-                    .is_some_and(|category| category != reference.category)
+                || category.is_some_and(|category| category != reference.category)
             {
                 continue;
             }
@@ -757,6 +853,16 @@ fn voice_card_id(scene_stem: &str, dialogue_index: u32) -> String {
 /// that don't already have one. Called after scene save.
 #[tauri::command]
 pub fn sync_scene_voice_cards(
+    project_path: String,
+    scene_file: String,
+) -> Result<Vec<VoiceAssetCard>, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        sync_scene_voice_cards_locked(project_path, scene_file)
+    })
+}
+
+fn sync_scene_voice_cards_locked(
     project_path: String,
     scene_file: String,
 ) -> Result<Vec<VoiceAssetCard>, String> {
@@ -859,6 +965,17 @@ pub fn fill_voice_card(
     voice_card_id: String,
     asset_filename: String,
 ) -> Result<VoiceAssetCard, String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        fill_voice_card_locked(project_path, voice_card_id, asset_filename)
+    })
+}
+
+fn fill_voice_card_locked(
+    project_path: String,
+    voice_card_id: String,
+    asset_filename: String,
+) -> Result<VoiceAssetCard, String> {
     let mut metadata = read_asset_metadata(&project_path)?;
     // Snapshot the fields we need before taking a mutable reference.
     let card = metadata
@@ -895,6 +1012,13 @@ pub fn fill_voice_card(
 /// Delete a voice card (mark as deleted so it won't be re-created on sync).
 #[tauri::command]
 pub fn delete_voice_card(project_path: String, voice_card_id: String) -> Result<(), String> {
+    let root = PathBuf::from(&project_path);
+    crate::project_lock::with_project_lock(&root, || {
+        delete_voice_card_locked(project_path, voice_card_id)
+    })
+}
+
+fn delete_voice_card_locked(project_path: String, voice_card_id: String) -> Result<(), String> {
     let mut metadata = read_asset_metadata(&project_path)?;
     let already_deleted = metadata.deleted_voice_cards.contains(&voice_card_id);
     metadata.voice_cards.remove(&voice_card_id);
@@ -1151,6 +1275,108 @@ mod tests {
             .join("background")
             .join("park.webp")
             .exists());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn delete_asset_failure_restores_file_references_and_metadata() {
+        let tmp = std::env::temp_dir().join("webgal_test_asset_delete_transaction");
+        let _ = fs::remove_dir_all(&tmp);
+        let project = tmp.to_string_lossy().into_owned();
+        let asset = tmp.join("game/background/park.webp");
+        let references = tmp.join("game/config/references/backgrounds/park.webp");
+        fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        fs::create_dir_all(&references).unwrap();
+        fs::write(&asset, "asset").unwrap();
+        fs::write(references.join("sketch.webp"), "reference").unwrap();
+        let mut metadata = AssetMetadata::default();
+        metadata
+            .aliases
+            .insert("background/park.webp".to_string(), "Park".to_string());
+        write_asset_metadata(&project, &metadata).unwrap();
+
+        let error = crate::project_lock::with_project_lock(&tmp, || {
+            delete_asset_locked_with_checkpoint(
+                project.clone(),
+                "background".to_string(),
+                "park.webp".to_string(),
+                |step| {
+                    (step != "references")
+                        .then_some(())
+                        .ok_or_else(|| "injected delete failure".to_string())
+                },
+            )
+        })
+        .unwrap_err();
+
+        assert!(error.contains("injected delete failure"));
+        assert_eq!(fs::read_to_string(asset).unwrap(), "asset");
+        assert_eq!(
+            fs::read_to_string(references.join("sketch.webp")).unwrap(),
+            "reference"
+        );
+        assert_eq!(
+            read_asset_metadata(&project)
+                .unwrap()
+                .aliases
+                .get("background/park.webp"),
+            Some(&"Park".to_string())
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn rename_asset_failure_restores_file_references_scene_and_metadata() {
+        let tmp = std::env::temp_dir().join("webgal_test_asset_rename_transaction");
+        let _ = fs::remove_dir_all(&tmp);
+        let project = tmp.to_string_lossy().into_owned();
+        let old_asset = tmp.join("game/background/park.webp");
+        let new_asset = tmp.join("game/background/garden.webp");
+        let old_references = tmp.join("game/config/references/backgrounds/park.webp");
+        let new_references = tmp.join("game/config/references/backgrounds/garden.webp");
+        let scene = tmp.join("game/scene/start.txt");
+        fs::create_dir_all(old_asset.parent().unwrap()).unwrap();
+        fs::create_dir_all(&old_references).unwrap();
+        fs::create_dir_all(scene.parent().unwrap()).unwrap();
+        fs::write(&old_asset, "asset").unwrap();
+        fs::write(old_references.join("sketch.webp"), "reference").unwrap();
+        fs::write(&scene, "changeBg:park.webp;\n").unwrap();
+        let mut metadata = AssetMetadata::default();
+        metadata
+            .aliases
+            .insert("background/park.webp".to_string(), "Park".to_string());
+        write_asset_metadata(&project, &metadata).unwrap();
+
+        let error = crate::project_lock::with_project_lock(&tmp, || {
+            rename_asset_locked_with_checkpoint(
+                project.clone(),
+                "background".to_string(),
+                "park.webp".to_string(),
+                "garden.webp".to_string(),
+                |step| {
+                    (step != "scenes")
+                        .then_some(())
+                        .ok_or_else(|| "injected rename failure".to_string())
+                },
+            )
+        })
+        .unwrap_err();
+
+        assert!(error.contains("injected rename failure"));
+        assert_eq!(fs::read_to_string(&old_asset).unwrap(), "asset");
+        assert!(!new_asset.exists());
+        assert_eq!(
+            fs::read_to_string(old_references.join("sketch.webp")).unwrap(),
+            "reference"
+        );
+        assert!(!new_references.exists());
+        assert_eq!(fs::read_to_string(scene).unwrap(), "changeBg:park.webp;\n");
+        let metadata = read_asset_metadata(&project).unwrap();
+        assert_eq!(
+            metadata.aliases.get("background/park.webp"),
+            Some(&"Park".to_string())
+        );
+        assert!(!metadata.aliases.contains_key("background/garden.webp"));
         let _ = fs::remove_dir_all(&tmp);
     }
 }

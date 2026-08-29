@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::characters::types::Character;
 
 use super::router::{contract_error, generate_structured_validated};
-use super::{Agent, AgentContext, AgentError, AgentOutput};
+use super::{Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload};
 
 pub struct CharacterAgent;
 
@@ -36,6 +36,7 @@ impl Agent for CharacterAgent {
                 "requirements": "生成 3-5 个可直接保存的角色卡。id 使用稳定英文小写标识，并覆盖 scenePlans.characterIds；若对 provisional characterId 做了小写化、翻译或改名，必须把原值逐字保存在该角色 aliases。name 是 WebGAL 对白中的显示名。description、personality、dialogueStyle、keywords 必须具体。sprites 留空，资产由 P2 生成。"
             });
             if let Some(routed) = generate_structured_validated::<CharacterResponse, _>(
+                ctx.chat,
                 "Character / 角色设计",
                 concat!(
                     "根据剧情结构创建一致、可演出的角色卡。严格使用 JSON：",
@@ -49,88 +50,96 @@ impl Agent for CharacterAgent {
                     validate_characters(&response.characters, ctx.scene_plans)
                 },
             ).await? {
-                return Ok(AgentOutput {
-                    characters: Some(routed.value.characters),
-                    model: Some(routed.model),
-                    prompt_tokens: routed.prompt_tokens,
-                    completion_tokens: routed.completion_tokens,
-                    ..AgentOutput::default()
-                });
+                return Ok(AgentOutput::new(AgentOutputPayload::Characters(
+                    routed.value.characters,
+                ))
+                .with_model(
+                    routed.model,
+                    routed.prompt_tokens,
+                    routed.completion_tokens,
+                ));
             }
 
             let characters = vec![
-                character(
-                    "protagonist",
-                    "陆川",
-                    "习惯先观察再行动的转学生，是异常回声的新感知者。",
-                    "克制、敏锐、害怕连累别人；越紧张越会用事实掩饰情绪。",
-                    "短句，先确认事实再表达感受；真正下定决心时会直接叫对方名字。",
-                    "男",
-                    "17",
-                    &["主人公", "转学生", "锚点"],
-                    "中立",
-                ),
-                character(
-                    "heroine",
-                    "林夏",
-                    "掌握静默协议真相的少女，独自追查被抹去的异常记录。",
-                    "冷静外表下有强烈的责任感，不轻易求助，却会记住他人的微小善意。",
-                    "语气简洁，常用反问试探；放下戒备后会把真正担忧藏在玩笑后面。",
-                    "女",
-                    "17",
-                    &["女主角", "知情者", "异常回声"],
-                    "越界者",
-                ),
-                character(
-                    "friend",
-                    "周遥",
-                    "主人公在新环境中的第一个朋友，也是维持日常秩序的现实提醒。",
-                    "热心、务实、对气氛变化很敏感；不理解秘密，却愿意保护朋友。",
-                    "自然口语，会用具体小事打断沉重气氛；认真时不绕弯子。",
-                    "女",
-                    "17",
-                    &["朋友", "日常", "见证者"],
-                    "守序",
-                ),
+                CharacterSeed {
+                    id: "protagonist",
+                    name: "陆川",
+                    description: "习惯先观察再行动的转学生，是异常回声的新感知者。",
+                    personality: "克制、敏锐、害怕连累别人；越紧张越会用事实掩饰情绪。",
+                    dialogue_style: "短句，先确认事实再表达感受；真正下定决心时会直接叫对方名字。",
+                    gender: "男",
+                    age: "17",
+                    keywords: &["主人公", "转学生", "锚点"],
+                    stance: "中立",
+                }
+                .build(),
+                CharacterSeed {
+                    id: "heroine",
+                    name: "林夏",
+                    description: "掌握静默协议真相的少女，独自追查被抹去的异常记录。",
+                    personality: "冷静外表下有强烈的责任感，不轻易求助，却会记住他人的微小善意。",
+                    dialogue_style: "语气简洁，常用反问试探；放下戒备后会把真正担忧藏在玩笑后面。",
+                    gender: "女",
+                    age: "17",
+                    keywords: &["女主角", "知情者", "异常回声"],
+                    stance: "越界者",
+                }
+                .build(),
+                CharacterSeed {
+                    id: "friend",
+                    name: "周遥",
+                    description: "主人公在新环境中的第一个朋友，也是维持日常秩序的现实提醒。",
+                    personality: "热心、务实、对气氛变化很敏感；不理解秘密，却愿意保护朋友。",
+                    dialogue_style: "自然口语，会用具体小事打断沉重气氛；认真时不绕弯子。",
+                    gender: "女",
+                    age: "17",
+                    keywords: &["朋友", "日常", "见证者"],
+                    stance: "守序",
+                }
+                .build(),
             ];
-            Ok(AgentOutput {
-                characters: Some(characters),
-                ..AgentOutput::default()
-            }
-            .local_fallback())
+            Ok(AgentOutput::new(AgentOutputPayload::Characters(characters)).local_fallback())
         })
     }
 }
 
-fn character(
-    id: &str,
-    name: &str,
-    description: &str,
-    personality: &str,
-    dialogue_style: &str,
-    gender: &str,
-    age: &str,
-    keywords: &[&str],
-    stance: &str,
-) -> Character {
-    Character {
-        id: id.to_string(),
-        name: name.to_string(),
-        aliases: Vec::new(),
-        description: description.to_string(),
-        personality: personality.to_string(),
-        reference_images: Vec::new(),
-        stance: stance.to_string(),
-        keywords: keywords.iter().map(|value| value.to_string()).collect(),
-        dialogue_style: dialogue_style.to_string(),
-        gender: gender.to_string(),
-        age: age.to_string(),
-        sprites: Vec::new(),
-        default_voice: None,
-        voice_timbre: None,
-        relations: Vec::new(),
-        color_theme: None,
-        notes: String::new(),
+struct CharacterSeed<'a> {
+    id: &'a str,
+    name: &'a str,
+    description: &'a str,
+    personality: &'a str,
+    dialogue_style: &'a str,
+    gender: &'a str,
+    age: &'a str,
+    keywords: &'a [&'a str],
+    stance: &'a str,
+}
+
+impl CharacterSeed<'_> {
+    fn build(self) -> Character {
+        Character {
+            id: self.id.to_string(),
+            name: self.name.to_string(),
+            aliases: Vec::new(),
+            description: self.description.to_string(),
+            personality: self.personality.to_string(),
+            reference_images: Vec::new(),
+            stance: self.stance.to_string(),
+            keywords: self
+                .keywords
+                .iter()
+                .map(|value| value.to_string())
+                .collect(),
+            dialogue_style: self.dialogue_style.to_string(),
+            gender: self.gender.to_string(),
+            age: self.age.to_string(),
+            sprites: Vec::new(),
+            default_voice: None,
+            voice_timbre: None,
+            relations: Vec::new(),
+            color_theme: None,
+            notes: String::new(),
+        }
     }
 }
 
@@ -251,28 +260,30 @@ mod tests {
     #[test]
     fn uncovered_provisional_character_id_reports_upstream_path() {
         let characters = vec![
-            character(
-                "hero",
-                "陆川",
-                "主角",
-                "谨慎",
-                "短句",
-                "男",
-                "17",
-                &["主角"],
-                "中立",
-            ),
-            character(
-                "heroine",
-                "林夏",
-                "女主",
-                "冷静",
-                "简洁",
-                "女",
-                "17",
-                &["女主"],
-                "越界",
-            ),
+            CharacterSeed {
+                id: "hero",
+                name: "陆川",
+                description: "主角",
+                personality: "谨慎",
+                dialogue_style: "短句",
+                gender: "男",
+                age: "17",
+                keywords: &["主角"],
+                stance: "中立",
+            }
+            .build(),
+            CharacterSeed {
+                id: "heroine",
+                name: "林夏",
+                description: "女主",
+                personality: "冷静",
+                dialogue_style: "简洁",
+                gender: "女",
+                age: "17",
+                keywords: &["女主"],
+                stance: "越界",
+            }
+            .build(),
         ];
         let scenes = vec![ScenePlan {
             id: "opening".into(),
@@ -298,6 +309,7 @@ mod tests {
         }];
         let agent = CharacterAgent;
         let ctx = AgentContext {
+            chat: &crate::agents::router::NoChatGateway,
             prompt: "校园悬疑恋爱",
             instruction: "",
             synopsis: "相遇",
@@ -312,7 +324,9 @@ mod tests {
             allow_local_fallback: true,
         };
         let out = agent.run(&ctx).await.unwrap();
-        let characters = out.characters.unwrap();
+        let AgentOutputPayload::Characters(characters) = out.payload else {
+            panic!("Character Agent must return characters")
+        };
         assert_eq!(characters.len(), 3);
         assert!(characters
             .iter()

@@ -1,9 +1,9 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDrag, useDrop } from 'react-dnd';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
   ArrowRight, BookOpen, Clipboard, Copy, FileText, GitBranch, GripVertical, Image,
-  MoreHorizontal, Music, Play, Plus, Scissors, Search, Trash2, Users,
+  MoreHorizontal, Music, Plus, Scissors, Search, Trash2, Users,
 } from 'lucide-react';
 import type { Character } from '../../lib/character-types';
 import type { SceneHeader } from '../../lib/webgal-ipc';
@@ -21,7 +21,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { commandIconFor, commandToneFor, getCommandSummary } from './command-presentation';
+import { commandIconFor, getCommandSummary } from './command-presentation';
 
 interface ScriptCommandStreamProps {
   nodes: WebGalNode[];

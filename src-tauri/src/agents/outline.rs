@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::story_plan::types::{BranchEdge, BranchGraph, ChapterPlan, ScenePlan};
 
 use super::router::{contract_error, generate_structured_validated};
-use super::{Agent, AgentContext, AgentError, AgentOutput};
+use super::{Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload};
 
 /// Plotter: turns canon into chapters, scene cards, and an explicit branch graph.
 pub struct OutlineAgent;
@@ -152,6 +152,7 @@ impl Agent for OutlineAgent {
                 "requirements": "生成 3 章、至少 5 个 scene。入口 scene 的 file 必须是 start.txt；其他 file 只能是无路径的 .txt 文件名。scene id 唯一，chapterId 必须引用章节 id。branches.entryScene 和每条 edge 的 from/to 使用 scene id，至少包含一次有 choice 文本的分支。"
             });
             if let Some(routed) = generate_structured_validated::<OutlineResponse, _>(
+                ctx.chat,
                 "Plotter / 剧情结构",
                 concat!(
                     "输出可执行的章节、场景卡和分支拓扑。严格使用 JSON：",
@@ -164,15 +165,16 @@ impl Agent for OutlineAgent {
             )
             .await?
             {
-                return Ok(AgentOutput {
-                    chapters: Some(routed.value.chapters),
-                    scene_plans: Some(routed.value.scene_plans),
-                    branches: Some(routed.value.branches),
-                    model: Some(routed.model),
-                    prompt_tokens: routed.prompt_tokens,
-                    completion_tokens: routed.completion_tokens,
-                    ..AgentOutput::default()
-                });
+                return Ok(AgentOutput::new(AgentOutputPayload::Outline {
+                    chapters: routed.value.chapters,
+                    scene_plans: routed.value.scene_plans,
+                    branches: routed.value.branches,
+                })
+                .with_model(
+                    routed.model,
+                    routed.prompt_tokens,
+                    routed.completion_tokens,
+                ));
             }
             let chapters = vec![
                 ChapterPlan {
@@ -256,12 +258,11 @@ impl Agent for OutlineAgent {
                     edge("decision", "ending_depart", Some("遵守协议，回到日常")),
                 ],
             };
-            Ok(AgentOutput {
-                chapters: Some(chapters),
-                scene_plans: Some(scene_plans),
-                branches: Some(branches),
-                ..AgentOutput::default()
-            }
+            Ok(AgentOutput::new(AgentOutputPayload::Outline {
+                chapters,
+                scene_plans,
+                branches,
+            })
             .local_fallback())
         })
     }
@@ -330,6 +331,7 @@ mod tests {
     async fn outline_agent_produces_two_chapters_from_synopsis() {
         let agent = OutlineAgent;
         let ctx = AgentContext {
+            chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
             synopsis: "主角在校园发现异常信号",
@@ -344,13 +346,19 @@ mod tests {
             allow_local_fallback: true,
         };
         let out = agent.run(&ctx).await.unwrap();
-        let chapters = out.chapters.expect("outline should produce chapters");
+        let AgentOutputPayload::Outline {
+            chapters,
+            scene_plans,
+            branches,
+        } = out.payload
+        else {
+            panic!("Outline Agent must return an outline")
+        };
         assert_eq!(chapters.len(), 3);
         assert_eq!(chapters[0].id, "ch1");
         assert_eq!(chapters[1].id, "ch2");
         assert!(chapters[0].summary.contains("异常信号"));
-        assert_eq!(out.scene_plans.as_ref().unwrap().len(), 6);
-        assert_eq!(out.branches.as_ref().unwrap().entry_scene, "opening");
-        assert!(out.synopsis.is_none());
+        assert_eq!(scene_plans.len(), 6);
+        assert_eq!(branches.entry_scene, "opening");
     }
 }

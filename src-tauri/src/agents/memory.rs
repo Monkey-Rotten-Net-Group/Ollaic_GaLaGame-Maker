@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use super::router::{contract_error, generate_structured_validated};
-use super::{Agent, AgentContext, AgentError, AgentOutput};
+use super::{Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload};
 
 /// Worldbuilder: creates shared canon and terminology for all downstream Agents.
 pub struct MemoryAgent;
@@ -57,20 +57,22 @@ impl Agent for MemoryAgent {
                 "requirements": "世界规则、主要舞台、社会日常、核心秘密、冲突边界；glossary 至少 4 项。"
             });
             if let Some(routed) = generate_structured_validated::<MemoryResponse, _>(
+                ctx.chat,
                 "Worldbuilder / 世界观设计",
                 "建立能约束后续剧情和对白的世界设定。JSON 格式：{\"worldbook\":\"...\",\"glossary\":{\"术语\":\"定义\"}}。",
                 &input,
                 ctx.allow_local_fallback,
                 validate_response,
             ).await? {
-                return Ok(AgentOutput {
-                    worldbook: Some(routed.value.worldbook),
-                    glossary: Some(routed.value.glossary),
-                    model: Some(routed.model),
-                    prompt_tokens: routed.prompt_tokens,
-                    completion_tokens: routed.completion_tokens,
-                    ..AgentOutput::default()
-                });
+                return Ok(AgentOutput::new(AgentOutputPayload::Memory {
+                    worldbook: routed.value.worldbook,
+                    glossary: routed.value.glossary,
+                })
+                .with_model(
+                    routed.model,
+                    routed.prompt_tokens,
+                    routed.completion_tokens,
+                ));
             }
             let worldbook = format!(
                 "故事发生在一个表面维持日常秩序、实际被异常事件悄悄改变的城市。核心舞台既是主人公最熟悉的生活圈，也是秘密留下痕迹的地方。世界规则要求每次获得真相都必须付出关系或记忆上的代价；公开权力希望维持安稳，年轻角色则更在意真实与彼此。所有超常现象都应服务于人物选择，不可无条件解决冲突。故事基线：{}",
@@ -94,11 +96,10 @@ impl Agent for MemoryAgent {
                     "角色主动承担代价、打破静默协议追索真相的行为。".to_string(),
                 ),
             ]);
-            Ok(AgentOutput {
-                worldbook: Some(worldbook),
-                glossary: Some(glossary),
-                ..AgentOutput::default()
-            }
+            Ok(AgentOutput::new(AgentOutputPayload::Memory {
+                worldbook,
+                glossary,
+            })
             .local_fallback())
         })
     }
@@ -122,6 +123,7 @@ mod tests {
     async fn memory_agent_produces_worldbook_from_synopsis() {
         let agent = MemoryAgent;
         let ctx = AgentContext {
+            chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
             synopsis: "赛博校园里的记忆黑客",
@@ -136,14 +138,22 @@ mod tests {
             allow_local_fallback: true,
         };
         let out = agent.run(&ctx).await.unwrap();
-        assert!(out.worldbook.as_deref().unwrap().contains("赛博校园"));
-        assert!(out.synopsis.is_none());
+        let AgentOutputPayload::Memory {
+            worldbook,
+            glossary,
+        } = out.payload
+        else {
+            panic!("Memory Agent must return memory")
+        };
+        assert!(worldbook.contains("赛博校园"));
+        assert_eq!(glossary.len(), 4);
     }
 
     #[tokio::test]
     async fn memory_agent_rejects_empty_synopsis() {
         let agent = MemoryAgent;
         let ctx = AgentContext {
+            chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
             synopsis: "  ",

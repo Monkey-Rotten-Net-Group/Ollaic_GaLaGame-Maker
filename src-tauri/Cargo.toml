@@ -17,7 +17,7 @@ genai = "0.5"
 futures = "0.3"
 futures-util = "0.3"
 dirs = "5"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "fs", "io-util", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "fs", "io-util", "time", "test-util"] }
 axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.5", features = ["fs"] }
 mime_guess = "2"

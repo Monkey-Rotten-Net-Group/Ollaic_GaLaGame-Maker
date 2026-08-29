@@ -1,10 +1,45 @@
 use serde::de::DeserializeOwned;
 use std::fmt::Write as _;
 use std::future::Future;
+use std::pin::Pin;
 
 use super::AgentError;
 
 type ModelCompletion = (String, String, Option<u32>, Option<u32>);
+
+pub trait ChatGateway: Send + Sync {
+    fn complete<'a>(
+        &'a self,
+        system: &'a str,
+        user: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<ModelCompletion>, String>> + Send + 'a>>;
+}
+
+pub struct ConfiguredChatGateway;
+
+impl ChatGateway for ConfiguredChatGateway {
+    fn complete<'a>(
+        &'a self,
+        system: &'a str,
+        user: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<ModelCompletion>, String>> + Send + 'a>> {
+        Box::pin(crate::ai::commands::complete_agent_text(system, user))
+    }
+}
+
+#[cfg(test)]
+pub struct NoChatGateway;
+
+#[cfg(test)]
+impl ChatGateway for NoChatGateway {
+    fn complete<'a>(
+        &'a self,
+        _system: &'a str,
+        _user: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<ModelCompletion>, String>> + Send + 'a>> {
+        Box::pin(async { Ok(None) })
+    }
+}
 
 pub struct Routed<T> {
     pub value: T,
@@ -14,6 +49,7 @@ pub struct Routed<T> {
 }
 
 pub async fn generate_structured_validated<T, V>(
+    gateway: &dyn ChatGateway,
     role: &str,
     task: &str,
     context: &serde_json::Value,
@@ -24,15 +60,13 @@ where
     T: DeserializeOwned,
     V: Fn(&mut T) -> Result<(), AgentError>,
 {
-    if cfg!(test) {
-        return Ok(None);
-    }
     let system = format!(
         "你是 Ollaic 的 {role} Agent。{task}\n只输出一个符合要求的 JSON 对象，不要 Markdown，不要解释。"
     );
     let user = serde_json::to_string_pretty(context)
         .map_err(|error| AgentError(format!("failed to serialize Agent context: {error}")))?;
-    let Some(first) = crate::ai::commands::complete_agent_text(&system, &user)
+    let Some(first) = gateway
+        .complete(&system, &user)
         .await
         .map_err(|error| AgentError(format!("{role} model failed: {error}")))?
     else {
@@ -44,17 +78,18 @@ where
             )))
         };
     };
-    let (value, (_, model, prompt_tokens, completion_tokens)) = repair_once_validated(
-        role,
-        task,
-        &user,
-        first,
-        &validate,
-        |repair_system, repair_user| async move {
-            crate::ai::commands::complete_agent_text(&repair_system, &repair_user).await
-        },
-    )
-    .await?;
+    let (value, (_, model, prompt_tokens, completion_tokens)) =
+        repair_once_validated(
+            role,
+            task,
+            &user,
+            first,
+            &validate,
+            |repair_system, repair_user| async move {
+                gateway.complete(&repair_system, &repair_user).await
+            },
+        )
+        .await?;
     Ok(Some(Routed {
         value,
         model,
@@ -63,6 +98,7 @@ where
     }))
 }
 
+#[cfg(test)]
 async fn repair_once<T, F, Fut>(
     role: &str,
     task: &str,
@@ -193,12 +229,42 @@ mod tests {
     use super::*;
     use serde::Deserialize;
 
+    struct UnavailableGateway;
+
+    impl ChatGateway for UnavailableGateway {
+        fn complete<'a>(
+            &'a self,
+            _system: &'a str,
+            _user: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<ModelCompletion>, String>> + Send + 'a>>
+        {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
     #[test]
     fn extracts_json_from_markdown_wrapped_response() {
         assert_eq!(
             extract_json("```json\n{\"ok\":true}\n```"),
             Some("{\"ok\":true}")
         );
+    }
+
+    #[tokio::test]
+    async fn unavailable_gateway_does_not_implicitly_authorize_local_fallback() {
+        let error = generate_structured_validated::<RequiredResponse, _>(
+            &UnavailableGateway,
+            "Test Agent",
+            "return an id",
+            &serde_json::json!({}),
+            false,
+            |_| Ok(()),
+        )
+        .await
+        .err()
+        .expect("an unavailable gateway should require run authorization");
+
+        assert!(error.0.contains("did not approve local fallback"));
     }
 
     #[tokio::test]

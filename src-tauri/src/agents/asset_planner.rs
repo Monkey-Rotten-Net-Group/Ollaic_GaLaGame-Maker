@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::story_plan::types::AssetTaskPlan;
 
 use super::router::{contract_error, generate_structured_validated};
-use super::{Agent, AgentContext, AgentError, AgentOutput};
+use super::{Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload};
 
 pub struct AssetPlannerAgent;
 
@@ -193,6 +193,7 @@ impl Agent for AssetPlannerAgent {
                 "requirements": "仅规划需求，不生成或绑定素材。kind 使用 background、figure、bgm、sfx 之一；targetStem 使用安全英文/数字/下划线；sceneRef/characterRef 引用已有 id；status 固定 pending。覆盖每个场景的背景、Scene Staging 每个 show cue 的角色与 emotion 立绘，以及全局 BGM。figure 任务必须包含 emotion，prompt 必须要求单人、完整身体、纯色背景和对应表情，不得生成多人合照或全幅 CG。"
             });
             if let Some(routed) = generate_structured_validated::<AssetPlanResponse, _>(
+                ctx.chat,
                 "AssetPlanner / 资产规划",
                 concat!(
                     "把故事内容转成 P2 可消费的结构化资产任务。严格使用 JSON：",
@@ -211,13 +212,14 @@ impl Agent for AssetPlannerAgent {
                     validate_asset_plan(&response.asset_plan, ctx.scene_plans, ctx.characters)
                 },
             ).await? {
-                return Ok(AgentOutput {
-                    asset_plan: Some(routed.value.asset_plan),
-                    model: Some(routed.model),
-                    prompt_tokens: routed.prompt_tokens,
-                    completion_tokens: routed.completion_tokens,
-                    ..AgentOutput::default()
-                });
+                return Ok(AgentOutput::new(AgentOutputPayload::AssetPlan(
+                    routed.value.asset_plan,
+                ))
+                .with_model(
+                    routed.model,
+                    routed.prompt_tokens,
+                    routed.completion_tokens,
+                ));
             }
 
             let mut tasks: Vec<AssetTaskPlan> = ctx
@@ -249,11 +251,7 @@ impl Agent for AssetPlannerAgent {
                 emotion: None,
                 status: "pending".to_string(),
             });
-            Ok(AgentOutput {
-                asset_plan: Some(tasks),
-                ..AgentOutput::default()
-            }
-            .local_fallback())
+            Ok(AgentOutput::new(AgentOutputPayload::AssetPlan(tasks)).local_fallback())
         })
     }
 }

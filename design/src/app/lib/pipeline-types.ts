@@ -25,14 +25,33 @@ export type StepStatus =
   | 'awaitingInput'
   | 'skipped';
 
-export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type RunStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'timeout' | 'persistenceFailed';
 
 export interface StepDef {
   id: string;
   kind: StepKind;
   dependsOn: string[];
-  agent?: string | null;
+  agent: string | null;
   prompt: string;
+}
+
+export type StepExecutor =
+  | { type: 'agent' }
+  | { type: 'namedAgent'; key: string }
+  | { type: 'assetQueue' };
+
+/** Normalize the legacy `agent` wire field at the IPC boundary. */
+export function stepExecutor(step: Pick<StepDef, 'id' | 'agent'>): StepExecutor {
+  if (step.agent === 'assetQueue' || (step.id === 'assetQueue' && step.agent == null)) {
+    return { type: 'assetQueue' };
+  }
+  return step.agent == null
+    ? { type: 'agent' }
+    : { type: 'namedAgent', key: step.agent };
+}
+
+export function isAssetQueueStep(step: Pick<StepDef, 'id' | 'agent'>): boolean {
+  return stepExecutor(step).type === 'assetQueue';
 }
 
 export interface StepState {
@@ -212,4 +231,11 @@ export type PipelineEvent =
   | { type: 'runResumed'; runId: string }
   | { type: 'runCompleted'; runId: string }
   | { type: 'runFailed'; runId: string; error: string }
+  | { type: 'runTimedOut'; runId: string; error: string }
+  | { type: 'runPersistenceFailed'; runId: string; error: string }
   | { type: 'runStopped'; runId: string };
+
+export interface PipelineEventRecord {
+  event: PipelineEvent;
+  receivedAt: number;
+}

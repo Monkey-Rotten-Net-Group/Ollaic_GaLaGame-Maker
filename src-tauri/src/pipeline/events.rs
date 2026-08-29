@@ -49,6 +49,14 @@ pub enum PipelineEvent {
         run_id: String,
         error: String,
     },
+    RunTimedOut {
+        run_id: String,
+        error: String,
+    },
+    RunPersistenceFailed {
+        run_id: String,
+        error: String,
+    },
     RunStopped {
         run_id: String,
     },
@@ -62,7 +70,9 @@ impl PipelineEvent {
             | PipelineEvent::RunResumed { run_id }
             | PipelineEvent::RunCompleted { run_id }
             | PipelineEvent::RunStopped { run_id }
-            | PipelineEvent::RunFailed { run_id, .. } => run_id,
+            | PipelineEvent::RunFailed { run_id, .. }
+            | PipelineEvent::RunTimedOut { run_id, .. }
+            | PipelineEvent::RunPersistenceFailed { run_id, .. } => run_id,
             PipelineEvent::StepStarted { run_id, .. }
             | PipelineEvent::StepSucceeded { run_id, .. }
             | PipelineEvent::StepFailed { run_id, .. }

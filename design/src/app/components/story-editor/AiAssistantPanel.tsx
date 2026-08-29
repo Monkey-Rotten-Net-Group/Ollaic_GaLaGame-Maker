@@ -1,13 +1,13 @@
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowUp, Loader2, MessageCircle, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2, X,
+  ArrowUp, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useAiAgent } from '../../hooks/useAiAgent';
 import { AiMemoryPanel } from '../AiMemoryPanel';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
-import { ConflictCard, ErrorCard } from '../AiStatusCard';
+import { ConflictCard, ErrorCard, MissingAssetCard } from '../AiStatusCard';
 import { AiAttachmentTray, AiUploadsButton } from '../AiUploadsPanel';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -29,6 +29,7 @@ interface AiInputBoxProps {
   /** Programmatic seed from the agent (prefill on regenerate, clear after send). */
   value: string;
   busy: boolean;
+  locked: boolean;
   pending: boolean;
   onSubmit: (text: string) => void;
   onStop: () => void;
@@ -40,12 +41,13 @@ interface AiInputBoxProps {
 
 // Keeps the draft in local state so typing only re-renders this small box,
 // not the whole StoryEditor tree (script list, worldline, timeline, ...).
-const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, onStop, attachSlot, traySlot }: AiInputBoxProps) {
+const AiInputBox = memo(function AiInputBox({ value, busy, locked, pending, onSubmit, onStop, attachSlot, traySlot }: AiInputBoxProps) {
   const [draft, setDraft] = useState(value);
   // Sync when the agent changes input externally (regenerate prefills, send clears).
   useEffect(() => { setDraft(value); }, [value]);
 
   const submit = () => {
+    if (locked) return;
     if (busy) { onStop(); return; }
     const text = draft.trim();
     if (!text || pending) return;
@@ -66,7 +68,7 @@ const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, on
               submit();
             }
           }}
-          disabled={busy || pending}
+          disabled={busy || locked || pending}
           className="h-24 w-full resize-none rounded-lg border border-border bg-surface-container-lowest p-2.5 pb-10 text-sm focus:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary-container/30 disabled:opacity-60"
           placeholder={busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'}
           aria-label="AI 创作输入"
@@ -75,7 +77,7 @@ const AiInputBox = memo(function AiInputBox({ value, busy, pending, onSubmit, on
         <button
           type="button"
           onClick={submit}
-          disabled={!busy && (!draft.trim() || pending)}
+          disabled={locked || (!busy && (!draft.trim() || pending))}
           className="absolute bottom-3 right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-secondary-container text-black transition-colors hover:bg-secondary-container/80 disabled:opacity-40"
           aria-label={busy ? '停止生成' : '发送（Enter）'}
           title={busy ? '停止生成' : '发送（Enter）'}
@@ -101,8 +103,12 @@ export function AiAssistantPanel({
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
   const statusText = aiAgent.busy
     ? '生成中'
+    : aiAgent.committing
+      ? '提交中'
     : aiAgent.status === 'pending'
       ? '等待确认'
+      : aiAgent.status === 'missing_assets'
+        ? '缺少素材'
       : aiAgent.status === 'error'
         ? '需要处理'
         : '等待输入';
@@ -126,7 +132,7 @@ export function AiAssistantPanel({
           <button
             type="button"
             onClick={aiAgent.startNewSession}
-            disabled={aiAgent.busy}
+            disabled={aiAgent.busy || aiAgent.committing}
             className="ollaic-icon-button h-7 w-7 disabled:opacity-40"
             aria-label="新建 AI 会话"
             title="新建会话"
@@ -137,7 +143,7 @@ export function AiAssistantPanel({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                disabled={aiAgent.busy}
+                disabled={aiAgent.busy || aiAgent.committing}
                 className="ollaic-icon-button h-7 w-7 text-foreground disabled:opacity-40"
                 aria-label="AI 会话管理"
                 title="会话管理"
@@ -228,15 +234,25 @@ export function AiAssistantPanel({
           <ChangeSetCard
             changeSet={aiAgent.pendingChangeSet}
             sceneHeaders={sceneHeaders}
+            committing={aiAgent.committing}
             onAccept={() => { void aiAgent.acceptChange(); }}
             onRevert={aiAgent.revertChange}
           />
         )}
         {aiAgent.status === 'conflict' && (
           <ConflictCard
+            committing={aiAgent.committing}
             onKeepManual={aiAgent.revertChange}
             onApplyAi={() => { void aiAgent.forceApplyChange(); }}
             onRegenerate={aiAgent.regenerateAfterConflict}
+          />
+        )}
+        {aiAgent.status === 'missing_assets' && aiAgent.missingIssues.length > 0 && (
+          <MissingAssetCard
+            issues={aiAgent.missingIssues}
+            onUseFallback={aiAgent.useFallbackAssets}
+            onOpenAssets={aiAgent.openAssets}
+            onRetryPrompt={aiAgent.retryWithExistingAssets}
           />
         )}
         {aiAgent.error && aiAgent.status === 'error' && (
@@ -260,6 +276,7 @@ export function AiAssistantPanel({
         <AiInputBox
           value={aiAgent.input}
           busy={aiAgent.busy}
+          locked={aiAgent.committing}
           pending={aiAgent.pendingChangeSet?.status === 'pending'}
           onSubmit={onSend}
           onStop={aiAgent.stop}

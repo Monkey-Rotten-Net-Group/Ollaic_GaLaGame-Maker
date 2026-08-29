@@ -2,7 +2,7 @@
 //! dependencies, and agents. See CONTEXT.md "Flow Template" / "Declarative
 //! Recipe" and the V2 node types in `doc/v2-agent-pipeline.md` section 3.4.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 
 /// The kind of work a Flow Step performs. Mirrors the V2 node-type table.
@@ -40,6 +40,44 @@ impl StepKind {
     }
 }
 
+/// The implementation that owns a Flow Step. The persisted `agent` field is
+/// intentionally kept compatible with existing runs and the FlowBoard, while
+/// the scheduler works with an explicit domain type instead of magic strings.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StepExecutor {
+    #[default]
+    Agent,
+    NamedAgent(String),
+    AssetQueue,
+}
+
+impl Serialize for StepExecutor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Agent => serializer.serialize_none(),
+            Self::NamedAgent(key) => serializer.serialize_str(key),
+            Self::AssetQueue => serializer.serialize_str("assetQueue"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for StepExecutor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let key = Option::<String>::deserialize(deserializer)?;
+        Ok(match key.as_deref() {
+            None => Self::Agent,
+            Some("assetQueue") => Self::AssetQueue,
+            Some(_) => Self::NamedAgent(key.expect("matched Some")),
+        })
+    }
+}
+
 /// One step in a Flow Recipe.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -48,9 +86,10 @@ pub struct StepDef {
     pub kind: StepKind,
     #[serde(default)]
     pub depends_on: Vec<String>,
-    /// Agent key. Defaults to the step kind when unset.
-    #[serde(default)]
-    pub agent: Option<String>,
+    /// Typed executor. Serialized as the legacy `agent` field for persisted
+    /// run and frontend compatibility.
+    #[serde(rename = "agent", default)]
+    pub executor: StepExecutor,
     #[serde(default)]
     pub prompt: String,
 }
@@ -61,13 +100,23 @@ impl StepDef {
             id: id.into(),
             kind,
             depends_on: Vec::new(),
-            agent: None,
+            executor: StepExecutor::Agent,
             prompt: String::new(),
         }
     }
 
     pub fn agent(mut self, key: impl Into<String>) -> Self {
-        self.agent = Some(key.into());
+        let key = key.into();
+        self.executor = if key == "assetQueue" {
+            StepExecutor::AssetQueue
+        } else {
+            StepExecutor::NamedAgent(key)
+        };
+        self
+    }
+
+    pub fn asset_queue(mut self) -> Self {
+        self.executor = StepExecutor::AssetQueue;
         self
     }
 }
@@ -167,7 +216,7 @@ pub fn default_recipe() -> FlowRecipe {
         )
         .step(
             StepDef::new("assetQueue", StepKind::Asset)
-                .agent("assetQueue")
+                .asset_queue()
                 .depends_on("scene"),
         )
 }
@@ -201,3 +250,34 @@ impl std::fmt::Display for RecipeError {
 }
 
 impl std::error::Error for RecipeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{StepDef, StepExecutor};
+
+    #[test]
+    fn step_executor_round_trips_the_existing_agent_json_contract() {
+        let default: StepDef = serde_json::from_str(
+            r#"{"id":"plan","kind":"plan","dependsOn":[],"agent":null,"prompt":""}"#,
+        )
+        .unwrap();
+        let named: StepDef = serde_json::from_str(
+            r#"{"id":"dialogist","kind":"scene","dependsOn":[],"agent":"dialogist","prompt":""}"#,
+        )
+        .unwrap();
+        let queue: StepDef = serde_json::from_str(
+            r#"{"id":"media","kind":"asset","dependsOn":[],"agent":"assetQueue","prompt":""}"#,
+        )
+        .unwrap();
+
+        assert_eq!(default.executor, StepExecutor::Agent);
+        assert_eq!(named.executor, StepExecutor::NamedAgent("dialogist".into()));
+        assert_eq!(queue.executor, StepExecutor::AssetQueue);
+        assert_eq!(
+            serde_json::to_value(default).unwrap()["agent"],
+            serde_json::Value::Null
+        );
+        assert_eq!(serde_json::to_value(named).unwrap()["agent"], "dialogist");
+        assert_eq!(serde_json::to_value(queue).unwrap()["agent"], "assetQueue");
+    }
+}

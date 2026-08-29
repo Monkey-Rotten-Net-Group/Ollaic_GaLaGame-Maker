@@ -10,6 +10,18 @@ const MUSIC_CONFIG_FILE: &str = "ai-music.json";
 const LOG_FILE: &str = "ai-log.jsonl";
 const AGENT_TRACE_FILE: &str = "ai-agent-trace.jsonl";
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProviderCapabilityDeclaration {
+    pub chat_tools: bool,
+    pub json_mode: bool,
+    pub streaming_cancellation: bool,
+    pub media_url_output: bool,
+    pub chat_deadline_ms: Option<u64>,
+    pub flow_step_deadline_ms: Option<u64>,
+    pub media_fetch_deadline_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AiConfig {
@@ -17,6 +29,10 @@ pub struct AiConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    /// Optional user declaration of capabilities for the `custom` provider.
+    /// When absent, `provider_capability::from_custom` returns conservative
+    /// defaults so legacy configs keep working.
+    pub capabilities: Option<ProviderCapabilityDeclaration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +51,7 @@ impl Default for AiConfig {
             model: "gpt-4o-mini".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 }
@@ -209,7 +226,7 @@ pub fn append_log_line_at(path: &PathBuf, line: &str) -> Result<(), String> {
     let dir = path
         .parent()
         .ok_or_else(|| "Unable to locate log directory".to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create log directory: {e}"))?;
+    fs::create_dir_all(dir).map_err(|e| format!("Failed to create log directory: {e}"))?;
 
     use std::io::Write;
     let mut file = fs::OpenOptions::new()
