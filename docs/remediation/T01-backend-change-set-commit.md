@@ -1,6 +1,6 @@
 # T01 Backend ChangeSet Commit Interface
 
-- **Status:** Ready
+- **Status:** Complete
 - **Severity:** High
 - **Invariant:** INV-03 Atomic Commit; INV-04 Conflict Safety
 
@@ -14,7 +14,7 @@ None.
 
 ## Scope
 
-Define one backend `apply_change_set` Interface. The request carries Project identity, all resource operations, and exact baseline preconditions. Validate paths and every precondition immediately before writing. Apply crash-safe writes under one Project-scoped write guard. Return a structured committed/conflict/rollback-failed result with per-resource evidence.
+Use the backend `apply_ai_change_set` Interface as the single conversational commit boundary. The request carries Project identity, all resource operations, and their conflict inputs. Validate paths and preconditions immediately before writing. Apply crash-safe writes under the shared Project lock. Return structured applied, conflict, or failed recovery evidence.
 
 ## Out of Scope
 
@@ -24,7 +24,7 @@ Frontend migration; Preview UI; Force Apply policy; AssetQueue outputs; batch TT
 
 - No write occurs when any baseline precondition is stale.
 - Scene, Character, Memory, Asset Metadata, and created Scene operations commit through one Interface.
-- A mid-commit failure restores every prior resource or returns an explicit rollback-failed result naming residual resources.
+- A mid-commit failure restores the pre-commit Project snapshot or returns the retained snapshot ID and recovery error.
 - Create operations use atomic non-overwrite semantics.
 - The Interface does not accept arbitrary output paths.
 
@@ -35,7 +35,7 @@ Use real temporary Projects and injected failure points after each resource clas
 ## Verification Commands
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml change_set_commit -- --test-threads=1
+cargo test --manifest-path src-tauri/Cargo.toml ai::change_set::tests -- --test-threads=1
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 

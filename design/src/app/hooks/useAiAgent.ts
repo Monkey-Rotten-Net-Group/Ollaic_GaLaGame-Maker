@@ -1108,7 +1108,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       edit.kind === 'scene' || edit.kind === 'create_scene' ? [edit.file] : [],
     );
     try {
-      await onCommitStart?.(affectedSceneFiles);
+      if (onCommitStart) await onCommitStart(affectedSceneFiles);
       await persistChangeSet(set, options);
     } finally {
       onCommitSettled?.();

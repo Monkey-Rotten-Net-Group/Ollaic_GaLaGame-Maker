@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This plan validates and deduplicates the Agent architecture review, Red Team review, and two read-only follow-up audits. It defines broken domain invariants, places remediation at testable Seams, maps file conflicts, and splits implementation into independently testable and mergeable tasks. No task is implemented by this planning change.
+This plan validates and deduplicates the Agent architecture review, Red Team review, and two read-only follow-up audits. It defines broken domain invariants, places remediation at testable Seams, maps file conflicts, and splits implementation into independently testable and mergeable tasks. Each task file records its current implementation status and focused verification commands.
 
 ## Domain Invariants
 
@@ -112,8 +112,8 @@ graph TD
 
 | Task | Title | Status | Severity | Dependencies |
 |---|---|---|---|---|
-| [T01](T01-backend-change-set-commit.md) | Backend ChangeSet Commit Interface | Ready | High | None |
-| [T02](T02-frontend-change-set-adapter.md) | Frontend ChangeSet Adapter Migration | Blocked | High | T01 |
+| [T01](T01-backend-change-set-commit.md) | Backend ChangeSet Commit Interface | Complete | High | None |
+| [T02](T02-frontend-change-set-adapter.md) | Frontend ChangeSet Adapter Migration | Complete | High | T01 |
 | [T03](T03-conversational-run-ownership.md) | Conversational Run Ownership and Cancellation | Blocked | High | T10 |
 | [T04](T04-reject-draft-preservation.md) | Reject Draft Preservation | Cancelled | - | Rejected F-23 |
 | [T05](T05-asset-queue-output-transaction.md) | AssetQueue Output Transaction | Ready | High | None |
@@ -127,7 +127,7 @@ graph TD
 | [T13](T13-batch-tts-transaction.md) | Batch TTS Transaction and Project Lock | Blocked | Medium | T05 |
 | [T14](T14-project-scoped-file-interfaces.md) | Project-Scoped File Interfaces | Ready | High | None |
 | [T15](T15-conversational-seam-tests.md) | Conversational Orchestration and Persistence Seam Tests | Blocked | Medium | T02, T03, T16, T08, T09 |
-| [T16](T16-editor-commit-coordination.md) | Editor Commit Coordination | Blocked | High | T02 |
+| [T16](T16-editor-commit-coordination.md) | Editor Commit Coordination | Complete | High | T02 |
 | [T17](T17-scene-name-atomic-create.md) | Scene Name Validation and Atomic Create | Blocked | High | T14, T01 |
 | [T18](T18-export-destination-protection.md) | Export Destination Protection | Blocked | High | T14 |
 | [T19](T19-asset-mutation-transaction.md) | Asset Rename and Delete Transaction | Blocked | High | T05, T14 |

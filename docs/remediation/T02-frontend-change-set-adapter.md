@@ -1,6 +1,6 @@
 # T02 Frontend ChangeSet Adapter Migration
 
-- **Status:** Blocked
+- **Status:** Complete
 - **Severity:** High
 - **Invariant:** INV-03 Atomic Commit; INV-04 Conflict Safety
 
@@ -29,12 +29,13 @@ Changing patch generation, staging algorithms, Preview layout, Reject behavior, 
 
 ## Test Plan
 
-Hook tests use a typed fake Adapter for committed, conflict, rollback-failed, and transport-error outcomes. Add one Tauri command integration test proving frontend request serialization matches T01.
+Hook tests mock the typed `applyAiChangeSet` Adapter for applied, conflict, recovery-failed, and transport-error outcomes. The IPC test verifies request serialization at the Tauri command boundary.
 
 ## Verification Commands
 
 ```bash
 pnpm --dir design test --run src/app/hooks/useAiAgent-preview.test.ts
+pnpm --dir design test --run src/app/lib/ai-change-set-ipc.test.ts
 pnpm --dir design test
 pnpm --dir design build
 ```

@@ -1,6 +1,6 @@
 # T16 Editor Commit Coordination
 
-- **Status:** Blocked
+- **Status:** Complete
 - **Severity:** High
 - **Invariant:** INV-03 Atomic Commit; INV-05 Reject Preservation
 
