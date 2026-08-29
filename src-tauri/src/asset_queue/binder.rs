@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::assets::commands::{SceneAssetCard, VoiceAssetCard};
 use crate::characters::types::{CharacterSprite, CharactersDocument};
 use crate::webgal::parser;
+use crate::webgal::project_paths::ProjectPaths;
 use crate::webgal::serializer;
 use crate::webgal::types::{CommandType, WebGalNode};
 
@@ -12,6 +13,9 @@ use super::types::{AssetKind, AssetTask};
 /// Promote the most recent generated artifact and bind it into playable project data.
 /// Callers serialize calls to this function because it rewrites shared JSON and scenes.
 pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
+    let project = ProjectPaths::open(project_path)?;
+    let _project_guard = project.lock_for_write();
+    let project_path = project.root();
     let artifact_path = task
         .attempts
         .iter()
@@ -64,6 +68,9 @@ pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Strin
 
 /// Restore scene/config references to an already-promoted successful asset.
 pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
+    let project = ProjectPaths::open(project_path)?;
+    let _project_guard = project.lock_for_write();
+    let project_path = project.root();
     let filename = task
         .asset_file
         .as_deref()

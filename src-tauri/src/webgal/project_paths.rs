@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
@@ -86,15 +85,28 @@ impl ProjectPaths {
     pub fn existing_scene(&self, scene_name: &str) -> Result<PathBuf, String> {
         let path = self.scene_candidate(scene_name)?;
         let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("Scene {scene_name} is not accessible: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(format!("Scene {scene_name} is not a regular project file"));
+            .map_err(|error| format!("Scene path {} is not accessible: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "Scene path {} is a symbolic link; remove it or replace it with a regular project file",
+                path.display()
+            ));
+        }
+        if !metadata.is_file() {
+            return Err(format!(
+                "Scene path {} is not a regular project file; replace it with a regular file",
+                path.display()
+            ));
         }
         let resolved = path
             .canonicalize()
-            .map_err(|error| format!("Scene {scene_name} is not accessible: {error}"))?;
+            .map_err(|error| format!("Scene path {} is not accessible: {error}", path.display()))?;
         if !resolved.starts_with(&self.scene_dir) {
-            return Err(format!("Scene {scene_name} escapes the project"));
+            return Err(format!(
+                "Scene path {} resolves outside {}; move it back into the project scene directory",
+                path.display(),
+                self.scene_dir.display()
+            ));
         }
         Ok(path)
     }
@@ -118,32 +130,55 @@ impl ProjectPaths {
             return Err(format!("Scene {} already exists", scene_name.as_str()));
         }
         let path = self.scene_dir.join(scene_name.as_str());
-        let create_result = (|| {
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)?;
-            file.write_all(content)?;
-            file.sync_all()
-        })();
-        if let Err(error) = create_result {
-            let _ = fs::remove_file(&path);
-            return Err(format!(
-                "Failed to create scene {}: {error}",
-                scene_name.as_str()
-            ));
-        }
+        crate::json_store::write_new_crash_safe(&path, content)
+            .map_err(|error| format!("Failed to create scene {}: {error}", scene_name.as_str()))?;
         Ok(scene_name)
     }
 
+    pub fn rename_scene(&self, scene_name: &str, new_name: &str) -> Result<SceneName, String> {
+        let normalized_name = SceneName::parse(new_name)?;
+        let _guard = self
+            .write_guard
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let path = self.existing_scene(scene_name)?;
+        if normalized_name.as_str() == scene_name {
+            return Ok(normalized_name);
+        }
+        if self.has_case_insensitive_scene_except(&normalized_name, Some(scene_name))? {
+            return Err(format!("Scene {} already exists", normalized_name.as_str()));
+        }
+        let new_path = self.scene_candidate(normalized_name.as_str())?;
+        rename_regular_file_without_replace(&path, &new_path).map_err(|error| {
+            format!(
+                "Failed to rename {} -> {}: {error}",
+                path.display(),
+                new_path.display()
+            )
+        })?;
+        Ok(normalized_name)
+    }
+
     pub fn has_case_insensitive_scene(&self, scene_name: &SceneName) -> Result<bool, String> {
+        self.has_case_insensitive_scene_except(scene_name, None)
+    }
+
+    fn has_case_insensitive_scene_except(
+        &self,
+        scene_name: &SceneName,
+        excluded_name: Option<&str>,
+    ) -> Result<bool, String> {
         let expected = scene_name.case_key();
         for entry in fs::read_dir(&self.scene_dir)
             .map_err(|error| format!("Failed to inspect project scenes: {error}"))?
         {
             let entry =
                 entry.map_err(|error| format!("Failed to inspect project scenes: {error}"))?;
-            if entry.file_name().to_string_lossy().to_lowercase() == expected {
+            let entry_name = entry.file_name();
+            if excluded_name.is_some_and(|excluded| entry_name == excluded) {
+                continue;
+            }
+            if entry_name.to_string_lossy().to_lowercase() == expected {
                 return Ok(true);
             }
         }
@@ -181,12 +216,58 @@ impl ProjectPaths {
     }
 }
 
+#[cfg(windows)]
+fn rename_regular_file_without_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0) } == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn rename_regular_file_without_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    if destination.exists() && same_file::is_same_file(source, destination)? {
+        return fs::rename(source, destination);
+    }
+    fs::hard_link(source, destination)?;
+    if let Err(error) = fs::remove_file(source) {
+        return Err(std::io::Error::new(
+            error.kind(),
+            format!(
+                "created {}, but failed to remove {}; both names were preserved: {error}",
+                destination.display(),
+                source.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn canonical_domain_dir(owner: &Path, requested: &Path, label: &str) -> Result<PathBuf, String> {
     let resolved = requested
         .canonicalize()
-        .map_err(|error| format!("Invalid project {label} directory: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "Invalid project {label} directory {}: {error}; create a regular directory at this path",
+                requested.display()
+            )
+        })?;
     if !resolved.is_dir() || !resolved.starts_with(owner) {
-        return Err(format!("Invalid project {label} directory"));
+        return Err(format!(
+            "Invalid project {label} directory {}: it resolves outside {}; remove the symbolic link and create a regular directory",
+            requested.display(),
+            owner.display()
+        ));
     }
     Ok(resolved)
 }
@@ -365,6 +446,45 @@ mod tests {
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
         let content = fs::read_to_string(project.join("game/scene/chapter.txt")).unwrap();
         assert!(content.starts_with("writer-"));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn rename_scene_never_overwrites_an_existing_destination() {
+        let workspace = temp_root("rename_collision");
+        let project = workspace.join("project");
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(project.join("game/scene/old.txt"), "old content").unwrap();
+        fs::write(project.join("game/scene/new.txt"), "new content").unwrap();
+        let paths = ProjectPaths::open(&project).unwrap();
+
+        assert!(paths.rename_scene("old.txt", "new.txt").is_err());
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/old.txt")).unwrap(),
+            "old content"
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/new.txt")).unwrap(),
+            "new content"
+        );
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn case_only_scene_rename_succeeds_without_changing_content() {
+        let workspace = temp_root("case_only_rename");
+        let project = workspace.join("project");
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::write(project.join("game/scene/chapter.txt"), "chapter content").unwrap();
+        let paths = ProjectPaths::open(&project).unwrap();
+
+        paths.rename_scene("chapter.txt", "Chapter.txt").unwrap();
+
+        assert!(!project.join("game/scene/chapter.txt").exists());
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/Chapter.txt")).unwrap(),
+            "chapter content"
+        );
         fs::remove_dir_all(workspace).unwrap();
     }
 }

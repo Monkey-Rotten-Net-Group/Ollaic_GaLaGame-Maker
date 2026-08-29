@@ -2591,15 +2591,18 @@ dependencies = [
  "ort",
  "percent-encoding",
  "reqwest 0.12.28",
+ "same-file",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tempfile",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "tower-http 0.5.2",
  "ureq",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

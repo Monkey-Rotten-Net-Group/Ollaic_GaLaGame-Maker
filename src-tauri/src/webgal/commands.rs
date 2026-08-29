@@ -1,5 +1,5 @@
 use super::parser;
-use super::project_paths::{ProjectPaths, SceneName};
+use super::project_paths::ProjectPaths;
 use super::serializer;
 use super::types::WebGalNode;
 use std::fs;
@@ -34,7 +34,9 @@ pub fn save_scene(
     nodes: Vec<WebGalNode>,
 ) -> Result<(), String> {
     let text = serializer::serialize_script(&nodes);
-    let path = ProjectPaths::open(project_path)?.existing_scene(&scene_name)?;
+    let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
+    let path = paths.existing_scene(&scene_name)?;
 
     crate::json_store::write_crash_safe(&path, text.as_bytes())
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
@@ -55,7 +57,9 @@ pub fn write_file_text(
     scene_name: String,
     content: String,
 ) -> Result<(), String> {
-    let path = ProjectPaths::open(project_path)?.existing_scene(&scene_name)?;
+    let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
+    let path = paths.existing_scene(&scene_name)?;
     crate::json_store::write_crash_safe(&path, content.as_bytes())
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
 }
@@ -69,7 +73,9 @@ pub fn list_scenes(project_path: String) -> Result<Vec<String>, String> {
 /// Delete a scene file.
 #[tauri::command]
 pub fn delete_scene(project_path: String, scene_name: String) -> Result<(), String> {
-    let path = ProjectPaths::open(project_path)?.existing_scene(&scene_name)?;
+    let paths = ProjectPaths::open(project_path)?;
+    let _guard = paths.lock_for_write();
+    let path = paths.existing_scene(&scene_name)?;
     fs::remove_file(&path).map_err(|e| format!("Failed to delete {}: {}", path.display(), e))
 }
 
@@ -81,21 +87,9 @@ pub fn rename_scene(
     new_name: String,
 ) -> Result<String, String> {
     let paths = ProjectPaths::open(project_path)?;
-    let path = paths.existing_scene(&scene_name)?;
-    let normalized_name = SceneName::parse(&new_name)?;
-    let new_path = paths.scene_candidate(normalized_name.as_str())?;
-    if paths.has_case_insensitive_scene(&normalized_name)? {
-        return Err(format!("Scene {} already exists", normalized_name.as_str()));
-    }
-    fs::rename(&path, &new_path).map_err(|e| {
-        format!(
-            "Failed to rename {} -> {}: {}",
-            path.display(),
-            new_path.display(),
-            e
-        )
-    })?;
-    Ok(normalized_name.as_str().to_string())
+    paths
+        .rename_scene(&scene_name, &new_name)
+        .map(|normalized| normalized.as_str().to_string())
 }
 
 /// Write a user-selected standalone scene export. This is intentionally not a
@@ -111,6 +105,15 @@ pub fn export_scene_file(path: String, nodes: Vec<WebGalNode>) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_project(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ollaic_webgal_commands_{label}_{nonce}"))
+    }
 
     #[test]
     fn write_file_text_round_trips_and_leaves_no_atomic_residue() {
@@ -145,5 +148,39 @@ mod tests {
         assert_eq!(residue, vec!["start.txt".to_string()]);
 
         let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scene_write_does_not_follow_a_preexisting_temporary_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = temp_project("temporary_symlink");
+        let project = workspace.join("project");
+        let scene_dir = project.join("game/scene");
+        let scene = scene_dir.join("start.txt");
+        let outside = workspace.join("outside.txt");
+        std::fs::create_dir_all(&scene_dir).unwrap();
+        std::fs::write(&scene, "original scene").unwrap();
+        std::fs::write(&outside, "outside sentinel").unwrap();
+        symlink(&outside, scene_dir.join("start.txt.tmp")).unwrap();
+
+        write_file_text(
+            project.to_string_lossy().into_owned(),
+            "start.txt".into(),
+            "updated scene".into(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "outside sentinel"
+        );
+        assert_eq!(std::fs::read_to_string(&scene).unwrap(), "updated scene");
+        assert!(!std::fs::symlink_metadata(&scene)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        std::fs::remove_dir_all(workspace).unwrap();
     }
 }

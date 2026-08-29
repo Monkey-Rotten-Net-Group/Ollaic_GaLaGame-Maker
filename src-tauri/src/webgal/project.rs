@@ -528,12 +528,8 @@ pub fn export_project(
         });
     }
 
-    if let Some(metadata) = metadata.as_ref() {
-        write_project_metadata(&project.root().to_string_lossy(), metadata)?;
-    }
-
-    let final_output = if as_zip {
-        fs::create_dir_all(&dest).map_err(|e| {
+    let zip_output = if as_zip {
+        fs::create_dir_all(dest).map_err(|e| {
             format!(
                 "Failed to create export directory {}: {}",
                 dest.display(),
@@ -541,6 +537,30 @@ pub fn export_project(
             )
         })?;
         let zip_path = dest.join(export_zip_name(&project_path, metadata.as_ref()));
+        if let Ok(destination_metadata) = fs::symlink_metadata(&zip_path) {
+            if destination_metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "Export destination {} is a symbolic link; remove it or choose a regular file path",
+                    zip_path.display()
+                ));
+            }
+            if !destination_metadata.is_file() {
+                return Err(format!(
+                    "Export destination {} is not a regular file; remove it or choose another path",
+                    zip_path.display()
+                ));
+            }
+        }
+        Some(zip_path)
+    } else {
+        None
+    };
+
+    if let Some(metadata) = metadata.as_ref() {
+        write_project_metadata(&project.root().to_string_lossy(), metadata)?;
+    }
+
+    let final_output = if let Some(zip_path) = zip_output {
         write_export_zip(&game_dir, metadata.as_ref(), &zip_path)?;
         zip_path
     } else {
@@ -1350,21 +1370,29 @@ fn write_export_zip(
     metadata: Option<&ProjectMetadata>,
     zip_path: &Path,
 ) -> Result<(), String> {
-    let file = fs::File::create(zip_path)
+    let mut temporary = crate::json_store::sibling_temporary_file(zip_path)
         .map_err(|e| format!("Failed to create zip {}: {e}", zip_path.display()))?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    add_dir_to_zip(&mut zip, game_dir, Path::new("game"), options)?;
-    if let Some(metadata) = metadata {
-        let text = serde_json::to_vec_pretty(metadata).map_err(|e| e.to_string())?;
-        zip.start_file("project-metadata.json", options)
-            .map_err(|e| format!("Failed to add metadata to zip: {e}"))?;
-        zip.write_all(&text)
-            .map_err(|e| format!("Failed to write metadata to zip: {e}"))?;
+    {
+        let mut zip = zip::ZipWriter::new(temporary.as_file_mut());
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        add_dir_to_zip(&mut zip, game_dir, Path::new("game"), options)?;
+        if let Some(metadata) = metadata {
+            let text = serde_json::to_vec_pretty(metadata).map_err(|e| e.to_string())?;
+            zip.start_file("project-metadata.json", options)
+                .map_err(|e| format!("Failed to add metadata to zip: {e}"))?;
+            zip.write_all(&text)
+                .map_err(|e| format!("Failed to write metadata to zip: {e}"))?;
+        }
+        zip.finish()
+            .map_err(|e| format!("Failed to finish zip: {e}"))?;
     }
-    zip.finish()
-        .map(|_| ())
-        .map_err(|e| format!("Failed to finish zip: {e}"))
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|e| format!("Failed to sync zip {}: {e}", zip_path.display()))?;
+    crate::json_store::persist_temporary_file(temporary, zip_path)
+        .map_err(|e| format!("Failed to publish zip {}: {e}", zip_path.display()))
 }
 
 fn add_dir_to_zip<W: Write + std::io::Seek>(
@@ -1510,6 +1538,44 @@ mod tests {
             assert_eq!(snapshot_tree(&project), before_alias_attempt);
         }
 
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zip_export_rejects_a_symlinked_final_file_without_touching_source() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = unique_export_workspace("zip_symlink");
+        let project = workspace.join("project");
+        let destination = workspace.join("export");
+        let scene = project.join("game/scene/start.txt");
+        fs::create_dir_all(scene.parent().unwrap()).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(project.join("game/config.txt"), "Game_name:Protected;").unwrap();
+        fs::write(&scene, "source sentinel").unwrap();
+        let metadata_path = project.join("project-metadata.json");
+        fs::write(&metadata_path, "metadata sentinel").unwrap();
+        symlink(&scene, destination.join("project-export.zip")).unwrap();
+
+        let metadata = ProjectMetadata {
+            description: "must not be written".into(),
+            ..ProjectMetadata::default()
+        };
+
+        let result = export_project(
+            project.to_string_lossy().into_owned(),
+            destination.to_string_lossy().into_owned(),
+            true,
+            Some(metadata),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&scene).unwrap(), "source sentinel");
+        assert_eq!(
+            fs::read_to_string(&metadata_path).unwrap(),
+            "metadata sentinel"
+        );
         fs::remove_dir_all(workspace).unwrap();
     }
 

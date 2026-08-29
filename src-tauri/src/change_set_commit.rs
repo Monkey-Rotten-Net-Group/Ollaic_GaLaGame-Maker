@@ -1,4 +1,5 @@
 use crate::webgal::project_paths::{ProjectPaths, SceneName};
+use same_file::Handle;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -102,6 +103,40 @@ struct FailurePlan {
     fail_write: Option<ResourceId>,
     fail_after_create: Option<ResourceId>,
     fail_rollback: Vec<ResourceId>,
+    #[cfg(test)]
+    replace_after_create: Option<ResourceId>,
+}
+
+struct WriteFailure {
+    error: std::io::Error,
+    mutated: bool,
+    created_identity: Option<Handle>,
+}
+
+impl WriteFailure {
+    fn before_mutation(error: std::io::Error) -> Self {
+        Self {
+            error,
+            mutated: false,
+            created_identity: None,
+        }
+    }
+
+    fn after_creation(error: std::io::Error, created_identity: Handle) -> Self {
+        Self {
+            error,
+            mutated: true,
+            created_identity: Some(created_identity),
+        }
+    }
+
+    fn after_unknown_mutation(error: std::io::Error) -> Self {
+        Self {
+            error,
+            mutated: true,
+            created_identity: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -111,6 +146,7 @@ impl FailurePlan {
             fail_write: Some(resource),
             fail_after_create: None,
             fail_rollback: Vec::new(),
+            replace_after_create: None,
         }
     }
 }
@@ -129,23 +165,16 @@ fn apply_change_set_impl(
 ) -> ApplyChangeSetResult {
     let project_paths = match ProjectPaths::open(&request.project_path) {
         Ok(paths) => paths,
-        Err(_) => {
+        Err(error) => {
             return ApplyChangeSetResult::FailedAndRolledBack {
                 failed_resource: ResourceId::Project,
-                message: "invalid project".into(),
+                message: error,
             }
         }
     };
     let project_key = project_paths.root().to_path_buf();
     let project = project_key.clone();
     let _guard = project_paths.lock_for_write();
-    if !project.join("game").is_dir() {
-        return ApplyChangeSetResult::FailedAndRolledBack {
-            failed_resource: ResourceId::Project,
-            message: "invalid project".into(),
-        };
-    }
-
     let mut writes = Vec::new();
     for operation in request.operations {
         match prepare_write(&project, operation) {
@@ -162,7 +191,10 @@ fn apply_change_set_impl(
         if !target_is_project_owned(&project_key, &write.path) {
             return ApplyChangeSetResult::FailedAndRolledBack {
                 failed_resource: write.resource.clone(),
-                message: "resource path escapes project".into(),
+                message: format!(
+                    "Resource path {} is outside the project or is a symbolic link; remove the link and choose a regular project file",
+                    write.path.display()
+                ),
             };
         }
     }
@@ -196,30 +228,38 @@ fn apply_change_set_impl(
         }
     }
 
-    let mut applied: Vec<(&PreparedWrite, Option<Vec<u8>>)> = Vec::new();
+    let mut applied: Vec<(&PreparedWrite, Option<Vec<u8>>, Option<Handle>)> = Vec::new();
     for (write, previous) in writes.iter().zip(snapshots) {
+        let created_resource = previous.is_none();
         let result = if failures.fail_write.as_ref() == Some(&write.resource) {
-            Err("injected write failure".to_string())
+            Err(WriteFailure::before_mutation(std::io::Error::other(
+                "injected write failure",
+            )))
         } else {
-            write_resource(write, failures).map_err(|error| error.to_string())
+            write_resource(write, created_resource, failures)
         };
-        if let Err(message) = result {
-            applied.push((write, previous));
-            let residual_resources = rollback(&mut applied, failures);
-            return if residual_resources.is_empty() {
-                ApplyChangeSetResult::FailedAndRolledBack {
-                    failed_resource: write.resource.clone(),
-                    message,
+        match result {
+            Ok(created_identity) => applied.push((write, previous, created_identity)),
+            Err(failure) => {
+                if failure.mutated {
+                    applied.push((write, previous, failure.created_identity));
                 }
-            } else {
-                ApplyChangeSetResult::RollbackFailed {
-                    failed_resource: write.resource.clone(),
-                    residual_resources,
-                    message,
-                }
-            };
+                let residual_resources = rollback(&mut applied, failures);
+                let message = failure.error.to_string();
+                return if residual_resources.is_empty() {
+                    ApplyChangeSetResult::FailedAndRolledBack {
+                        failed_resource: write.resource.clone(),
+                        message,
+                    }
+                } else {
+                    ApplyChangeSetResult::RollbackFailed {
+                        failed_resource: write.resource.clone(),
+                        residual_resources,
+                        message,
+                    }
+                };
+            }
         }
-        applied.push((write, previous));
     }
     ApplyChangeSetResult::Committed {
         resources: writes.into_iter().map(|write| write.resource).collect(),
@@ -234,42 +274,92 @@ fn read_snapshot(path: &Path) -> std::io::Result<Option<Vec<u8>>> {
     }
 }
 
-fn write_resource(write: &PreparedWrite, failures: &FailurePlan) -> std::io::Result<()> {
+fn write_resource(
+    write: &PreparedWrite,
+    created_resource: bool,
+    failures: &FailurePlan,
+) -> Result<Option<Handle>, WriteFailure> {
     if let Some(parent) = write.path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(WriteFailure::before_mutation)?;
     }
     match write.baseline {
         Baseline::Missing => {
-            write_create_new(&write.path, &write.content)?;
-            if failures.fail_after_create.as_ref() == Some(&write.resource) {
-                return Err(std::io::Error::other("injected failure after create"));
+            crate::json_store::write_new_crash_safe(&write.path, &write.content)
+                .map_err(WriteFailure::before_mutation)?;
+            let created_identity =
+                Handle::from_path(&write.path).map_err(WriteFailure::after_unknown_mutation)?;
+            #[cfg(test)]
+            if failures.replace_after_create.as_ref() == Some(&write.resource) {
+                if let Err(error) = std::fs::remove_file(&write.path) {
+                    return Err(WriteFailure::after_creation(error, created_identity));
+                }
+                if let Err(error) = std::fs::write(&write.path, b"concurrent replacement") {
+                    return Err(WriteFailure::after_creation(error, created_identity));
+                }
             }
-            Ok(())
+            if failures.fail_after_create.as_ref() == Some(&write.resource) {
+                return Err(WriteFailure::after_creation(
+                    std::io::Error::other("injected failure after create"),
+                    created_identity,
+                ));
+            }
+            Ok(Some(created_identity))
         }
-        _ => crate::json_store::write_crash_safe(&write.path, &write.content),
+        _ => {
+            crate::json_store::write_crash_safe(&write.path, &write.content)
+                .map_err(WriteFailure::before_mutation)?;
+            if created_resource {
+                Handle::from_path(&write.path)
+                    .map(Some)
+                    .map_err(WriteFailure::after_unknown_mutation)
+            } else {
+                Ok(None)
+            }
+        }
     }
 }
 
 fn rollback(
-    applied: &mut Vec<(&PreparedWrite, Option<Vec<u8>>)>,
+    applied: &mut Vec<(&PreparedWrite, Option<Vec<u8>>, Option<Handle>)>,
     failures: &FailurePlan,
 ) -> Vec<ResourceId> {
     let mut residual = Vec::new();
-    for (write, previous) in applied.drain(..).rev() {
+    for (write, previous, created_identity) in applied.drain(..).rev() {
         let result = if failures.fail_rollback.contains(&write.resource) {
             Err(std::io::Error::other("injected rollback failure"))
         } else if let Some(bytes) = previous {
             crate::json_store::write_crash_safe(&write.path, &bytes)
-        } else if write.path.exists() {
-            std::fs::remove_file(&write.path).and_then(|()| remove_created_parent(write))
         } else {
-            remove_created_parent(write)
+            remove_created_resource(write, created_identity.as_ref())
         };
         if result.is_err() {
             residual.push(write.resource.clone());
         }
     }
     residual
+}
+
+fn remove_created_resource(
+    write: &PreparedWrite,
+    created_identity: Option<&Handle>,
+) -> std::io::Result<()> {
+    let Some(created_identity) = created_identity else {
+        return Err(std::io::Error::other(format!(
+            "cannot safely remove {} because its file identity was not recorded",
+            write.path.display()
+        )));
+    };
+    match Handle::from_path(&write.path) {
+        Ok(current_identity) if &current_identity == created_identity => {
+            std::fs::remove_file(&write.path).and_then(|()| remove_created_parent(write))
+        }
+        Ok(_) => Err(std::io::Error::other(format!(
+            "refusing to remove {} because it was replaced during rollback",
+            write.path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => remove_created_parent(write),
+        Err(error) => Err(error),
+    }
 }
 
 fn remove_created_parent(write: &PreparedWrite) -> std::io::Result<()> {
@@ -384,16 +474,6 @@ fn serialize_json(
 ) -> Result<Vec<u8>, (ResourceId, String)> {
     serde_json::to_vec_pretty(value)
         .map_err(|error| (resource, format!("failed to serialize resource: {error}")))
-}
-
-fn write_create_new(path: &Path, content: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    file.write_all(content)?;
-    file.sync_all()
 }
 
 fn baseline_matches(write: &PreparedWrite) -> bool {
@@ -829,13 +909,16 @@ mod tests {
                 content: "changed".into(),
             }],
         });
-        assert_eq!(
-            result,
+        match result {
             ApplyChangeSetResult::FailedAndRolledBack {
                 failed_resource: ResourceId::Project,
-                message: "invalid project".into(),
+                message,
+            } => {
+                assert!(message.contains(&project.join("game/scene").display().to_string()));
+                assert!(message.contains("remove the symbolic link"));
             }
-        );
+            other => panic!("expected project validation failure, got {other:?}"),
+        }
         assert_eq!(
             fs::read_to_string(outside.join("game/scene/victim.txt")).unwrap(),
             "outside"
@@ -845,8 +928,8 @@ mod tests {
     }
 
     #[test]
-    fn change_set_commit_writer_error_after_replace_restores_current_resource() {
-        let project = temp_project("writer_error_after_replace");
+    fn change_set_commit_writer_error_before_replace_leaves_current_resource_unchanged() {
+        let project = temp_project("writer_error_before_replace");
         let scene = project.join("game/scene/start.txt");
         fs::write(&scene, "before").unwrap();
         fs::create_dir(scene.with_extension("txt.bak")).unwrap();
@@ -858,18 +941,21 @@ mod tests {
                 content: "after".into(),
             }],
         });
-        assert_eq!(
-            result,
-            ApplyChangeSetResult::RollbackFailed {
-                failed_resource: ResourceId::Scene {
-                    file: "start.txt".into()
-                },
-                residual_resources: vec![ResourceId::Scene {
-                    file: "start.txt".into()
-                }],
-                message: "Is a directory (os error 21)".into(),
+        match result {
+            ApplyChangeSetResult::FailedAndRolledBack {
+                failed_resource,
+                message,
+            } => {
+                assert_eq!(
+                    failed_resource,
+                    ResourceId::Scene {
+                        file: "start.txt".into()
+                    }
+                );
+                assert!(!message.is_empty());
             }
-        );
+            other => panic!("expected a rolled-back writer error, got {other:?}"),
+        }
         assert_eq!(fs::read_to_string(&scene).unwrap(), "before");
         fs::remove_dir_all(project).unwrap();
     }
@@ -928,6 +1014,7 @@ mod tests {
                 fail_write: None,
                 fail_after_create: Some(resource.clone()),
                 fail_rollback: Vec::new(),
+                replace_after_create: None,
             },
         );
         assert_eq!(
@@ -972,6 +1059,7 @@ mod tests {
                 }),
                 fail_after_create: None,
                 fail_rollback: vec![residual.clone()],
+                replace_after_create: None,
             },
         );
         assert_eq!(
@@ -1022,6 +1110,56 @@ mod tests {
             ApplyChangeSetResult::FailedAndRolledBack { .. }
         ));
         assert!(!project.join("game/scene/one.txt").exists());
+        assert!(!project.join("game/scene/two.txt").exists());
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn change_set_rollback_preserves_a_concurrently_replaced_created_file() {
+        let project = temp_project("created_file_replaced_before_rollback");
+        let replaced = ResourceId::Scene {
+            file: "one.txt".into(),
+        };
+        let request = ApplyChangeSetRequest {
+            project_path: project.to_string_lossy().into_owned(),
+            operations: vec![
+                ChangeSetOperation::CreateScene {
+                    file: "one.txt".into(),
+                    content: "change-set content".into(),
+                },
+                ChangeSetOperation::CreateScene {
+                    file: "two.txt".into(),
+                    content: "never written".into(),
+                },
+            ],
+        };
+
+        let result = apply_change_set_with_failures(
+            request,
+            FailurePlan {
+                fail_write: Some(ResourceId::Scene {
+                    file: "two.txt".into(),
+                }),
+                fail_after_create: None,
+                fail_rollback: Vec::new(),
+                replace_after_create: Some(replaced.clone()),
+            },
+        );
+
+        assert_eq!(
+            result,
+            ApplyChangeSetResult::RollbackFailed {
+                failed_resource: ResourceId::Scene {
+                    file: "two.txt".into()
+                },
+                residual_resources: vec![replaced],
+                message: "injected write failure".into(),
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/one.txt")).unwrap(),
+            "concurrent replacement"
+        );
         assert!(!project.join("game/scene/two.txt").exists());
         fs::remove_dir_all(project).unwrap();
     }
