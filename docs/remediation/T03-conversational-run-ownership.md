@@ -18,7 +18,7 @@ Introduce a per-Run identity and cancellation handle shared by frontend orchestr
 
 ## Out of Scope
 
-Production Flow cancellation; Provider deadline defaults; chat history retention; ChangeSet transaction behavior.
+Agent Flow cancellation; Provider deadline defaults; chat history retention; ChangeSet transaction behavior.
 
 ## Acceptance Criteria
 

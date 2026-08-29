@@ -1,5 +1,139 @@
 use super::*;
 use std::{collections::BTreeSet, fs};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+async fn serve_one_http_response(
+    status: &str,
+    content_type: &str,
+    content_length: usize,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let status = status.to_string();
+    let content_type = content_type.to_string();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0_u8; 4096];
+        let _ = socket.read(&mut request).await.unwrap();
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n"
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+    format!("http://{address}")
+}
+
+#[tokio::test]
+async fn music_generation_rejects_oversized_raw_audio_response() {
+    let base_url = serve_one_http_response(
+        "200 OK",
+        "audio/mpeg",
+        safe_media_fetch::MAX_AUDIO_BYTES.saturating_add(1),
+    )
+    .await;
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "music-test".to_string(),
+        api_key: String::new(),
+        base_url,
+        capabilities: None,
+    };
+
+    let error = generate_openai_compatible_music(&cfg, "music-test", "test", "mp3")
+        .await
+        .expect_err("oversized audio response must be rejected");
+
+    assert!(error.contains("超过大小限制"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn music_generation_rejects_oversized_json_response() {
+    let base_url = serve_one_http_response(
+        "200 OK",
+        "application/json",
+        safe_media_fetch::MAX_AUDIO_BYTES.saturating_add(1),
+    )
+    .await;
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "music-test".to_string(),
+        api_key: String::new(),
+        base_url,
+        capabilities: None,
+    };
+
+    let error = generate_openai_compatible_music(&cfg, "music-test", "test", "mp3")
+        .await
+        .expect_err("oversized JSON response must be rejected");
+
+    assert!(error.contains("超过大小限制"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn music_generation_rejects_oversized_error_response() {
+    let base_url = serve_one_http_response(
+        "500 Internal Server Error",
+        "text/plain",
+        MAX_PROVIDER_ERROR_BYTES.saturating_add(1),
+    )
+    .await;
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "music-test".to_string(),
+        api_key: String::new(),
+        base_url,
+        capabilities: None,
+    };
+
+    let error = generate_openai_compatible_music(&cfg, "music-test", "test", "mp3")
+        .await
+        .expect_err("oversized provider error must be rejected");
+
+    assert!(error.contains("超过大小限制"), "unexpected error: {error}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn provider_request_stops_at_the_declared_chat_deadline() {
+    let request = with_provider_deadline(50, async {
+        std::future::pending::<()>().await;
+        Ok::<_, String>(())
+    });
+    tokio::pin!(request);
+
+    tokio::time::advance(std::time::Duration::from_millis(50)).await;
+    let error = request.await.unwrap_err();
+
+    assert!(
+        error.contains("provider_timeout"),
+        "unexpected error: {error}"
+    );
+    assert!(error.contains("50"), "unexpected error: {error}");
+}
+
+#[tokio::test]
+async fn seedream_rejects_url_output_before_starting_a_generation_request() {
+    let cfg = AiProviderConfig {
+        provider: "custom".to_string(),
+        model: "doubao-seedream-4-0-250828".to_string(),
+        api_key: String::new(),
+        base_url: "http://127.0.0.1:1".to_string(),
+        capabilities: Some(crate::ai::config::ProviderCapabilityDeclaration {
+            media_url_output: false,
+            ..Default::default()
+        }),
+    };
+
+    let error = generate_openai_compatible_image(&cfg, "doubao-seedream-4-0-250828", "test", None)
+        .await
+        .unwrap_err();
+
+    assert!(error.contains("媒体 URL 输出"), "unexpected error: {error}");
+    assert!(
+        !error.contains("连接"),
+        "request started before preflight: {error}"
+    );
+}
 
 #[test]
 fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
@@ -1277,8 +1411,8 @@ fn media_download_url_rejects_ssrf_targets() {
     assert!(validate_media_download_url("http://[::1]/x.png").is_err());
     // Public endpoints pass.
     assert!(validate_media_download_url("https://example.com/image.png").is_ok());
-    assert!(validate_media_download_url(
-        "https://oaidalleapiprodscus.blob.core.windows.net/x.png"
-    )
-    .is_ok());
+    assert!(
+        validate_media_download_url("https://oaidalleapiprodscus.blob.core.windows.net/x.png")
+            .is_ok()
+    );
 }

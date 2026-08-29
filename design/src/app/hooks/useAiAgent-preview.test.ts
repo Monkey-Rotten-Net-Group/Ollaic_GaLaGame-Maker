@@ -5,8 +5,10 @@ import { useAiAgent } from './useAiAgent';
 
 vi.mock('../lib/ai-ipc', () => ({
   aiChatTurn: vi.fn(),
+  aiChatCancel: vi.fn(async () => true),
   appendAiAgentTrace: vi.fn(async () => {}),
   getAiConfig: vi.fn(async () => ({ provider: 'openai', model: 'gpt-4o-mini', apiKey: '', baseUrl: '' })),
+  getAiProviderCapability: vi.fn(async () => ({ chatTools: true })),
 }));
 
 vi.mock('../lib/ai-tools', () => ({

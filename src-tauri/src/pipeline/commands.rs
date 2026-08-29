@@ -15,6 +15,7 @@ use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::registry::{ManagedRun, RunRegistry};
 use crate::pipeline::scheduler::{
     cleanup_rollback_snapshots, queue_rollback_snapshot_cleanup, rollback_snapshot_ids, Pipeline,
+    StepDeadlines,
 };
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepStatus, SystemClock};
 use crate::pipeline::store;
@@ -51,6 +52,49 @@ impl Orchestrator {
             runs: RunRegistry::new(),
         }
     }
+
+    fn flow_step_deadlines_for_new_run(
+        &self,
+        allow_local_fallback: bool,
+    ) -> Result<StepDeadlines, String> {
+        let config = crate::ai::config::load_config();
+        let agent = match crate::ai::provider_capability::capability_for_config(&config) {
+            Ok(capability) => std::time::Duration::from_millis(capability.flow_step_deadline_ms),
+            Err(_) if allow_local_fallback && !crate::ai::commands::has_agent_chat_config() => {
+                std::time::Duration::from_secs(180)
+            }
+            Err(error) => return Err(error),
+        };
+        let configs = [
+            crate::ai::config::load_image_config(),
+            crate::ai::config::load_tts_config(),
+            crate::ai::config::load_music_config(),
+        ];
+        let asset_queue = media_deadline_for_new_run(&configs, allow_local_fallback)?;
+        Ok(StepDeadlines { agent, asset_queue })
+    }
+}
+
+fn media_deadline_for_new_run(
+    configs: &[crate::ai::config::AiProviderConfig],
+    allow_local_fallback: bool,
+) -> Result<std::time::Duration, String> {
+    if !allow_local_fallback {
+        return Ok(std::time::Duration::from_millis(
+            crate::ai::provider_capability::media_flow_step_deadline_ms(configs)?,
+        ));
+    }
+
+    let declared = configs
+        .iter()
+        .filter_map(|config| {
+            crate::ai::provider_capability::capability_for_provider_config(config)
+                .ok()
+                .map(|capability| capability.flow_step_deadline_ms)
+        })
+        .max()
+        .unwrap_or(0);
+    Ok(std::time::Duration::from_millis(declared.max(180_000)))
 }
 
 static RUN_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -111,14 +155,17 @@ pub async fn pipeline_start(
     let run_id = new_run_id();
     let recipe = default_recipe();
     let sink = make_sink(&app);
+    let deadlines =
+        orchestrator.flow_step_deadlines_for_new_run(allow_local_fallback == Some(true))?;
     let handle = orchestrator
         .pipeline
-        .create_run_with_options(
+        .create_run_with_deadlines(
             &project_path,
             &run_id,
             &prompt,
             &recipe,
             allow_local_fallback == Some(true),
+            deadlines,
             &SystemClock,
             &sink,
         )
@@ -471,7 +518,12 @@ pub async fn pipeline_export_run_history(
     project_path: String,
 ) -> Result<String, String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some(handle) = orchestrator.runs.get(&run_id).await.map(|entry| entry.handle.clone()) {
+    if let Some(handle) = orchestrator
+        .runs
+        .get(&run_id)
+        .await
+        .map(|entry| entry.handle.clone())
+    {
         let state = handle.state().lock().await;
         return serde_json::to_string_pretty(&*state).map_err(|error| error.to_string());
     }
@@ -549,6 +601,7 @@ pub async fn pipeline_list_runs(project_path: String) -> Result<Vec<RunState>, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::config::{AiProviderConfig, ProviderCapabilityDeclaration};
 
     #[test]
     fn run_ids_are_unique() {
@@ -556,5 +609,49 @@ mod tests {
         let b = new_run_id();
         assert_ne!(a, b);
         assert!(a.starts_with("run_"));
+    }
+
+    #[test]
+    fn local_fallback_keeps_long_declared_media_deadlines() {
+        let configs = [
+            AiProviderConfig {
+                provider: "custom".to_string(),
+                model: "slow-image".to_string(),
+                api_key: String::new(),
+                base_url: "https://media.example".to_string(),
+                capabilities: Some(ProviderCapabilityDeclaration {
+                    flow_step_deadline_ms: Some(900_000),
+                    ..Default::default()
+                }),
+            },
+            AiProviderConfig {
+                provider: "unknown".to_string(),
+                model: String::new(),
+                api_key: String::new(),
+                base_url: String::new(),
+                capabilities: None,
+            },
+        ];
+
+        assert_eq!(
+            media_deadline_for_new_run(&configs, true).unwrap(),
+            std::time::Duration::from_secs(900)
+        );
+        assert!(media_deadline_for_new_run(&configs, false).is_err());
+    }
+
+    #[test]
+    fn local_fallback_uses_its_floor_when_no_media_capability_is_available() {
+        let configs = [AiProviderConfig {
+            provider: "unknown".to_string(),
+            model: String::new(),
+            api_key: String::new(),
+            base_url: String::new(),
+            capabilities: None,
+        }];
+        assert_eq!(
+            media_deadline_for_new_run(&configs, true).unwrap(),
+            std::time::Duration::from_secs(180)
+        );
     }
 }

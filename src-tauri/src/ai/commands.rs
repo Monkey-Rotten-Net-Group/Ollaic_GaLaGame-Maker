@@ -1,10 +1,14 @@
+use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
+use super::provider_capability::{
+    capability_for_config, capability_for_provider_config, ProviderCapability, RequiredCapability,
+};
+use super::safe_media_fetch::{self, ExpectedMedia};
 use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
-    ToolCall, ToolResponse,
+    ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, Tool, ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
@@ -19,6 +23,7 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
+const MAX_PROVIDER_ERROR_BYTES: usize = 64 * 1024;
 
 /// A reqwest client with the standard request timeout applied. Using this
 /// everywhere prevents media/TTS HTTP calls from hanging forever when a
@@ -72,15 +77,6 @@ pub struct AiToolCall {
 pub struct AiTurnResult {
     pub text: Option<String>,
     pub tool_calls: Vec<AiToolCall>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AiStreamEvent {
-    Start,
-    Chunk { content: String },
-    Done,
-    Error { message: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -268,7 +264,13 @@ pub fn get_ai_config() -> AiConfig {
 
 #[tauri::command]
 pub fn set_ai_config(config: AiConfig) -> Result<(), String> {
+    capability_for_config(&config)?;
     config::save_config(&config)
+}
+
+#[tauri::command]
+pub fn get_ai_provider_capability(config: Option<AiConfig>) -> Result<ProviderCapability, String> {
+    capability_for_config(&config.unwrap_or_else(config::load_config))
 }
 
 #[tauri::command]
@@ -278,6 +280,7 @@ pub fn get_ai_image_config() -> AiProviderConfig {
 
 #[tauri::command]
 pub fn set_ai_image_config(config: AiProviderConfig) -> Result<(), String> {
+    capability_for_provider_config(&config)?;
     config::save_image_config(&config)
 }
 
@@ -288,6 +291,7 @@ pub fn get_ai_tts_config() -> AiProviderConfig {
 
 #[tauri::command]
 pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
+    capability_for_provider_config(&config)?;
     config::save_tts_config(&config)
 }
 
@@ -298,6 +302,7 @@ pub fn get_ai_music_config() -> AiProviderConfig {
 
 #[tauri::command]
 pub fn set_ai_music_config(config: AiProviderConfig) -> Result<(), String> {
+    capability_for_provider_config(&config)?;
     config::save_music_config(&config)
 }
 
@@ -516,7 +521,8 @@ async fn generate_openai_compatible_music(
         .to_ascii_lowercase();
 
     if !status.is_success() {
-        let text = response.text().await.unwrap_or_default();
+        let bytes = safe_media_fetch::read_bounded_body(response, MAX_PROVIDER_ERROR_BYTES).await?;
+        let text = String::from_utf8_lossy(&bytes);
         log_provider_event("music_generate", cfg, model, &endpoint, false, &text);
         return Err(format!("音乐生成失败 ({status}): {text}"));
     }
@@ -528,10 +534,9 @@ async fn generate_openai_compatible_music(
         || mime.starts_with("binary/")
     {
         let ext = extension_from_mime(mime, response_format);
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
+        let bytes =
+            safe_media_fetch::read_bounded_body(response, safe_media_fetch::MAX_AUDIO_BYTES)
+                .await?;
         log_provider_event(
             "music_generate",
             cfg,
@@ -549,10 +554,10 @@ async fn generate_openai_compatible_music(
     // Otherwise treat as JSON/text and extract base64 or a downloadable URL so
     // gateways that return JSON still produce a valid, playable file (instead of
     // silently saving the JSON body as a broken audio file).
-    let text = response
-        .text()
-        .await
-        .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
+    let bytes =
+        safe_media_fetch::read_bounded_body(response, safe_media_fetch::MAX_AUDIO_BYTES).await?;
+    let text =
+        String::from_utf8(bytes).map_err(|e| format!("音乐生成响应不是有效 UTF-8 文本: {e}"))?;
     parse_music_json_response(cfg, model, &endpoint, &text, response_format).await
 }
 
@@ -660,15 +665,18 @@ fn find_audio_url(v: &serde_json::Value) -> Option<String> {
 #[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {
     validate_config_basics(&config)?;
+    let capability = capability_for_config(&config)?;
 
     let endpoint = effective_endpoint(&config);
     let request = ChatRequest::new(vec![ChatMessage::user("Reply with exactly OK.")]);
     let client = build_client(&config);
 
     let options = chat_debug_options();
-    match client
-        .exec_chat(&config.model, request, Some(&options))
-        .await
+    match with_provider_deadline(
+        capability.chat_deadline_ms,
+        client.exec_chat(&config.model, request, Some(&options)),
+    )
+    .await
     {
         Ok(response) => {
             let message = response
@@ -684,93 +692,11 @@ pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, 
                 message,
             })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Err(message) => {
             log_ai_event("validate", &config, &endpoint, false, &message);
             Err(message)
         }
     }
-}
-
-#[tauri::command]
-pub async fn ai_chat_stream(
-    app: AppHandle,
-    request_id: String,
-    messages: Vec<AiMessageInput>,
-    character_context: Option<String>,
-) -> Result<(), String> {
-    let cfg = config::load_config();
-    validate_config_basics(&cfg)?;
-
-    let mut chat_messages: Vec<ChatMessage> = Vec::new();
-    let mut sys_text = config::default_system_prompt();
-
-    if let Some(ref ctx) = character_context {
-        if !ctx.is_empty() {
-            if !sys_text.is_empty() {
-                sys_text.push_str("\n\n");
-            }
-            sys_text.push_str("## 当前项目的角色设定\n");
-            sys_text.push_str(ctx);
-        }
-    }
-
-    if !sys_text.is_empty() {
-        chat_messages.push(ChatMessage::system(&sys_text));
-    }
-    for m in messages {
-        let msg = match m.role.as_str() {
-            "user" => ChatMessage::user(m.content),
-            "assistant" => ChatMessage::assistant(m.content),
-            "system" => ChatMessage::system(m.content),
-            _ => ChatMessage::user(m.content),
-        };
-        chat_messages.push(msg);
-    }
-
-    let request = ChatRequest::new(chat_messages);
-    let client = build_client(&cfg);
-    let model = cfg.model.clone();
-    let endpoint = effective_endpoint(&cfg);
-    let event_name = format!("ai-chat-{request_id}");
-
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let _ = app_handle.emit(&event_name, AiStreamEvent::Start);
-        let options = chat_debug_options();
-        match client
-            .exec_chat_stream(&model, request, Some(&options))
-            .await
-        {
-            Ok(chat_res) => {
-                let mut stream = chat_res.stream;
-                while let Some(event) = stream.next().await {
-                    match event {
-                        Ok(ChatStreamEvent::Chunk(StreamChunk { content })) => {
-                            let _ = app_handle.emit(&event_name, AiStreamEvent::Chunk { content });
-                        }
-                        Ok(ChatStreamEvent::End(_)) => break,
-                        Ok(_) => {}
-                        Err(e) => {
-                            let message = e.to_string();
-                            log_ai_event("chat_stream", &cfg, &endpoint, false, &message);
-                            let _ = app_handle.emit(&event_name, AiStreamEvent::Error { message });
-                            return;
-                        }
-                    }
-                }
-                log_ai_event("chat_stream", &cfg, &endpoint, true, "stream completed");
-                let _ = app_handle.emit(&event_name, AiStreamEvent::Done);
-            }
-            Err(e) => {
-                let message = e.to_string();
-                log_ai_event("chat_stream", &cfg, &endpoint, false, &message);
-                let _ = app_handle.emit(&event_name, AiStreamEvent::Error { message });
-            }
-        }
-    });
-
-    Ok(())
 }
 
 /// Convert frontend message inputs into genai chat messages, replaying tool
@@ -811,14 +737,17 @@ fn to_chat_messages(messages: Vec<AiMessageInput>) -> Vec<ChatMessage> {
 
 /// Single non-streaming turn used by the multi-step agent loop. Returns either
 /// the model's tool calls (to be executed by the frontend) or its final text.
-#[tauri::command]
-pub async fn ai_chat_turn(
+pub(crate) async fn ai_chat_turn(
     messages: Vec<AiMessageInput>,
     tools: Vec<ToolDef>,
     character_context: Option<String>,
 ) -> Result<AiTurnResult, String> {
     let cfg = config::load_config();
     validate_config_basics(&cfg)?;
+    let capability = capability_for_config(&cfg)?;
+    if !tools.is_empty() {
+        capability.require(RequiredCapability::ChatTools)?;
+    }
 
     let mut chat_messages: Vec<ChatMessage> = Vec::new();
     if let Some(ctx) = character_context {
@@ -845,7 +774,12 @@ pub async fn ai_chat_turn(
     let endpoint = effective_endpoint(&cfg);
 
     let options = chat_debug_options();
-    match client.exec_chat(&cfg.model, request, Some(&options)).await {
+    match with_provider_deadline(
+        capability.chat_deadline_ms,
+        client.exec_chat(&cfg.model, request, Some(&options)),
+    )
+    .await
+    {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
             let tool_calls = response
@@ -860,12 +794,38 @@ pub async fn ai_chat_turn(
             log_ai_event("chat_turn", &cfg, &endpoint, true, "turn completed");
             Ok(AiTurnResult { text, tool_calls })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Err(message) => {
             log_ai_event("chat_turn", &cfg, &endpoint, false, &message);
             Err(message)
         }
     }
+}
+
+#[tauri::command]
+pub async fn ai_chat_turn_owned(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    project_path: String,
+    run_id: String,
+    messages: Vec<AiMessageInput>,
+    tools: Vec<ToolDef>,
+    character_context: Option<String>,
+) -> Result<AiTurnResult, String> {
+    runs.run_cancellable(
+        std::path::Path::new(&project_path),
+        &run_id,
+        ai_chat_turn(messages, tools, character_context),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn ai_chat_cancel(
+    runs: tauri::State<'_, ChatRunRegistry>,
+    project_path: String,
+    run_id: String,
+) -> Result<bool, String> {
+    runs.cancel(std::path::Path::new(&project_path), &run_id)
+        .await
 }
 
 /// Pipeline Agent entry point. `None` means no usable chat model is configured,
@@ -879,19 +839,22 @@ pub(crate) async fn complete_agent_text(
     if validate_config_basics(&cfg).is_err() {
         return Ok(None);
     }
+    let capability = capability_for_config(&cfg)?;
     let request = ChatRequest::new(vec![
         ChatMessage::system(system_prompt),
         ChatMessage::user(user_prompt),
     ]);
     let endpoint = effective_endpoint(&cfg);
-    let options = if matches!(cfg.provider.as_str(), "openai" | "deepseek") {
+    let options = if capability.json_mode {
         chat_debug_options().with_response_format(ChatResponseFormat::JsonMode)
     } else {
         chat_debug_options()
     };
-    match build_client(&cfg)
-        .exec_chat(&cfg.model, request, Some(&options))
-        .await
+    match with_provider_deadline(
+        capability.chat_deadline_ms,
+        build_client(&cfg).exec_chat(&cfg.model, request, Some(&options)),
+    )
+    .await
     {
         Ok(response) => {
             let text = response
@@ -918,12 +881,28 @@ pub(crate) async fn complete_agent_text(
                     .and_then(|value| u32::try_from(value).ok()),
             )))
         }
-        Err(error) => {
-            let message = error.to_string();
+        Err(message) => {
             log_ai_event("pipeline_agent", &cfg, &endpoint, false, &message);
             Err(message)
         }
     }
+}
+
+async fn with_provider_deadline<T, E>(
+    deadline_ms: u64,
+    future: impl std::future::Future<Output = Result<T, E>>,
+) -> Result<T, String>
+where
+    E: std::fmt::Display,
+{
+    tokio::time::timeout(Duration::from_millis(deadline_ms), future)
+        .await
+        .map_err(|_| {
+            format!(
+                "AI 供应商请求超时 [provider_timeout]（{deadline_ms} 毫秒）；请检查网络或调整供应商时限"
+            )
+        })?
+        .map_err(|error| error.to_string())
 }
 
 fn build_client(cfg: &AiConfig) -> Client {
@@ -1088,6 +1067,9 @@ async fn generate_openai_compatible_image(
     prompt: &str,
     reference: Option<&(String, String)>,
 ) -> Result<GeneratedMedia, String> {
+    if is_seedream_model(model) {
+        capability_for_provider_config(cfg)?.require(RequiredCapability::MediaUrlOutput)?;
+    }
     let endpoint = media_endpoint(cfg, "images/generations");
     let body = if is_seedream_model(model) {
         let mut body = serde_json::json!({
@@ -1972,10 +1954,7 @@ async fn response_to_generated_media(
         log_provider_event(action, cfg, model, endpoint, false, &text);
         return Err(format!("音频生成失败 ({status}): {text}"));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("读取音频生成响应失败: {e}"))?;
+    let bytes = safe_media_fetch::read_bounded_response(response, ExpectedMedia::Audio).await?;
     log_provider_event(action, cfg, model, endpoint, true, "audio generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -2024,19 +2003,16 @@ async fn download_generated_media(
     extension: &str,
     action: &str,
 ) -> Result<GeneratedMedia, String> {
-    validate_media_download_url(url)?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("创建下载客户端失败: {e}"))?;
-    let bytes = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("下载生成媒体失败: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("读取生成媒体失败: {e}"))?;
+    let mut capability_config = cfg.clone();
+    capability_config.model = model.to_string();
+    let capability = capability_for_provider_config(&capability_config)?;
+    capability.require(RequiredCapability::MediaUrlOutput)?;
+    let bytes = safe_media_fetch::fetch_generated_media(
+        url,
+        ExpectedMedia::from_extension(extension),
+        Duration::from_millis(capability.media_fetch_deadline_ms),
+    )
+    .await?;
     log_provider_event(action, cfg, model, endpoint, true, "media generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -2047,42 +2023,9 @@ async fn download_generated_media(
 /// Reject SSRF-prone media download URLs: non-http(s) schemes and loopback/
 /// private/link-local/reserved hosts. A provider-returned media URL must point
 /// at a public endpoint, never the local machine or an internal network.
+#[cfg(test)]
 fn validate_media_download_url(url: &str) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("无效的下载 URL: {e}"))?;
-    match parsed.scheme() {
-        "https" | "http" => {}
-        other => return Err(format!("不允许的下载协议: {other}")),
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
-    if is_private_download_host(host) {
-        return Err(format!("拒绝下载内部/保留地址: {host}"));
-    }
-    Ok(())
-}
-
-fn is_private_download_host(host: &str) -> bool {
-    let lower = host.to_ascii_lowercase();
-    if lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") {
-        return true;
-    }
-    // host_str() brackets IPv6 literals; strip them before parsing.
-    let bare = lower.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = bare.parse::<std::net::Ipv4Addr>() {
-        return ip.is_loopback()
-            || ip.is_private()
-            || ip.is_link_local()
-            || ip.is_unspecified()
-            || ip.is_broadcast();
-    }
-    if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
-        return ip.is_loopback()
-            || ip.is_unspecified()
-            || ip.is_unique_local()
-            || ip.is_unicast_link_local();
-    }
-    false
+    safe_media_fetch::validate_media_download_url(url).map(|_| ())
 }
 
 fn dashscope_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
@@ -2210,6 +2153,7 @@ fn log_provider_event(
         model: model.to_string(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
+        capabilities: cfg.capabilities.clone(),
     };
     log_ai_event(action, &chat_cfg, endpoint, success, message);
 }

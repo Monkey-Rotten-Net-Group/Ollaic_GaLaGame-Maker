@@ -1,4 +1,4 @@
-# T09 StagingDraft Read Overlay
+# T09 Staged Output Read Overlay
 
 - **Status:** Ready
 - **Severity:** Medium

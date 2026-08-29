@@ -12,7 +12,7 @@ This plan validates and deduplicates the Agent architecture review, Red Team rev
 - **INV-04 Conflict Safety:** Every write validates the exact staged baseline at the write Seam; check-to-write races cannot silently overwrite newer work.
 - **INV-05 User Edit Preservation:** Accept, Reject, autosave, navigation, and Agent cleanup cannot silently discard or overwrite newer user buffers or cached drafts.
 - **INV-06 Run Ownership:** Only the current conversational Run can execute tools, update shared state, or publish Preview; Stop permanently revokes old ownership.
-- **INV-07 Read Your Writes:** One Agent Run observes a coherent StagingDraft, including newly created resources.
+- **INV-07 Read Your Writes:** One Agent Run observes a coherent Staged Output, including newly created resources.
 - **INV-08 Narrative Context:** Function-calling turns receive bounded Project Memory and accepted facts without discretionary tool calls.
 - **INV-09 Recoverable Flow Output:** Failed/interrupted Flow and asset mutations leave no untracked playable output outside a rollback record.
 - **INV-10 Bounded External I/O:** Provider work is capability-checked, cancellable or deadline-bounded, and media fetch is network- and memory-bounded.
@@ -35,7 +35,7 @@ This plan validates and deduplicates the Agent architecture review, Red Team rev
 | F-09 | Raw Scene commands and Scene names permit Project-scope escape | Confirmed | High | INV-12 | T14, T17 |
 | F-10 | Export destination can overlap and delete/mutate the source Project | Confirmed | High | INV-12 | T18 |
 | F-11 | Asset rename/delete are sequential cross-resource mutations without rollback | Confirmed | High | INV-03, INV-09 | T19 |
-| F-12 | Production Flow Step timeout exists but production constructors disable it | Confirmed | Medium | INV-10 | T07 |
+| F-12 | Agent Flow Step timeout exists but production constructors disable it | Confirmed | Medium | INV-10 | T07 |
 | F-13 | FC context omits mandatory Memory/facts and injects an effectively unbounded current Scene | Confirmed | Medium | INV-08 | T08 |
 | F-14 | Read tools do not observe newly staged Scenes and Characters | Confirmed | Medium | INV-07 | T09 |
 | F-15 | Function-calling capability is selected by duplicated static provider lists | Confirmed | Medium | INV-10 | T10 |
@@ -48,7 +48,7 @@ This plan validates and deduplicates the Agent architecture review, Red Team rev
 | F-22 | Reject directly restores stale `before` over the live buffer | Rejected | - | INV-05 | - |
 | F-23 | Reject draft-cache cleanup has a proven data-loss path | Rejected | - | INV-05 | - |
 | F-24 | Multiple created Scenes are never cleanup candidates | Rejected | - | INV-03 | - |
-| F-25 | Production Flow cancellation is ineffective | Rejected | - | INV-06 | - |
+| F-25 | Agent Flow cancellation is ineffective | Rejected | - | INV-06 | - |
 | F-26 | Existing non-current Scene has no confirmation-time check | Duplicate | - | INV-04 | F-02 |
 | F-27 | Asset Metadata conflict is a separate root cause | Duplicate | - | INV-04 | F-02 |
 | F-28 | Provider request continues after Stop is separate from old-Run ownership | Duplicate | - | INV-06 | F-03 |
@@ -66,7 +66,7 @@ This plan validates and deduplicates the Agent architecture review, Red Team rev
 - F-22 is rejected: Reject changes status and does not write staged `before` content into the live buffer.
 - F-23 is rejected after a second path analysis: restoring a cached Scene does not delete its cache entry, and switching away from a dirty Scene re-stashes it. No reproducible loss path was established.
 - F-24 is rejected: created paths are tracked and deletion is attempted; F-01 retains swallowed rollback errors.
-- F-25 is rejected for Production Flow: scheduler cancellation drops the in-flight future and the real cancellation test passes.
+- F-25 is rejected for Agent Flow: scheduler cancellation drops the in-flight future and the real cancellation test passes.
 - F-31 requires an effective Tauri capability/threat-model test. Missing backend path scope remains confirmed as F-09/F-19.
 - F-32's missing transaction coverage is confirmed; the exact residual artifact set requires fault injection.
 - Direct user-triggered TTS may be an explicit write command, so Preview policy is deferred while its transaction defect remains F-18.
@@ -118,9 +118,9 @@ graph TD
 | [T04](T04-reject-draft-preservation.md) | Reject Draft Preservation | Cancelled | - | Rejected F-23 |
 | [T05](T05-asset-queue-output-transaction.md) | AssetQueue Output Transaction | Ready | High | None |
 | [T06](T06-safe-media-fetch.md) | Safe Bounded Media Fetch | Blocked | High | T10 |
-| [T07](T07-production-step-deadline.md) | Production Flow Step Deadline | Blocked | Medium | T10 |
+| [T07](T07-production-step-deadline.md) | Agent Flow Step Deadline | Blocked | Medium | T10 |
 | [T08](T08-stable-narrative-context.md) | Stable Narrative Context | Ready | Medium | None |
-| [T09](T09-staging-read-overlay.md) | StagingDraft Read Overlay | Ready | Medium | None |
+| [T09](T09-staging-read-overlay.md) | Staged Output Read Overlay | Ready | Medium | None |
 | [T10](T10-provider-capability-model.md) | Provider Capability Model | Ready | Medium | None |
 | [T11](T11-recoverable-provider-config.md) | Recoverable Provider Configuration | Ready | Medium | None |
 | [T12](T12-trace-data-minimization.md) | Agent Trace Data Minimization | Ready | Medium | None |
@@ -145,11 +145,11 @@ T04 is retained as a cancelled audit artifact so the rejected Finding does not s
 7. T10 Provider Capability Model
 8. T03 Conversational Run Ownership and Cancellation
 9. T06 Safe Bounded Media Fetch
-10. T07 Production Flow Step Deadline
+10. T07 Agent Flow Step Deadline
 11. T05 AssetQueue Output Transaction
 12. T19 Asset Rename and Delete Transaction
 13. T13 Batch TTS Transaction and Project Lock
-14. T09 StagingDraft Read Overlay
+14. T09 Staged Output Read Overlay
 15. T08 Stable Narrative Context
 16. T11 Recoverable Provider Configuration
 17. T12 Agent Trace Data Minimization

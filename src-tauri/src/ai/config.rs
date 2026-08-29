@@ -17,6 +17,19 @@ pub struct AiConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    pub capabilities: Option<ProviderCapabilityDeclaration>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderCapabilityDeclaration {
+    pub chat_tools: bool,
+    pub json_mode: bool,
+    pub streaming_cancellation: bool,
+    pub media_url_output: bool,
+    pub chat_deadline_ms: Option<u64>,
+    pub flow_step_deadline_ms: Option<u64>,
+    pub media_fetch_deadline_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +39,7 @@ pub struct AiProviderConfig {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
+    pub capabilities: Option<ProviderCapabilityDeclaration>,
 }
 
 impl Default for AiConfig {
@@ -35,6 +49,7 @@ impl Default for AiConfig {
             model: "gpt-4o-mini".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 }
@@ -46,6 +61,7 @@ impl AiProviderConfig {
             model: "dall-e-3".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 
@@ -55,6 +71,7 @@ impl AiProviderConfig {
             model: "tts-1".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 
@@ -64,6 +81,7 @@ impl AiProviderConfig {
             model: "music-1".into(),
             api_key: String::new(),
             base_url: String::new(),
+            capabilities: None,
         }
     }
 }
@@ -72,42 +90,6 @@ impl Default for AiProviderConfig {
     fn default() -> Self {
         Self::image_default()
     }
-}
-
-pub fn default_system_prompt() -> String {
-    r##"You are a WebGAL story editing assistant.
-
-The frontend provides the current scene, numbered script lines, available assets, characters, and project memory in system messages. Follow those higher-detail instructions exactly.
-
-Core output protocol:
-- When editing the script, output one JSON object: {"patches":[...]}.
-- When only discussing the story, output one JSON object: {"type":"chat","message":"..."}.
-- Do not use Markdown fences.
-- Do not claim that files have already been changed. The app will preview changes and the user decides whether to apply them.
-
-Patch rules:
-- Supported patch types: insert, delete, replace.
-- Patch file must be the current scene file.
-- Line numbers refer to the numbered WebGAL txt script supplied by the app.
-- Include anchorText when possible by copying the target original line exactly.
-- insert.afterLine can be a positive line number or "end".
-- delete/replace require startLine <= endLine.
-- For insert/replace, text is raw WebGAL txt, with one command per line.
-
-WebGAL txt reminders:
-- Narration: :text;
-- Dialogue: Character:text;
-- Comment: ;comment text
-- Background: changeBg:file -next;
-- Figure: changeFigure:file -left/-right/-center -next;
-- BGM: bgm:file;
-- Sound effect: playEffect:file;
-- Choice: choose:Label A:sceneA.txt|Label B:sceneB.txt;
-- Scene jump: changeScene:scene.txt;
-
-Use only asset filenames listed by the app. If a required asset is missing, return chat explaining the missing asset instead of inventing a filename.
-"##
-    .to_string()
 }
 
 fn config_path(file_name: &str) -> Option<PathBuf> {

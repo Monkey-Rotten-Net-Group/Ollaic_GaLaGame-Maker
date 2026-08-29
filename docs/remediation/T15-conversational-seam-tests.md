@@ -18,7 +18,7 @@ Build a focused harness crossing conversational orchestration, Tauri command Ada
 
 ## Out of Scope
 
-Full browser E2E, live Provider calls, Production Flow tests already covered in Rust, and exhaustive UI visual testing.
+Full browser E2E, live Provider calls, Agent Flow tests already covered in Rust, and exhaustive UI visual testing.
 
 ## Acceptance Criteria
 

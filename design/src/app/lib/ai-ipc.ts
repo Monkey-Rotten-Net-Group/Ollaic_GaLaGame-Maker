@@ -17,6 +17,27 @@ export interface AiConfig {
   model: string;
   api_key: string;
   base_url: string;
+  capabilities?: ProviderCapabilityDeclaration | null;
+}
+
+export interface ProviderCapabilityDeclaration {
+  chat_tools: boolean;
+  json_mode: boolean;
+  streaming_cancellation: boolean;
+  media_url_output: boolean;
+  chat_deadline_ms?: number | null;
+  flow_step_deadline_ms?: number | null;
+  media_fetch_deadline_ms?: number | null;
+}
+
+export interface ProviderCapability {
+  chatTools: boolean;
+  jsonMode: boolean;
+  streamingCancellation: boolean;
+  mediaUrlOutput: boolean;
+  chatDeadlineMs: number;
+  flowStepDeadlineMs: number;
+  mediaFetchDeadlineMs: number;
 }
 
 export type AiProviderConfig = AiConfig;
@@ -82,18 +103,16 @@ export interface AiTurnResult {
   toolCalls: AiToolCall[];
 }
 
-export type AiStreamEvent =
-  | { type: 'start' }
-  | { type: 'chunk'; content: string }
-  | { type: 'done' }
-  | { type: 'error'; message: string };
-
 export async function getAiConfig(): Promise<AiConfig> {
   return invoke<AiConfig>('get_ai_config');
 }
 
 export async function setAiConfig(config: AiConfig): Promise<void> {
   return invoke<void>('set_ai_config', { config });
+}
+
+export async function getAiProviderCapability(config?: AiConfig): Promise<ProviderCapability> {
+  return invoke<ProviderCapability>('get_ai_provider_capability', { config: config ?? null });
 }
 
 export async function getAiImageConfig(): Promise<AiProviderConfig> {
@@ -221,68 +240,13 @@ export async function listenBatchTtsProgress(
   });
 }
 
-export interface StreamHandlers {
-  onChunk?: (content: string) => void;
-  onDone?: () => void;
-  onError?: (message: string) => void;
-  onStart?: () => void;
-}
-
-export async function aiChatStream(
-  messages: AiChatMessage[],
-  handlers: StreamHandlers,
-  characterContext?: string,
-): Promise<{ requestId: string; cancel: () => void }> {
-  const requestId =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const eventName = `ai-chat-${requestId}`;
-
-  let unlisten: UnlistenFn | null = null;
-  const stop = () => {
-    if (unlisten) {
-      unlisten();
-      unlisten = null;
-    }
-  };
-
-  unlisten = await listen<AiStreamEvent>(eventName, (e) => {
-    const payload = e.payload;
-    switch (payload.type) {
-      case 'start':
-        handlers.onStart?.();
-        break;
-      case 'chunk':
-        handlers.onChunk?.(payload.content);
-        break;
-      case 'done':
-        handlers.onDone?.();
-        stop();
-        break;
-      case 'error':
-        handlers.onError?.(payload.message);
-        stop();
-        break;
-    }
-  });
-
-  try {
-    await invoke<void>('ai_chat_stream', { requestId, messages, characterContext });
-  } catch (err) {
-    stop();
-    handlers.onError?.(String(err));
-  }
-
-  return { requestId, cancel: stop };
-}
-
 /**
  * One non-streaming agent turn. Sends conversation + available tools to the
- * model and returns either tool calls (to execute) or final text. Used by the
- * multi-step agent loop; pure-chat streaming still goes through aiChatStream.
+ * model and returns either tool calls (to execute) or final text.
  */
 export async function aiChatTurn(
+  projectPath: string,
+  runId: string,
   messages: AiChatMessage[],
   tools: ToolDef[],
   characterContext?: string,
@@ -293,9 +257,15 @@ export async function aiChatTurn(
     tool_calls: m.toolCalls?.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) ?? null,
     tool_call_id: m.toolCallId ?? null,
   }));
-  return invoke<AiTurnResult>('ai_chat_turn', {
+  return invoke<AiTurnResult>('ai_chat_turn_owned', {
+    projectPath,
+    runId,
     messages: wireMessages,
     tools,
     characterContext,
   });
+}
+
+export async function aiChatCancel(projectPath: string, runId: string): Promise<boolean> {
+  return invoke<boolean>('ai_chat_cancel', { projectPath, runId });
 }

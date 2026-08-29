@@ -18,7 +18,7 @@ Define a bounded NarrativeContext Module containing Project Memory summary, acce
 
 ## Out of Scope
 
-Embedding search, long-term vector memory, chat UI persistence, and StagingDraft read overlay.
+Embedding search, long-term vector memory, chat UI persistence, and Staged Output read overlay.
 
 ## Acceptance Criteria
 

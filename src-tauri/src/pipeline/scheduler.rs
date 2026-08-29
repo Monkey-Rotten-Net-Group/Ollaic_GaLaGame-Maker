@@ -32,6 +32,14 @@ pub struct RunHandle {
     pause_after_step: AtomicBool,
     cancelled: Arc<AtomicBool>,
     asset_binding_gate: Arc<Mutex<()>>,
+    step_timeout: Duration,
+    asset_queue_timeout: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StepDeadlines {
+    pub(crate) agent: Duration,
+    pub(crate) asset_queue: Duration,
 }
 
 impl RunHandle {
@@ -95,14 +103,81 @@ enum Action {
 /// The testable orchestrator core.
 pub struct Pipeline {
     agents: AgentRegistry,
-    figure_matting_model: Result<std::path::PathBuf, String>,
-    step_timeout: Option<Duration>,
+    asset_generators: Arc<dyn AssetGeneratorFactory>,
+    default_local_fallback: bool,
+    step_timeout: Duration,
+}
+
+const DEFAULT_PROVIDER_STEP_TIMEOUT: Duration = Duration::from_secs(180);
+const MAX_PROVIDER_STEP_TIMEOUT_MS: u64 = 3_600_000;
+
+fn validated_step_timeout_ms(timeout: Duration) -> Result<u64, PipelineError> {
+    let millis = u64::try_from(timeout.as_millis())
+        .map_err(|_| PipelineError::InvalidStepTimeout(timeout.as_millis()))?;
+    if millis == 0 || millis > MAX_PROVIDER_STEP_TIMEOUT_MS {
+        return Err(PipelineError::InvalidStepTimeout(timeout.as_millis()));
+    }
+    Ok(millis)
+}
+
+fn restored_step_timeout(
+    state: &RunState,
+    legacy_default: Duration,
+) -> Result<Duration, PipelineError> {
+    match state.step_timeout_ms {
+        Some(millis) => {
+            let timeout = Duration::from_millis(millis);
+            validated_step_timeout_ms(timeout)?;
+            Ok(timeout)
+        }
+        None => Ok(legacy_default),
+    }
+}
+
+fn restored_asset_queue_timeout(
+    state: &RunState,
+    step_timeout: Duration,
+) -> Result<Duration, PipelineError> {
+    match state.asset_queue_timeout_ms {
+        Some(millis) => {
+            let timeout = Duration::from_millis(millis);
+            validated_step_timeout_ms(timeout)?;
+            Ok(timeout)
+        }
+        None => Ok(step_timeout),
+    }
 }
 
 struct ConfiguredAssetGenerator {
     local_fallback: bool,
     cancelled: Arc<AtomicBool>,
     figure_matting_model: Result<std::path::PathBuf, String>,
+}
+
+pub(crate) trait AssetGeneratorFactory: Send + Sync {
+    fn create(
+        &self,
+        allow_local_fallback: bool,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator>;
+}
+
+struct ConfiguredAssetGeneratorFactory {
+    figure_matting_model: Result<std::path::PathBuf, String>,
+}
+
+impl AssetGeneratorFactory for ConfiguredAssetGeneratorFactory {
+    fn create(
+        &self,
+        allow_local_fallback: bool,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(ConfiguredAssetGenerator {
+            local_fallback: allow_local_fallback,
+            cancelled,
+            figure_matting_model: self.figure_matting_model.clone(),
+        })
+    }
 }
 
 impl AssetGenerator for ConfiguredAssetGenerator {
@@ -137,13 +212,6 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         Box::pin(async move {
             if self.cancelled.load(Ordering::SeqCst) {
                 return Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string());
-            }
-            // Tests must not hit the network: generation is deterministic
-            // placeholder output. Production still tries the provider and falls
-            // back to a placeholder only on error (or when local fallback was
-            // explicitly authorized).
-            if cfg!(test) {
-                return Ok(local_placeholder(task.kind));
             }
             let result = generate_configured_asset(task, &self.figure_matting_model).await;
             if self.cancelled.load(Ordering::SeqCst) {
@@ -342,15 +410,100 @@ fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
     }
 }
 
+#[cfg(test)]
+struct PlaceholderAssetGeneratorFactory;
+
+#[cfg(test)]
+impl AssetGeneratorFactory for PlaceholderAssetGeneratorFactory {
+    fn create(
+        &self,
+        _allow_local_fallback: bool,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(PlaceholderAssetGenerator { cancelled })
+    }
+}
+
+#[cfg(test)]
+struct PlaceholderAssetGenerator {
+    cancelled: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+impl AssetGenerator for PlaceholderAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        task: &'a AssetTask,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            if self.cancelled.load(Ordering::SeqCst) {
+                Err(crate::asset_queue::scheduler::ASSET_QUEUE_CANCELLED.to_string())
+            } else {
+                Ok(local_placeholder(task.kind))
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct HangingAssetGeneratorFactory {
+    started: Arc<tokio::sync::Semaphore>,
+}
+
+#[cfg(test)]
+impl HangingAssetGeneratorFactory {
+    pub(crate) fn new(started: Arc<tokio::sync::Semaphore>) -> Self {
+        Self { started }
+    }
+}
+
+#[cfg(test)]
+impl AssetGeneratorFactory for HangingAssetGeneratorFactory {
+    fn create(
+        &self,
+        _allow_local_fallback: bool,
+        _cancelled: Arc<AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        Arc::new(HangingAssetGenerator {
+            started: self.started.clone(),
+        })
+    }
+}
+
+#[cfg(test)]
+struct HangingAssetGenerator {
+    started: Arc<tokio::sync::Semaphore>,
+}
+
+#[cfg(test)]
+impl AssetGenerator for HangingAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            self.started.add_permits(1);
+            std::future::pending().await
+        })
+    }
+}
+
 impl Pipeline {
+    #[cfg(test)]
     pub fn new(agents: AgentRegistry) -> Self {
         Pipeline {
             agents,
-            figure_matting_model: Err("figure matting model is not configured".to_string()),
-            step_timeout: None,
+            asset_generators: Arc::new(PlaceholderAssetGeneratorFactory),
+            default_local_fallback: true,
+            step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
         }
     }
 
+    #[cfg(test)]
     pub fn with_default_agents() -> Self {
         Self::new(AgentRegistry::with_defaults())
     }
@@ -360,16 +513,33 @@ impl Pipeline {
     ) -> Self {
         Self {
             agents: AgentRegistry::with_defaults(),
-            figure_matting_model,
-            step_timeout: None,
+            asset_generators: Arc::new(ConfiguredAssetGeneratorFactory {
+                figure_matting_model,
+            }),
+            default_local_fallback: false,
+            step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
         }
     }
 
     /// Cap each step's agent run with a timeout; on expiry the step fails and
     /// the run terminates as `RunStatus::Timeout` instead of hanging forever.
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
-        self.step_timeout = Some(timeout);
+        self.step_timeout = timeout;
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_asset_generators_for_test(
+        mut self,
+        asset_generators: Arc<dyn AssetGeneratorFactory>,
+    ) -> Self {
+        self.asset_generators = asset_generators;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn step_timeout(&self) -> Duration {
+        self.step_timeout
     }
 
     /// Create + persist a run, emit `RunStarted`, return a handle set to
@@ -383,7 +553,15 @@ impl Pipeline {
         clock: &dyn Clock,
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
-        self.create_run_with_options(project_path, run_id, prompt, recipe, false, clock, sink)
+        self.create_run_with_options(
+            project_path,
+            run_id,
+            prompt,
+            recipe,
+            self.default_local_fallback,
+            clock,
+            sink,
+        )
     }
 
     pub fn create_run_with_options(
@@ -396,6 +574,57 @@ impl Pipeline {
         clock: &dyn Clock,
         sink: &dyn EventSink,
     ) -> Result<Arc<RunHandle>, PipelineError> {
+        self.create_run_with_timeout(
+            project_path,
+            run_id,
+            prompt,
+            recipe,
+            allow_local_fallback,
+            self.step_timeout,
+            clock,
+            sink,
+        )
+    }
+
+    pub fn create_run_with_timeout(
+        &self,
+        project_path: &Path,
+        run_id: &str,
+        prompt: &str,
+        recipe: &FlowRecipe,
+        allow_local_fallback: bool,
+        step_timeout: Duration,
+        clock: &dyn Clock,
+        sink: &dyn EventSink,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
+        self.create_run_with_deadlines(
+            project_path,
+            run_id,
+            prompt,
+            recipe,
+            allow_local_fallback,
+            StepDeadlines {
+                agent: step_timeout,
+                asset_queue: step_timeout,
+            },
+            clock,
+            sink,
+        )
+    }
+
+    pub(crate) fn create_run_with_deadlines(
+        &self,
+        project_path: &Path,
+        run_id: &str,
+        prompt: &str,
+        recipe: &FlowRecipe,
+        allow_local_fallback: bool,
+        deadlines: StepDeadlines,
+        clock: &dyn Clock,
+        sink: &dyn EventSink,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
+        let step_timeout_ms = validated_step_timeout_ms(deadlines.agent)?;
+        let asset_queue_timeout_ms = validated_step_timeout_ms(deadlines.asset_queue)?;
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
         // Validate or create the IR before writing any run state. An invalid
         // plan must not leave an orphan run that later bypasses validation.
@@ -413,6 +642,8 @@ impl Pipeline {
         let mut state = RunState::new(run_id, project_path, prompt, recipe, clock.now_ms());
         state.status = RunStatus::Running;
         state.allow_local_fallback = allow_local_fallback;
+        state.step_timeout_ms = Some(step_timeout_ms);
+        state.asset_queue_timeout_ms = Some(asset_queue_timeout_ms);
         if let Err(error) = store::save_run_state(project_path, &state) {
             if let Some(previous) = previous_plan {
                 story_plan::save_plan(project_path, &previous).map_err(PipelineError::Plan)?;
@@ -432,6 +663,8 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout: deadlines.agent,
+            asset_queue_timeout: deadlines.asset_queue,
         }))
     }
 
@@ -454,6 +687,8 @@ impl Pipeline {
         let mut state = store::load_run_state(project_path, run_id)
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
+        let step_timeout = restored_step_timeout(&state, self.step_timeout)?;
+        let asset_queue_timeout = restored_asset_queue_timeout(&state, step_timeout)?;
         if state.status.is_terminal() {
             return Err(PipelineError::InvalidRunTransition(
                 run_id.to_string(),
@@ -490,6 +725,8 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout,
+            asset_queue_timeout,
         }))
     }
 
@@ -510,6 +747,8 @@ impl Pipeline {
         let mut state = store::load_run_state(project_path, run_id)
             .map_err(PipelineError::Store)?
             .ok_or(PipelineError::RunNotFound(run_id.to_string()))?;
+        let step_timeout = restored_step_timeout(&state, self.step_timeout)?;
+        let asset_queue_timeout = restored_asset_queue_timeout(&state, step_timeout)?;
         let mut changed = false;
         if !state.status.is_terminal() {
             restore_interrupted_outputs(project_path, &state)?;
@@ -544,6 +783,8 @@ impl Pipeline {
             pause_after_step: AtomicBool::new(false),
             cancelled: Arc::new(AtomicBool::new(false)),
             asset_binding_gate: Arc::new(Mutex::new(())),
+            step_timeout,
+            asset_queue_timeout,
         }))
     }
 
@@ -794,10 +1035,7 @@ impl Pipeline {
 
         let (production_brief, allow_local_fallback) = {
             let state = handle.state.lock().await;
-            (
-                state.prompt.clone(),
-                state.allow_local_fallback || cfg!(test),
-            )
+            (state.prompt.clone(), state.allow_local_fallback)
         };
         let input_snapshot = serde_json::json!({
             "productionBrief": &production_brief,
@@ -857,21 +1095,44 @@ impl Pipeline {
         };
         let result = if agent_key.as_deref() == Some("assetQueue") {
             let run_id = handle.state.lock().await.run_id.clone();
-            let generator = Arc::new(ConfiguredAssetGenerator {
-                local_fallback: allow_local_fallback,
-                cancelled: handle.cancelled.clone(),
-                figure_matting_model: self.figure_matting_model.clone(),
-            });
-            match crate::asset_queue::run_queue_cancellable(
+            let generator = self
+                .asset_generators
+                .create(allow_local_fallback, handle.cancelled.clone());
+            let queue_run = crate::asset_queue::run_queue_cancellable(
                 project_path,
                 &run_id,
                 &plan,
                 generator,
                 handle.cancelled.clone(),
                 handle.asset_binding_gate.clone(),
-            )
-            .await
-            {
+            );
+            tokio::pin!(queue_run);
+            let cancel_wait = handle.cancel_notify.notified();
+            tokio::pin!(cancel_wait);
+            cancel_wait.as_mut().enable();
+            if handle.cancelled.load(Ordering::SeqCst) {
+                return;
+            }
+            let timeout_sleep = tokio::time::sleep(handle.asset_queue_timeout);
+            tokio::pin!(timeout_sleep);
+            let queue_result = tokio::select! {
+                biased;
+                _ = &mut cancel_wait => return,
+                result = &mut queue_run => result,
+                _ = &mut timeout_sleep => {
+                    self.fail_step_timeout(
+                        project_path,
+                        handle,
+                        sink,
+                        clock,
+                        id,
+                        handle.asset_queue_timeout,
+                    )
+                    .await;
+                    return;
+                }
+            };
+            match queue_result {
                 Ok(queue) => {
                     let failed = queue
                         .tasks
@@ -922,19 +1183,12 @@ impl Pipeline {
         } else {
             match self.agents.get(kind, agent_key.as_deref()) {
                 Some(agent) => {
-                    let timeout_sleep = async {
-                        match self.step_timeout {
-                            Some(timeout) => tokio::time::sleep(timeout).await,
-                            None => std::future::pending::<()>().await,
-                        }
-                    };
+                    let timeout_sleep = tokio::time::sleep(handle.step_timeout);
                     tokio::select! {
                         result = agent.run(&ctx) => result,
                         _ = timeout_sleep => {
-                            if let Some(timeout) = self.step_timeout {
-                                self.fail_step_timeout(project_path, handle, sink, clock, id, timeout)
-                                    .await;
-                            }
+                            self.fail_step_timeout(project_path, handle, sink, clock, id, handle.step_timeout)
+                                .await;
                             return;
                         }
                         _ = handle.cancel_notify.notified() => {
@@ -1118,8 +1372,16 @@ impl Pipeline {
         step_id: String,
         error: String,
     ) {
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Failed)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Failed,
+        )
+        .await;
     }
 
     async fn fail_step_timeout(
@@ -1132,8 +1394,16 @@ impl Pipeline {
         timeout: Duration,
     ) {
         let error = format!("step timed out after {:?}", timeout);
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Timeout)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Timeout,
+        )
+        .await;
     }
 
     async fn fail_step_with_status(
@@ -2115,6 +2385,7 @@ pub enum PipelineError {
     StepNotFound(String),
     InvalidStepTransition(String, String),
     InvalidRunTransition(String, String),
+    InvalidStepTimeout(u128),
     Recovery(String),
     Cleanup(String),
 }
@@ -2134,6 +2405,10 @@ impl std::fmt::Display for PipelineError {
             PipelineError::InvalidRunTransition(id, reason) => {
                 write!(f, "invalid transition for run '{}': {}", id, reason)
             }
+            PipelineError::InvalidStepTimeout(millis) => write!(
+                f,
+                "flow step timeout must be between 1 and {MAX_PROVIDER_STEP_TIMEOUT_MS} milliseconds, got {millis}"
+            ),
             PipelineError::Recovery(error) => write!(f, "pipeline recovery error: {}", error),
             PipelineError::Cleanup(error) => write!(f, "snapshot cleanup deferred: {}", error),
         }
