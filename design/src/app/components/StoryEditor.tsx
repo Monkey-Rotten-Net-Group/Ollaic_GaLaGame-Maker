@@ -14,9 +14,9 @@ import { SceneManagerPanel } from './SceneManagerPanel';
 import type { WebGalNode } from '../lib/webgal-types';
 import {
   parseScene, serializeScene, saveScene, loadScene,
-  openProject, getScenePath, createScene,
+  openProject, createScene,
   setRuntimeProject, setRuntimeTemplateDir, getRuntimeUrl, jumpToSentence, openInBrowser,
-  readFileText, writeFileText, deleteScene, renameScene,
+  readFileText, exportSceneFile, deleteScene, renameScene,
   type ProjectInfo,
 } from '../lib/webgal-ipc';
 import { listCharacters, listCharacterNames } from '../lib/character-ipc';
@@ -215,9 +215,8 @@ export function StoryEditor() {
 
           let loadedInitialScene = false;
           for (const sceneName of sceneCandidates) {
-            const scenePath = await getScenePath(storedPath, sceneName);
             try {
-              const loaded = await loadScene(scenePath);
+              const loaded = await loadScene(storedPath, sceneName);
               setCurrentSceneName(sceneName);
             // Restore sessionStorage draft left by assets-page navigation
             const draftKey = `scene-draft-${projectId}-${sceneName}`;
@@ -342,8 +341,7 @@ export function StoryEditor() {
       }
       if (projectPath) {
         // Save to project's game/scene/ directory
-        const scenePath = await getScenePath(projectPath, currentSceneName);
-        await saveScene(scenePath, nodesToSave);
+        await saveScene(projectPath, currentSceneName, nodesToSave);
         await syncSceneBackgroundCard(currentSceneName, nodesToSave);
       } else {
         // No project open, prompt user to pick a save location.
@@ -356,7 +354,7 @@ export function StoryEditor() {
           setSaveStatus('idle');
           return false;
         }
-        await saveScene(selected, nodesToSave);
+        await exportSceneFile(selected, nodesToSave);
       }
       setDirty(false);
       editorCommitCoordinator.deleteDraft(currentSceneName);
@@ -551,9 +549,8 @@ export function StoryEditor() {
       sceneLoadTokenRef.current = myToken;
       setCurrentSceneName(sceneName);
 
-      const scenePath = await getScenePath(selected, sceneName);
       try {
-        const loaded = await loadScene(scenePath);
+        const loaded = await loadScene(selected, sceneName);
         const text = await serializeScene(loaded);
         if (sceneLoadTokenRef.current !== myToken) return;
         setNodes(loaded);
@@ -598,7 +595,6 @@ export function StoryEditor() {
     const myToken = sceneLoadTokenRef.current + 1;
     sceneLoadTokenRef.current = myToken;
     setCurrentSceneName(sceneName);
-    const scenePath = await getScenePath(projectPath, sceneName);
     try {
       // Prefer a cached draft over the saved file
       const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(sceneName);
@@ -610,7 +606,7 @@ export function StoryEditor() {
         setSelectedNode(null);
         setDirty(true);
       } else {
-        const loaded = await loadScene(scenePath);
+        const loaded = await loadScene(projectPath, sceneName);
         const text = await serializeScene(loaded);
         if (sceneLoadTokenRef.current !== myToken) return;
         setNodes(loaded);
@@ -664,8 +660,7 @@ export function StoryEditor() {
     const ok = window.confirm(`确定删除场景 "${sceneName}" 吗？此操作不可恢复。`);
     if (!ok) return;
     try {
-      const path = await getScenePath(projectPath, sceneName);
-      await deleteScene(path);
+      await deleteScene(projectPath, sceneName);
       // If deleting the current scene, switch to another
       if (sceneName === currentSceneName) {
         const info = await openProject(projectPath);
@@ -687,8 +682,7 @@ export function StoryEditor() {
     if (!newName || newName === oldName) return;
     const finalName = newName.endsWith('.txt') ? newName : `${newName}.txt`;
     try {
-      const path = await getScenePath(projectPath, oldName);
-      await renameScene(path, finalName);
+      await renameScene(projectPath, oldName, finalName);
       void refreshProjectInfo();
       if (oldName === currentSceneName) {
         setCurrentSceneName(finalName);
@@ -747,7 +741,7 @@ export function StoryEditor() {
       console.log('序列化完成，文本长度:', text.length);
 
       // Write to file using Tauri
-      await writeFileText(savePath, text);
+      await exportSceneFile(savePath, nodes);
 
       console.log('导出成功:', savePath);
 
@@ -797,8 +791,7 @@ export function StoryEditor() {
       ? currentSceneName
       : (info.scenes[0] ?? 'start.txt');
     setCurrentSceneName(restoredSceneName);
-    const scenePath = await getScenePath(projectPath, restoredSceneName);
-    const loaded = await loadScene(scenePath);
+    const loaded = await loadScene(projectPath, restoredSceneName);
     setNodes(loaded);
     setScriptSource(await serializeScene(loaded));
     editorCommitCoordinator.clearDrafts();

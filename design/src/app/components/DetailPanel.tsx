@@ -1100,7 +1100,7 @@ function ScenePickerButton({
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    listScenes(`${projectPath}/game/scene`)
+    listScenes(projectPath)
       .then(setScenes)
       .catch(() => setScenes([]))
       .finally(() => setLoading(false));

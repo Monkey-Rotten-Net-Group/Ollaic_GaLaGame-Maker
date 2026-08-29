@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import {
   X, Plus, FolderOpen, Pencil, Check, Trash2,
 } from 'lucide-react';
-import { getScenePath, updateSceneHeader, type ProjectInfo, type SceneHeader } from '../lib/webgal-ipc';
+import { updateSceneHeader, type ProjectInfo, type SceneHeader } from '../lib/webgal-ipc';
 
 export interface SceneManagerPanelProps {
   open: boolean;
@@ -49,9 +49,8 @@ export function SceneManagerPanel({
     if (!projectPath) return;
     setSaving(true);
     try {
-      const path = await getScenePath(projectPath, sceneName);
       const header: SceneHeader = { chapter: editChapter.trim(), outline: editOutline.trim() };
-      await updateSceneHeader(path, header);
+      await updateSceneHeader(projectPath, sceneName, header);
       onHeaderUpdated(sceneName, header);
       setEditingScene(null);
     } catch (e) {

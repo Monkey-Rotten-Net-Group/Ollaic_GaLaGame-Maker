@@ -65,7 +65,7 @@ import {
   truncateContextMessages,
   type MissingAssetIssue,
 } from '../lib/story-agent';
-import { getScenePath, listScenes, parseScene, readFileText, sceneDisplayName, serializeSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
+import { listScenes, parseScene, readFileText, sceneDisplayName, serializeSceneHeader, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
 
@@ -466,12 +466,11 @@ export function useAiAgent(params: UseAiAgentParams) {
     characters,
     readSceneContent: async (file: string) => {
       if (!projectPath) throw new Error('当前没有打开的项目。');
-      const path = await getScenePath(projectPath, file);
-      return readFileText(path);
+      return readFileText(projectPath, file);
     },
     listSceneFiles: async () => {
       if (!projectPath) return [];
-      return listScenes(`${projectPath}/game/scene`);
+      return listScenes(projectPath);
     },
     getCharacter: (id: string) => characters.find((c) => c.id === id),
     memory: memory ?? emptyProjectMemory(),
@@ -1072,8 +1071,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       readSceneContent: async (file) => {
         const draft = await readSceneDraft?.(file);
         if (draft !== undefined) return draft;
-        const path = await getScenePath(projectPath, file);
-        return readFileText(path);
+        return readFileText(projectPath, file);
       },
       getCharacter: (id) => characters.find((c) => c.id === id),
       memory: memory ?? emptyProjectMemory(),

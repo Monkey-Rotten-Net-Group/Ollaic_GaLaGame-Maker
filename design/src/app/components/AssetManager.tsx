@@ -66,7 +66,7 @@ import {
   type AiProviderConfig,
   type AiMediaGenerationProgress,
 } from '../lib/ai-ipc';
-import { getScenePath, loadScene, openProject, saveScene } from '../lib/webgal-ipc';
+import { loadScene, openProject, saveScene } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { listCharacters } from '../lib/character-ipc';
 import { CharacterPanel } from './CharacterPanel';
@@ -271,8 +271,7 @@ async function replaceBackgroundReferencesInScenes(
   const sceneFiles = Array.from(new Set(usages.map((usage) => usage.sceneFile).filter(Boolean)));
   let updatedCount = 0;
   for (const sceneFile of sceneFiles) {
-    const scenePath = await getScenePath(projectPath, sceneFile);
-    const nodes = await loadScene(scenePath);
+    const nodes = await loadScene(projectPath, sceneFile);
     let changed = false;
     const nextNodes = nodes.map((node) => {
       if (node.type !== 'changeBg') return node;
@@ -282,7 +281,7 @@ async function replaceBackgroundReferencesInScenes(
       updatedCount += 1;
       return { ...node, asset: newName, content: newName };
     });
-    if (changed) await saveScene(scenePath, nextNodes);
+    if (changed) await saveScene(projectPath, sceneFile, nextNodes);
   }
   return updatedCount;
 }
@@ -477,8 +476,7 @@ export function AssetManager() {
           voiceCards: { ...(metadataRef.current.voiceCards ?? {}) },
         };
         for (const sceneName of info.scenes) {
-          const scenePath = await getScenePath(projectPath, sceneName);
-          const nodes = await loadScene(scenePath);
+          const nodes = await loadScene(projectPath, sceneName);
           nodes.forEach((node: WebGalNode, index: number) => {
             if (node.type !== 'dialogue') return;
             const text = node.content.trim();
@@ -577,8 +575,7 @@ export function AssetManager() {
         const seen = new Set<string>();
         const refs: { filename: string; exists: boolean }[] = [];
         for (const sceneName of info.scenes) {
-          const scenePath = await getScenePath(projectPath, sceneName);
-          const nodes = await loadScene(scenePath);
+          const nodes = await loadScene(projectPath, sceneName);
           for (const filename of extractSceneBgmAssets(nodes)) {
             if (seen.has(filename)) continue;
             seen.add(filename);
@@ -1150,8 +1147,7 @@ export function AssetManager() {
 
   const applySceneBackgroundReference = useCallback(async (sceneFile: string, assetName: string) => {
     if (!projectPath) return;
-    const scenePath = await getScenePath(projectPath, sceneFile);
-    const nodes = await loadScene(scenePath);
+    const nodes = await loadScene(projectPath, sceneFile);
     const nextNode: WebGalNode = {
       id: `changeBg-${Date.now()}`,
       type: 'changeBg',
@@ -1174,7 +1170,7 @@ export function AssetManager() {
     const nextNodes = index >= 0
       ? nodes.map((node, nodeIndex) => nodeIndex === index ? { ...node, content: assetName, asset: assetName } : node)
       : [nextNode, ...nodes];
-    await saveScene(scenePath, nextNodes);
+    await saveScene(projectPath, sceneFile, nextNodes);
   }, [projectPath]);
 
   const handleNewSceneCard = useCallback(() => {

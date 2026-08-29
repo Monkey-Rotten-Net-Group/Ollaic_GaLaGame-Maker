@@ -160,6 +160,7 @@ fn main() {
             webgal::commands::write_file_text,
             webgal::commands::delete_scene,
             webgal::commands::rename_scene,
+            webgal::commands::export_scene_file,
             // Project management
             webgal::project::init_project,
             webgal::project::open_project,

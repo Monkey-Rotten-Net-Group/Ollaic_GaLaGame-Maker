@@ -20,29 +20,34 @@ export async function serializeScene(nodes: WebGalNode[]): Promise<string> {
   return invoke<string>('serialize_scene', { nodes });
 }
 
-/** Read a .txt scene file from disk, parse it, return nodes. */
-export async function loadScene(path: string): Promise<WebGalNode[]> {
-  return invoke<WebGalNode[]>('load_scene', { path });
+/** Read a project-owned Scene, parse it, and return nodes. */
+export async function loadScene(projectPath: string, sceneName: string): Promise<WebGalNode[]> {
+  return invoke<WebGalNode[]>('load_scene', { projectPath, sceneName });
 }
 
-/** Serialize nodes and write to a .txt scene file on disk. */
-export async function saveScene(path: string, nodes: WebGalNode[]): Promise<void> {
-  return invoke<void>('save_scene', { path, nodes });
+/** Serialize nodes and write to a project-owned Scene. */
+export async function saveScene(projectPath: string, sceneName: string, nodes: WebGalNode[]): Promise<void> {
+  return invoke<void>('save_scene', { projectPath, sceneName, nodes });
 }
 
-/** List all .txt scene files in a directory. */
-export async function listScenes(dir: string): Promise<string[]> {
-  return invoke<string[]>('list_scenes', { dir });
+/** List all Scenes owned by a Project. */
+export async function listScenes(projectPath: string): Promise<string[]> {
+  return invoke<string[]>('list_scenes', { projectPath });
 }
 
-/** Read the raw text content of a file. */
-export async function readFileText(path: string): Promise<string> {
-  return invoke<string>('read_file_text', { path });
+/** Read the raw text content of a project-owned Scene. */
+export async function readFileText(projectPath: string, sceneName: string): Promise<string> {
+  return invoke<string>('read_file_text', { projectPath, sceneName });
 }
 
-/** Write raw text content to a file. */
-export async function writeFileText(path: string, content: string): Promise<void> {
-  return invoke<void>('write_file_text', { path, content });
+/** Write raw text content to a project-owned Scene. */
+export async function writeFileText(projectPath: string, sceneName: string, content: string): Promise<void> {
+  return invoke<void>('write_file_text', { projectPath, sceneName, content });
+}
+
+/** Export one Scene to a path authorized by the OS save dialog. */
+export async function exportSceneFile(path: string, nodes: WebGalNode[]): Promise<void> {
+  return invoke<void>('export_scene_file', { path, nodes });
 }
 
 export interface SceneHeader {
@@ -73,8 +78,12 @@ export function serializeSceneHeader(header: SceneHeader): string {
  * Read a scene file, replace its leading comment header with the given metadata,
  * and write it back to disk.
  */
-export async function updateSceneHeader(path: string, header: SceneHeader): Promise<void> {
-  const text = await readFileText(path);
+export async function updateSceneHeader(
+  projectPath: string,
+  sceneName: string,
+  header: SceneHeader,
+): Promise<void> {
+  const text = await readFileText(projectPath, sceneName);
   const lines = text.split('\n');
   let headerEnd = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -82,7 +91,7 @@ export async function updateSceneHeader(path: string, header: SceneHeader): Prom
     else break;
   }
   const body = lines.slice(headerEnd).join('\n');
-  await writeFileText(path, serializeSceneHeader(header) + body);
+  await writeFileText(projectPath, sceneName, serializeSceneHeader(header) + body);
 }
 
 /**
@@ -142,17 +151,17 @@ export async function getScenePath(projectPath: string, sceneName: string): Prom
   return invoke<string>('get_scene_path', { projectPath, sceneName });
 }
 
-/** Create a new scene file in the project. */
+/** Atomically create a Scene and return its normalized Scene name. */
 export async function createScene(projectPath: string, sceneName: string): Promise<string> {
   return invoke<string>('create_scene', { projectPath, sceneName });
 }
 
-export async function deleteScene(path: string): Promise<void> {
-  return invoke('delete_scene', { path });
+export async function deleteScene(projectPath: string, sceneName: string): Promise<void> {
+  return invoke('delete_scene', { projectPath, sceneName });
 }
 
-export async function renameScene(path: string, newName: string): Promise<string> {
-  return invoke<string>('rename_scene', { path, newName });
+export async function renameScene(projectPath: string, sceneName: string, newName: string): Promise<string> {
+  return invoke<string>('rename_scene', { projectPath, sceneName, newName });
 }
 
 // ---------------------------------------------------------------------------

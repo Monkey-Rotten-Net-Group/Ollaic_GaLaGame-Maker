@@ -1,4 +1,5 @@
 use crate::webgal::parser as webgal_parser;
+use crate::webgal::project_paths::ProjectPaths;
 use crate::webgal::references;
 use crate::webgal::types::CommandType;
 use base64::Engine;
@@ -582,6 +583,9 @@ pub fn rename_asset(
     old_name: String,
     new_name: String,
 ) -> Result<AssetInfo, String> {
+    let project = ProjectPaths::open(&project_path)?;
+    let _project_guard = project.lock_for_write();
+    let project_path = project.root().to_string_lossy().into_owned();
     validate_asset_filename(&old_name)?;
     validate_asset_filename(&new_name)?;
     let subdir = category_to_dir(&category).ok_or_else(|| format!("未知素材类型: {category}"))?;

@@ -8,7 +8,7 @@ import type { VoiceAssetCard, AssetUsage } from '../lib/assets-ipc';
 import {
   fillVoiceCard, deleteVoiceCard, importAsset,
 } from '../lib/assets-ipc';
-import { getScenePath, loadScene, saveScene } from '../lib/webgal-ipc';
+import { loadScene, saveScene } from '../lib/webgal-ipc';
 import {
   generateBatchTts, listenBatchTtsProgress,
   getAiTtsConfig,
@@ -71,8 +71,7 @@ async function writeVoiceFlagToScenes(
   let wroteAny = false;
   for (const [sceneFile, usages] of byScene) {
     try {
-      const scenePath = await getScenePath(projectPath, sceneFile);
-      const nodes = await loadScene(scenePath);
+      const nodes = await loadScene(projectPath, sceneFile);
       let changed = false;
       for (const usage of usages) {
         const idx = (usage.lineNumber ?? 0) - 1;
@@ -84,7 +83,7 @@ async function writeVoiceFlagToScenes(
         changed = true;
       }
       if (changed) {
-        await saveScene(scenePath, nodes);
+        await saveScene(projectPath, sceneFile, nodes);
         wroteAny = true;
       }
     } catch (e) {

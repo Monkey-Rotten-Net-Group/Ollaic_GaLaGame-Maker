@@ -17,7 +17,7 @@ import { listAiUploads, readAiUpload } from './ai-uploads-ipc';
 import { listAllAssets, listAssets, type AssetInfo } from './assets-ipc';
 import { getCharacter, listCharacterNames, listCharacters } from './character-ipc';
 import { readProjectMemory } from './project-memory';
-import { getScenePath, listScenes, readFileText, parseSceneHeader } from './webgal-ipc';
+import { listScenes, readFileText, parseSceneHeader } from './webgal-ipc';
 import { isEditorPatch, type EditorPatch } from './editor-patch';
 import { figureFileTail, findCharacter, resolveSpriteFile } from './figure-resolve';
 import type { Character } from './character-types';
@@ -49,10 +49,6 @@ export interface ToolContext {
 const SCENE_READ_MAX_LINES = 200;
 const ASSET_LIST_LIMIT = 200;
 const REFERENCE_READ_MAX_LINES = 200;
-
-function sceneDir(projectPath: string): string {
-  return `${projectPath}/game/scene`;
-}
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
@@ -206,11 +202,11 @@ const readTools: AgentTool[] = [
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
-      const files = await listScenes(sceneDir(projectPath));
+      const files = await listScenes(projectPath);
       // Pair each filename with its chapter/outline header for comprehension.
       const scenes = await Promise.all(files.map(async (file) => {
         try {
-          const header = parseSceneHeader(await readFileText(await getScenePath(projectPath, file)));
+          const header = parseSceneHeader(await readFileText(projectPath, file));
           return { file, chapter: header.chapter ?? '', outline: header.outline ?? '' };
         } catch {
           return { file, chapter: '', outline: '' };
@@ -237,8 +233,7 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const name = asString(args.name);
       if (!name) throw new Error('read_scene 需要场景文件名 name。');
-      const path = await getScenePath(projectPath, name);
-      const content = await readFileText(path);
+      const content = await readFileText(projectPath, name);
       const numbered = numberScript(content, asInt(args.fromLine) ?? 1, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
       return { name, ...numbered };
     },

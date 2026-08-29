@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getScenePath, loadScene, parseSceneHeader, readFileText, type SceneHeader } from '../../lib/webgal-ipc';
+import { loadScene, parseSceneHeader, readFileText, type SceneHeader } from '../../lib/webgal-ipc';
 import { extractSceneLinks, type SceneLink, type WebGalNode } from '../../lib/webgal-types';
 
 function linksEqual(left: SceneLink[], right: SceneLink[]) {
@@ -15,8 +15,10 @@ export function useSceneGraphIndex(currentSceneName: string, nodes: WebGalNode[]
   const refresh = useCallback(async (projectPath: string, scenes: string[]) => {
     const entries = await Promise.all(scenes.map(async (name) => {
       try {
-        const path = await getScenePath(projectPath, name);
-        const [text, sceneNodes] = await Promise.all([readFileText(path), loadScene(path)]);
+        const [text, sceneNodes] = await Promise.all([
+          readFileText(projectPath, name),
+          loadScene(projectPath, name),
+        ]);
         return [name, parseSceneHeader(text), extractSceneLinks(sceneNodes)] as const;
       } catch {
         return [name, {}, [] as SceneLink[]] as const;
