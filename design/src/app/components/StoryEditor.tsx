@@ -53,6 +53,7 @@ import { useSceneDocument } from './story-editor/useSceneDocument';
 import { useSceneGraphIndex } from './story-editor/useSceneGraphIndex';
 import { useProjectSnapshots } from './story-editor/useProjectSnapshots';
 import { useProjectExport } from './story-editor/useProjectExport';
+import { createEditorCommitCoordinator } from './story-editor/editor-commit-coordinator';
 
 // Fixed auto-save cadence (ms). Auto-save is toggled on/off from the top-bar
 // switch; there is no user-configurable interval.
@@ -152,8 +153,10 @@ export function StoryEditor() {
   const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
   const pendingActionRef = useRef<(() => void) | null>(null);
 
-  // In-memory draft cache: sceneName -> nodes snapshot for unsaved scenes
-  const sceneDraftCache = useRef<Map<string, WebGalNode[]>>(new Map());
+  // Synchronous ownership gate shared by autosave, cached drafts, and the AI
+  // commit seam. A ref makes commit-start visible before React can re-render.
+  const editorCommitCoordinatorRef = useRef(createEditorCommitCoordinator());
+  const editorCommitCoordinator = editorCommitCoordinatorRef.current;
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
@@ -324,6 +327,8 @@ export function StoryEditor() {
   // Save
   // ---------------------------------------------------------------------------
   const handleSave = useCallback(async (): Promise<boolean> => {
+    const finishSave = editorCommitCoordinator.startSave(currentSceneName);
+    if (!finishSave) return false;
     setSaveStatus('saving');
     try {
       let nodesToSave = nodesRef.current.length > 0 ? nodesRef.current : nodes;
@@ -352,7 +357,7 @@ export function StoryEditor() {
         await saveScene(selected, nodesToSave);
       }
       setDirty(false);
-      sceneDraftCache.current.delete(currentSceneName);
+      editorCommitCoordinator.deleteDraft(currentSceneName);
       // Refresh header + scene-graph link entry for the saved scene
       if (projectPath) void refreshSceneGraph(projectPath, projectInfo?.scenes ?? [currentSceneName]);
       // Sync voice cards from the dialogue lines
@@ -373,9 +378,12 @@ export function StoryEditor() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
       return false;
+    } finally {
+      finishSave();
     }
   }, [
     currentSceneName,
+    editorCommitCoordinator,
     refreshSceneGraph,
     updateSceneLinks,
     nodes,
@@ -580,7 +588,7 @@ export function StoryEditor() {
     // Stash current unsaved nodes in the in-memory draft cache. A pending AI
     // preview no longer lives in `nodes`, so `dirty` means real user edits.
     if (dirty) {
-      sceneDraftCache.current.set(currentSceneName, nodes);
+      editorCommitCoordinator.cacheDraft(currentSceneName, nodes);
     }
 
     // Guard against out-of-order async results: a fast A→B→A switch must not
@@ -591,7 +599,7 @@ export function StoryEditor() {
     const scenePath = await getScenePath(projectPath, sceneName);
     try {
       // Prefer a cached draft over the saved file
-      const draft = sceneDraftCache.current.get(sceneName);
+      const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(sceneName);
       if (draft) {
         const text = await serializeScene(draft);
         if (sceneLoadTokenRef.current !== myToken) return;
@@ -613,7 +621,7 @@ export function StoryEditor() {
       setNodes([]);
       setScriptSource('');
     }
-  }, [projectPath, currentSceneName, dirty, nodes]);
+  }, [projectPath, currentSceneName, dirty, editorCommitCoordinator, nodes]);
 
   // Stable wrapper for child components (SceneGraph) so they can be memoized —
   // the underlying handleSwitchScene closes over `nodes`/`dirty` and changes
@@ -791,13 +799,14 @@ export function StoryEditor() {
     const loaded = await loadScene(scenePath);
     setNodes(loaded);
     setScriptSource(await serializeScene(loaded));
-    sceneDraftCache.current.clear();
+    editorCommitCoordinator.clearDrafts();
     setDirty(false);
     setSelectedNode(null);
     setAiUploadsRevision((revision) => revision + 1);
     await refreshCharactersForAi();
   }, [
     currentSceneName,
+    editorCommitCoordinator,
     projectPath,
     refreshCharactersForAi,
     refreshSceneGraph,
@@ -877,6 +886,33 @@ export function StoryEditor() {
     setSearchParams,
   ]);
 
+  const readCachedSceneDraft = useCallback(async (sceneFile: string) => {
+    const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(sceneFile);
+    return draft ? serializeScene(draft) : undefined;
+  }, [editorCommitCoordinator]);
+
+  const reconcileCurrentAiScene = useCallback((edit: SceneEdit) => {
+    pushHistory(nodesRef.current);
+    nodesRef.current = edit.afterNodes;
+    dirtyRef.current = false;
+    setNodes(edit.afterNodes);
+    setScriptSource(edit.afterContent);
+    setSelectedNode(null);
+    setDirty(false);
+    setSaveStatus('saved');
+    editorCommitCoordinator.deleteDraft(edit.file);
+  }, [
+    dirtyRef,
+    editorCommitCoordinator,
+    nodesRef,
+    pushHistory,
+    setDirty,
+    setNodes,
+    setSaveStatus,
+    setScriptSource,
+    setSelectedNode,
+  ]);
+
   const aiAgent = useAiAgent({
     projectId,
     projectPath,
@@ -895,6 +931,10 @@ export function StoryEditor() {
     setSelectedNode,
     setShowScript,
     pushHistory,
+    onCommitStart: (sceneFiles) => editorCommitCoordinator.beginCommit(sceneFiles),
+    onCommitSettled: () => editorCommitCoordinator.settleCommit(),
+    readSceneDraft: readCachedSceneDraft,
+    reconcileCurrentScene: reconcileCurrentAiScene,
     onScenesChanged: async () => {
       if (!projectPath) return;
       const info = await openProject(projectPath);
@@ -917,19 +957,6 @@ export function StoryEditor() {
     );
     if (!sceneEdit) return undefined;
     return computeFullNodeDiff(sceneEdit.beforeNodes, sceneEdit.afterNodes);
-  }, [aiAgent.pendingChangeSet, currentSceneName]);
-
-  useEffect(() => {
-    const set = aiAgent.pendingChangeSet;
-    if (set?.status === 'accepted') {
-      set.edits.forEach((edit) => {
-        if (edit.kind === 'scene') sceneDraftCache.current.delete(edit.file);
-      });
-      return;
-    }
-    if (set?.status === 'reverted' && set.edits.some((edit) => edit.kind === 'scene' && edit.file === currentSceneName)) {
-      sceneDraftCache.current.delete(currentSceneName);
-    }
   }, [aiAgent.pendingChangeSet, currentSceneName]);
 
   const handleAiSend = useCallback((text: string) => { void aiAgent.sendPrompt(text); }, [aiAgent.sendPrompt]);
