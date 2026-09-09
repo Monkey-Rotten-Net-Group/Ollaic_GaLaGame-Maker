@@ -50,7 +50,18 @@ pub fn rename_asset_references(
         };
 
         let next = if reference.command == "voice" {
-            line.replacen(&format!("-{old_filename}"), &format!("-{new_filename}"), 1)
+            match voice_flag_span(line, old_filename) {
+                Some(span) => {
+                    let token = &line[span.clone()];
+                    let prefix = token.find('=').map_or("-", |index| &token[..=index]);
+                    format!(
+                        "{}{prefix}{new_filename}{}",
+                        &line[..span.start],
+                        &line[span.end..]
+                    )
+                }
+                None => line.to_string(),
+            }
         } else if let Some(colon) = line.find(':') {
             let (prefix, value) = line.split_at(colon + 1);
             format!("{prefix}{}", value.replacen(old_filename, new_filename, 1))
@@ -64,6 +75,64 @@ pub fn rename_asset_references(
     }
 
     (rewritten, changed)
+}
+
+/// Remove semantic references to one asset while preserving unrelated source.
+/// Command-only references are removed with their line; dialogue voice flags
+/// are removed without deleting the dialogue itself.
+pub fn remove_asset_references(source: &str, category: &str, filename: &str) -> (String, usize) {
+    let mut changed = 0usize;
+    let mut rewritten = String::with_capacity(source.len());
+
+    for line in source.split_inclusive('\n') {
+        let reference = find_asset_references(line)
+            .into_iter()
+            .find(|reference| reference.category == category && reference.filename == filename);
+        let Some(reference) = reference else {
+            rewritten.push_str(line);
+            continue;
+        };
+
+        changed += 1;
+        if reference.command == "voice" {
+            rewritten.push_str(&remove_voice_flag(line, filename));
+        }
+    }
+
+    (rewritten, changed)
+}
+
+fn remove_voice_flag(line: &str, filename: &str) -> String {
+    let Some(span) = voice_flag_span(line, filename) else {
+        return line.to_string();
+    };
+    let mut remove_start = span.start;
+    while remove_start > 0 {
+        let previous = line[..remove_start].chars().next_back().unwrap();
+        if !previous.is_whitespace() || previous == '\n' || previous == '\r' {
+            break;
+        }
+        remove_start -= previous.len_utf8();
+    }
+    format!("{}{}", &line[..remove_start], &line[span.end..])
+}
+
+fn voice_flag_span(line: &str, filename: &str) -> Option<std::ops::Range<usize>> {
+    let body = line.split(';').next()?;
+    let content_start = body.find(':').map_or(0, |index| index + 1);
+    for token in body[content_start..].split_whitespace() {
+        if !token.starts_with('-') {
+            continue;
+        }
+        let node = parser::parse_script(&format!("Speaker: {token};"))
+            .into_iter()
+            .next()?;
+        if node.voice.as_deref() == Some(filename) {
+            let start = token.as_ptr() as usize - line.as_ptr() as usize;
+            return Some(start..start + token.len());
+        }
+    }
+    None
 }
 
 fn reference_from_node(node: &WebGalNode) -> Option<(&'static str, &'static str, String)> {
@@ -92,6 +161,29 @@ fn reference_from_node(node: &WebGalNode) -> Option<(&'static str, &'static str,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn voice_rename_preserves_flag_key_when_filename_contains_equals() {
+        let (renamed, count) = rename_asset_references(
+            "Alice:hello -v1=clip=take.wav;",
+            "vocal",
+            "clip=take.wav",
+            "new.wav",
+        );
+        assert_eq!(count, 1);
+        assert_eq!(renamed, "Alice:hello -v1=new.wav;");
+    }
+
+    #[test]
+    fn voice_mutations_preserve_filename_mentions_in_dialogue_and_comments() {
+        let source = "Alice:clip-v1.wav -v1.wav; // -v1.wav\r\n";
+        let (removed, count) = remove_asset_references(source, "vocal", "v1.wav");
+        assert_eq!(count, 1);
+        assert_eq!(removed, "Alice:clip-v1.wav; // -v1.wav\r\n");
+        let (renamed, count) = rename_asset_references(source, "vocal", "v1.wav", "v2.wav");
+        assert_eq!(count, 1);
+        assert_eq!(renamed, "Alice:clip-v1.wav -v2.wav; // -v1.wav\r\n");
+    }
 
     #[test]
     fn extracts_supported_asset_commands_with_source_locations() {
@@ -145,5 +237,34 @@ mod tests {
         assert_eq!(changed, 1);
         assert!(vocal.contains("Alice:hello -intro.wav;"));
         assert_eq!(find_asset_references(&vocal)[2].filename, "intro.wav");
+    }
+
+    #[test]
+    fn removes_only_matching_semantic_references_and_preserves_dialogue() {
+        let source = concat!(
+            "changeBg:park.webp -next;\n",
+            "changeFigure:park.webp -left;\n",
+            ":park.webp is dialogue text;\n",
+            "Alice:hello -v1.wav;\n",
+        );
+
+        let (without_background, changed) =
+            remove_asset_references(source, "background", "park.webp");
+        assert_eq!(changed, 1);
+        assert!(!without_background.contains("changeBg:park.webp"));
+        assert!(without_background.contains("changeFigure:park.webp -left;"));
+        assert!(without_background.contains(":park.webp is dialogue text;"));
+
+        let (without_voice, changed) =
+            remove_asset_references(&without_background, "vocal", "v1.wav");
+        assert_eq!(changed, 1);
+        assert!(without_voice.contains("Alice:hello;"));
+        let references = find_asset_references(&without_voice);
+        assert!(!references
+            .iter()
+            .any(|reference| reference.category == "background"));
+        assert!(!references
+            .iter()
+            .any(|reference| reference.category == "vocal"));
     }
 }

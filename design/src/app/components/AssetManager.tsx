@@ -725,7 +725,7 @@ export function AssetManager() {
     try {
       const usages = await findAssetUsages(projectPath, target.name, target.category);
       const usageWarning = usages.length > 0
-        ? `\n该素材仍被 ${usages.length} 处剧本引用，删除后这些引用将失效。`
+        ? `\n该素材仍被 ${usages.length} 处剧本引用，删除时将同步移除这些引用。`
         : '';
       if (!confirm(`确定删除 "${target.name}"？（不可恢复）${usageWarning}`)) return;
       await flushAssetMetadataSaves(projectPath);

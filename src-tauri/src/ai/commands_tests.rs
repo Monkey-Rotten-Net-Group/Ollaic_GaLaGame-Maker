@@ -1343,3 +1343,48 @@ fn media_download_url_rejects_ssrf_targets() {
             .is_ok()
     );
 }
+
+#[test]
+fn batch_tts_nth_decode_failure_is_structured_before_publish() {
+    let first = BatchTtsItem {
+        voice_card_id: "voice-1".to_string(),
+        text: "one".to_string(),
+        voice_prompt: String::new(),
+    };
+    let second = BatchTtsItem {
+        voice_card_id: "voice-2".to_string(),
+        text: "two".to_string(),
+        voice_prompt: String::new(),
+    };
+    let prepared = prepare_generated_voice_asset(
+        &first,
+        0,
+        0,
+        "one.mp3".to_string(),
+        GeneratedMedia {
+            base64_data: "b25l".to_string(),
+            extension: "mp3".to_string(),
+        },
+    )
+    .unwrap();
+    assert_eq!(prepared.bytes, b"one");
+
+    let failure = prepare_generated_voice_asset(
+        &second,
+        1,
+        1,
+        "two.mp3".to_string(),
+        GeneratedMedia {
+            base64_data: "%%%not-base64%%%".to_string(),
+            extension: "mp3".to_string(),
+        },
+    )
+    .unwrap_err();
+    let encoded = failure.encoded();
+    let structured: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(structured["code"], "batch_tts_preparation_failed");
+    assert_eq!(structured["stage"], "decode");
+    assert_eq!(structured["failedIndex"], 1);
+    assert_eq!(structured["voiceCardId"], "voice-2");
+    assert_eq!(structured["generatedCount"], 1);
+}
