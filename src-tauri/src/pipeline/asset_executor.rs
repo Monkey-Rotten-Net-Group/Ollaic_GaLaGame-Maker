@@ -290,51 +290,6 @@ impl AssetGenerator for PlaceholderAssetGenerator {
 }
 
 #[cfg(test)]
-pub(crate) struct HangingAssetGeneratorFactory {
-    started: Arc<tokio::sync::Semaphore>,
-}
-
-#[cfg(test)]
-impl HangingAssetGeneratorFactory {
-    pub(crate) fn new(started: Arc<tokio::sync::Semaphore>) -> Self {
-        Self { started }
-    }
-}
-
-#[cfg(test)]
-impl AssetGeneratorFactory for HangingAssetGeneratorFactory {
-    fn create(
-        &self,
-        _allow_local_fallback: bool,
-        _cancelled: Arc<AtomicBool>,
-    ) -> Arc<dyn AssetGenerator> {
-        Arc::new(HangingAssetGenerator {
-            started: self.started.clone(),
-        })
-    }
-}
-
-#[cfg(test)]
-struct HangingAssetGenerator {
-    started: Arc<tokio::sync::Semaphore>,
-}
-
-#[cfg(test)]
-impl AssetGenerator for HangingAssetGenerator {
-    fn generate<'a>(
-        &'a self,
-        _task: &'a AssetTask,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            self.started.add_permits(1);
-            std::future::pending().await
-        })
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model};
     use crate::ai::config::AiProviderConfig;

@@ -21,6 +21,8 @@ pub(crate) struct ExecutorContext<'a> {
     pub(crate) plan: &'a StoryPlan,
     pub(crate) cancelled: &'a Arc<AtomicBool>,
     pub(crate) asset_binding_gate: &'a Arc<Mutex<()>>,
+    #[cfg(test)]
+    pub(crate) hanging_asset_queue_started: Option<&'a Arc<tokio::sync::Semaphore>>,
 }
 
 pub(crate) async fn execute(context: ExecutorContext<'_>) -> Result<AgentOutput, AgentError> {
@@ -42,6 +44,12 @@ pub(crate) async fn execute(context: ExecutorContext<'_>) -> Result<AgentOutput,
 }
 
 async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput, AgentError> {
+    #[cfg(test)]
+    if let Some(started) = context.hanging_asset_queue_started {
+        started.add_permits(1);
+        return std::future::pending().await;
+    }
+
     let generator = context.asset_generators.create(
         context.agent_context.allow_local_fallback,
         context.cancelled.clone(),

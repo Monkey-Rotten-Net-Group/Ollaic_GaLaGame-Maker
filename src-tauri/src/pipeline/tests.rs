@@ -15,7 +15,7 @@ use crate::agents::{
     Agent, AgentContext, AgentError, AgentOutput, AgentOutputPayload, AgentRegistry,
 };
 use crate::asset_queue::{AssetGenerator, AssetTask, GeneratedArtifact};
-use crate::pipeline::asset_executor::{AssetGeneratorFactory, HangingAssetGeneratorFactory};
+use crate::pipeline::asset_executor::AssetGeneratorFactory;
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent, RecordingSink};
 use crate::pipeline::project_state::project_has_story_content;
@@ -24,7 +24,7 @@ use crate::pipeline::scheduler::{Pipeline, RunCreation, DEFAULT_STEP_TIMEOUT};
 use crate::pipeline::state::{
     Clock, RunStatus, StepRunHistory, StepStatus, SystemClock, MAX_STEP_HISTORY,
 };
-use crate::story_plan::types::{AssetTaskPlan, ChapterPlan};
+use crate::story_plan::types::ChapterPlan;
 
 // ---------- test helpers ----------
 
@@ -290,23 +290,6 @@ fn fresh_project(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     tmp
-}
-
-fn seed_background_asset(project: &std::path::Path) {
-    let mut plan = crate::story_plan::load_plan(project)
-        .unwrap()
-        .expect("run creation writes a story plan");
-    plan.asset_plan = vec![AssetTaskPlan {
-        id: "test_background".to_string(),
-        kind: "background".to_string(),
-        target_stem: "test_background".to_string(),
-        prompt: "test background".to_string(),
-        scene_ref: None,
-        character_ref: None,
-        emotion: None,
-        status: "pending".to_string(),
-    }];
-    crate::story_plan::save_plan(project, &plan).unwrap();
 }
 
 /// Human-readable event sequence: run events by name, step events by
@@ -1202,9 +1185,7 @@ async fn asset_queue_timeout_is_persisted_as_timeout_not_cancellation() {
 
     let pipeline = Arc::new(
         Pipeline::with_default_agents()
-            .with_asset_generators_for_test(Arc::new(HangingAssetGeneratorFactory::new(
-                started.clone(),
-            )))
+            .with_hanging_asset_queue_for_test(started.clone())
             .with_step_timeout(Duration::from_secs(30)),
     );
     let recipe =
@@ -1219,7 +1200,6 @@ async fn asset_queue_timeout_is_persisted_as_timeout_not_cancellation() {
             sink.as_ref(),
         )
         .unwrap();
-    seed_background_asset(&project);
     let task = {
         let pipeline = pipeline.clone();
         let project = project.clone();
@@ -1258,9 +1238,7 @@ async fn asset_queue_user_stop_is_cancelled_not_timeout() {
     let started = Arc::new(Semaphore::new(0));
     let pipeline = Arc::new(
         Pipeline::with_default_agents()
-            .with_asset_generators_for_test(Arc::new(HangingAssetGeneratorFactory::new(
-                started.clone(),
-            )))
+            .with_hanging_asset_queue_for_test(started.clone())
             .with_step_timeout(Duration::from_secs(30)),
     );
     let recipe =
@@ -1275,7 +1253,6 @@ async fn asset_queue_user_stop_is_cancelled_not_timeout() {
             sink.as_ref(),
         )
         .unwrap();
-    seed_background_asset(&project);
     let task = {
         let pipeline = pipeline.clone();
         let project = project.clone();
@@ -1399,9 +1376,7 @@ async fn asset_queue_retry_after_timeout_runs_again() {
     let started = Arc::new(Semaphore::new(0));
     let pipeline = Arc::new(
         Pipeline::with_default_agents()
-            .with_asset_generators_for_test(Arc::new(HangingAssetGeneratorFactory::new(
-                started.clone(),
-            )))
+            .with_hanging_asset_queue_for_test(started.clone())
             .with_step_timeout(Duration::from_secs(30)),
     );
     let recipe =
@@ -1418,7 +1393,6 @@ async fn asset_queue_retry_after_timeout_runs_again() {
             sink: sink.as_ref(),
         })
         .unwrap();
-    seed_background_asset(&project);
     let first = {
         let pipeline = pipeline.clone();
         let project = project.clone();
