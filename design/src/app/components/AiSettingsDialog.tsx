@@ -307,7 +307,16 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {!loaded ? (
-            <div className="text-sm text-muted-foreground">加载中…</div>
+            error ? (
+              <div className="px-3 py-2 rounded-md bg-destructive/10 border border-destructive/30 text-sm text-destructive">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">加载中…</div>
+            )
           ) : (
             <>
               {activeTab === 'chat' && (
