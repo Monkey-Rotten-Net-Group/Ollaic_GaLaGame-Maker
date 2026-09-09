@@ -1,0 +1,10 @@
+{
+  "projectPath": "/virtual/project",
+  "operations": [
+    {
+      "kind": "create_scene",
+      "file": "chapter-2.txt",
+      "content": "\nB:staged;"
+    }
+  ]
+}

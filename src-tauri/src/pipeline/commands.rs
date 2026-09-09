@@ -45,11 +45,9 @@ pub struct Orchestrator {
 impl Orchestrator {
     pub fn new(app: &tauri::AppHandle) -> Self {
         let flow_step_timeout = crate::ai::config::load_config()
-            .and_then(|config| {
-                crate::ai::provider_capability::capability_for_config(&config)
-            })
-        .map(|capability| std::time::Duration::from_millis(capability.flow_step_deadline_ms))
-        .unwrap_or_else(|_| std::time::Duration::from_secs(180));
+            .and_then(|config| crate::ai::provider_capability::capability_for_config(&config))
+            .map(|capability| std::time::Duration::from_millis(capability.flow_step_deadline_ms))
+            .unwrap_or_else(|_| std::time::Duration::from_secs(180));
         Orchestrator {
             pipeline: Arc::new(
                 Pipeline::with_default_agents_and_matting(
@@ -480,7 +478,12 @@ pub async fn pipeline_export_run_history(
     project_path: String,
 ) -> Result<String, String> {
     let requested_path = PathBuf::from(project_path);
-    if let Some(handle) = orchestrator.runs.get(&run_id).await.map(|entry| entry.handle.clone()) {
+    if let Some(handle) = orchestrator
+        .runs
+        .get(&run_id)
+        .await
+        .map(|entry| entry.handle.clone())
+    {
         let state = handle.state().lock().await;
         return serde_json::to_string_pretty(&*state).map_err(|error| error.to_string());
     }

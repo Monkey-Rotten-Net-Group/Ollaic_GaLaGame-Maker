@@ -49,9 +49,7 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
         "aliyun" | "volcengine" | "zhipu" | "siliconflow" | "elevenlabs" => {
             builtin(false, false, true, true, 600_000)
         }
-        "sd-webui" | "comfyui" | "edge-tts" => {
-            builtin(false, false, false, false, 900_000)
-        }
+        "sd-webui" | "comfyui" | "edge-tts" => builtin(false, false, false, false, 900_000),
         "custom" => from_custom(config.capabilities.as_ref()),
         "" => return Err("尚未选择 AI 供应商".to_string()),
         _ => return Err(format!("未知 AI 供应商：{}", config.provider.trim())),
@@ -107,7 +105,10 @@ fn validate_deadlines(capability: ProviderCapability) -> Result<(), String> {
     for (name, value) in [
         ("chat_deadline_ms", capability.chat_deadline_ms),
         ("flow_step_deadline_ms", capability.flow_step_deadline_ms),
-        ("media_fetch_deadline_ms", capability.media_fetch_deadline_ms),
+        (
+            "media_fetch_deadline_ms",
+            capability.media_fetch_deadline_ms,
+        ),
     ] {
         if value == 0 || value > 3_600_000 {
             return Err(format!("{name} 必须在 1 到 3600000 毫秒之间"));
@@ -189,7 +190,9 @@ mod tests {
             chat_deadline_ms: Some(0),
             ..Default::default()
         });
-        assert!(capability_for_config(&invalid).unwrap_err().contains("chat_deadline_ms"));
+        assert!(capability_for_config(&invalid)
+            .unwrap_err()
+            .contains("chat_deadline_ms"));
     }
 
     #[test]
