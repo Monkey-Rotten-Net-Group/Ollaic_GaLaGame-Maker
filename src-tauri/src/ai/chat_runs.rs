@@ -31,9 +31,14 @@ impl ChatRunHandle {
 }
 
 /// One slot per `run_id` in the registry. A `Live` slot hosts the in-flight
-/// Provider future; a `Cancelled` slot is a poison marker so any later
+/// Provider future; a `Cancelled` slot is a poison marker so a later
 /// `run_cancellable` for the same id rejects without ever driving a Provider
 /// future (closing the cancel-before-register race).
+///
+/// The marker is bounded rather than permanent: it expires after
+/// `CANCELLED_MARKER_TTL` and the oldest markers are evicted once the map
+/// reaches `MAX_CANCELLED_MARKERS`. A cancel that arrives more than
+/// `CANCELLED_MARKER_TTL` before its register no longer suppresses the run.
 #[derive(Clone)]
 enum RunState {
     Live(ChatRunHandle),
@@ -99,9 +104,10 @@ impl ChatRunRegistry {
 
     /// Cancel a previously registered run. Returns `true` if a live run was
     /// signalled, `false` if the id was already cancelled, completed, or
-    /// never started. In every `false` case the id is poisoned: any later
-    /// `run_cancellable` for the same id rejects immediately. Safe to call
-    /// repeatedly.
+    /// never started. In the `false` cases the id is poisoned for
+    /// `CANCELLED_MARKER_TTL`: a later `run_cancellable` for the same id
+    /// rejects while the marker lives, or until the oldest markers are
+    /// evicted at `MAX_CANCELLED_MARKERS`. Safe to call repeatedly.
     pub async fn cancel(&self, run_id: &str) -> bool {
         let mut states = self.states.lock().await;
         let now = Instant::now();
