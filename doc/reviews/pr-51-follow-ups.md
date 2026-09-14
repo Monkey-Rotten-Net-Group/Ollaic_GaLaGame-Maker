@@ -13,13 +13,14 @@
 
 ## P3：媒体类型匹配对大小写过严
 
-- 状态：已修复实际生效的那一层；另一份同名实现没有被编译，需要单独决定去留。
+- 状态：已修复。两份重复实现收敛为一份。
 
-- 位置：实际生效的校验在 `src-tauri/src/ai/commands.rs` 的 `fetch_media_bytes_with_policy`；`src-tauri/src/ai/safe_media_fetch.rs` 中的 `collect_body` 是同一问题的第二份实现。
+- 位置：`src-tauri/src/ai/safe_media_fetch.rs` 现在保存唯一一份校验，`src-tauri/src/ai/commands.rs` 只做调用。
 - 现象：代码用区分大小写的 `starts_with("image/")` 或 `starts_with("audio/")` 校验 `Content-Type`。HTTP 媒体类型的 type/subtype 语义不区分大小写，因此合法但少见的 `Image/PNG` 会被拒绝。
-- 影响：部分非标准化供应商返回大小写混合的媒体类型时，生成结果会被误报为类型不受支持；安全边界本身没有被放宽。两份实现并存还意味着只修其中一份会让人误以为问题已经关闭。
-- 处理：`commands.rs` 中实际生效的校验改为 ASCII 大小写不敏感匹配，并用真实本地 HTTP 响应断言 `Image/PNG` 被接受（`commands_tests.rs`）。`safe_media_fetch.rs` 的同类改写保持正确，但在该模块被重新声明前不产生任何效果。
-- 遗留：`safe_media_fetch.rs` 自 PR #51（`afc6696`）进入 master 起就没有出现在 `ai/mod.rs` 的模块列表里，所以 `commands.rs` 一直保留着一份重复的 DNS 固定 / 重定向 / 大小上限实现。需要决定把 `safe_media_fetch` 接回 `ai` 模块并让 `commands.rs` 复用它，还是删除该文件；在此之前两份实现会继续各自漂移。
+- 影响：部分非标准化供应商返回大小写混合的媒体类型时，生成结果会被误报为类型不受支持；安全边界本身没有被放宽。两份实现并存还意味着只修其中一份会让人误以为问题已经关闭，而两份实现早已开始分叉。
+- 处理：`safe_media_fetch.rs` 自 PR #51（`afc6696`）进入 master 起就没有出现在 `ai/mod.rs` 的模块列表里，实际生效的一直是 `commands.rs` 里那份重复的 DNS 固定 / 重定向 / 大小上限实现。现已把 `safe_media_fetch` 接回 `ai` 模块作为媒体下载的唯一入口，删除 `commands.rs` 中重复的约 320 行实现，并把校验改为 ASCII 大小写不敏感。
+- 附带收紧（统一两处真实分叉的必然结果）：DNS 解析结果里只要出现一个内部 / 保留地址，整次下载失败。旧实现会过滤掉内网地址、继续连接剩下的公网地址，留下 DNS 重绑定 / TOCTOU 窗口。直接响应也从此纳入 64 MiB 流式上限和流式过程中的分块检查，这两条此前只覆盖 URL 下载路径。
+- 遗留：`Content-Type` 校验按信任级别分成两档。Provider 返回的 URL 必须正面声明媒体类型，缺省或通用类型一律拒绝；操作者自己配置的端点沿用它既有的字节流契约，接受 `application/octet-stream`、`binary/*` 与无 `Content-Type` 的响应，以免这次收敛顺手打断自定义网关。两档分别有测试固定（`safe_media_fetch.rs`）。音乐端点「原始字节还是 JSON」的分派复用同一个谓词，因此不会与校验漂移；但该分派本身只有谓词级单测，没有端到端覆盖 `generate_openai_compatible_music`。
 
 ## P3：回滚快照清理警告可能无法持久化
 
