@@ -100,12 +100,23 @@ pub(crate) async fn next_action(
                 sink.emit(event);
                 return Action::Idle;
             }
-            if let Err(error) = cleanup_rollback_snapshots(project_path, &mut state) {
+            let cleanup_result = cleanup_rollback_snapshots(project_path, &mut state);
+            if cleanup_was_queued || cleanup_result.is_err() {
                 if let Some(attempt) = state
                     .find_step_mut(&id)
                     .and_then(|step| step.history.last_mut())
                 {
-                    attempt.warnings.push(error.to_string());
+                    // The provisional notice is resolved by the attempt above:
+                    // either cleanup succeeded, or the concrete diagnostic
+                    // below replaces it. Leaving it behind would make a
+                    // successful step look like it still has pending work.
+                    attempt.warnings.retain(|w| w != SNAPSHOT_CLEANUP_PENDING_WARNING);
+                    if let Err(error) = &cleanup_result {
+                        let warning = error.to_string();
+                        if !attempt.warnings.contains(&warning) {
+                            attempt.warnings.push(warning);
+                        }
+                    }
                 }
                 let _ = store::save_run_state(project_path, &state);
             }

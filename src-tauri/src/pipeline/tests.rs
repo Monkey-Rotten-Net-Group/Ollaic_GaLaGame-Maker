@@ -2678,7 +2678,7 @@ async fn failed_snapshot_cleanup_remains_persisted_for_retry() {
 }
 
 #[tokio::test]
-async fn snapshot_cleanup_warning_is_persisted_before_cleanup_is_attempted() {
+async fn snapshot_cleanup_failure_keeps_diagnostic_and_drops_pending_notice() {
     let project = fresh_project("snapshot_cleanup_warning");
     let sink = RecordingSink::new();
     let clock = StepClock::new();
@@ -2731,10 +2731,80 @@ async fn snapshot_cleanup_warning_is_persisted_before_cleanup_is_attempted() {
         .last()
         .unwrap()
         .warnings;
-    assert!(warnings
-        .iter()
-        .any(|warning| warning.contains("旧回滚快照正在清理")));
     assert_eq!(persisted.pending_snapshot_cleanup, vec!["../invalid"]);
+    assert!(
+        warnings.iter().any(|warning| warning.contains("../invalid")),
+        "cleanup failure must stay visible: {warnings:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.contains("旧回滚快照正在清理")),
+        "a resolved cleanup must not keep the provisional notice: {warnings:?}"
+    );
+}
+
+#[tokio::test]
+async fn successful_snapshot_cleanup_drops_pending_notice() {
+    let project = fresh_project("snapshot_cleanup_success");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let recipe = FlowRecipe::new().step(StepDef::new("plan", StepKind::Plan));
+    let pipeline = Pipeline::with_default_agents();
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_snapshot_cleanup_success",
+            "brief",
+            &recipe,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    {
+        let mut state = handle.state().lock().await;
+        let step = state.find_step_mut("plan").unwrap();
+        step.attempt = MAX_STEP_HISTORY as u32;
+        step.history = (1..=MAX_STEP_HISTORY)
+            .map(|attempt| StepRunHistory {
+                attempt: attempt as u32,
+                input_snapshot: "old input".to_string(),
+                output: Some("old output".to_string()),
+                error: None,
+                started_at: attempt as u64,
+                finished_at: Some(attempt as u64 + 1),
+                duration_ms: Some(1),
+                diff: None,
+                cost: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                warnings: Vec::new(),
+                downgrade: None,
+                rollback_snapshot: (attempt == 1).then(|| "already-removed".to_string()),
+            })
+            .collect();
+        crate::pipeline::store::save_run_state(&project, &state).unwrap();
+    }
+
+    pipeline.execute(&project, handle, &sink, &clock).await;
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_snapshot_cleanup_success")
+        .unwrap()
+        .unwrap();
+    let warnings = &persisted
+        .find_step("plan")
+        .unwrap()
+        .history
+        .last()
+        .unwrap()
+        .warnings;
+    assert!(persisted.pending_snapshot_cleanup.is_empty());
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.contains("旧回滚快照正在清理")),
+        "a succeeded step must not report pending cleanup: {warnings:?}"
+    );
 }
 
 #[tokio::test]
