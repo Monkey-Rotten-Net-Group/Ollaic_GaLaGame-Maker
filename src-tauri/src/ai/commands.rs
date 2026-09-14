@@ -1,8 +1,12 @@
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
 use super::provider_capability::{capability_for_config, ProviderCapability, RequiredCapability};
+use super::safe_media_fetch::{
+    collect_media_response, fetch_media, FetchPolicy, MediaKind,
+    SystemMediaDnsResolver as SafeSystemMediaDnsResolver,
+};
 use base64::Engine;
-use futures::{SinkExt, StreamExt, TryStreamExt};
+use futures::{SinkExt, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ChatStreamEvent, StreamChunk, Tool,
@@ -11,11 +15,8 @@ use genai::chat::{
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
-use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
 #[cfg(test)]
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
@@ -24,17 +25,6 @@ const DEFAULT_LOG_LIMIT: usize = 100;
 const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
-const MEDIA_DNS_TIMEOUT_SECS: u64 = 10;
-const MAX_MEDIA_REDIRECTS: usize = 10;
-/// Hard cap on a single media download. Provider-generated images rarely exceed
-/// ~25 MB and audio clips rarely exceed ~50 MB; anything larger is almost
-/// certainly a misconfigured endpoint or an attack, so refuse to allocate the
-/// buffer before it lands in memory.
-const MAX_MEDIA_BYTES: u64 = 64 * 1024 * 1024;
-/// Allowlist of Content-Types we will actually base64-embed. The extension
-/// guesser accepts the same set, so anything else would land as an unknown
-/// file and confuse downstream tools.
-const MEDIA_ALLOWED_PREFIXES: &[&str] = &["image/", "audio/"];
 
 /// A reqwest client with the standard request timeout applied. Using this
 /// everywhere prevents media/TTS HTTP calls from hanging forever when a
@@ -549,16 +539,14 @@ async fn generate_openai_compatible_music(
     }
 
     // Raw audio bytes (the recommended custom-gateway contract): use directly.
+    // The same predicate decides the dispatch here and the Content-Type check
+    // inside `collect_media_response`, so the two cannot drift apart. A
+    // missing Content-Type falls through to the JSON shapes below, because
+    // some gateways return JSON without labelling it.
     let mime = content_type.split(';').next().unwrap_or("").trim();
-    if mime.starts_with("audio/")
-        || mime == "application/octet-stream"
-        || mime.starts_with("binary/")
-    {
+    if !mime.is_empty() && MediaKind::Audio.declares_media_bytes(mime) {
         let ext = extension_from_mime(mime, response_format);
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
+        let bytes = collect_media_response(response, MediaKind::Audio).await?;
         log_provider_event(
             "music_generate",
             cfg,
@@ -618,6 +606,7 @@ async fn parse_music_json_response(
             &url,
             fallback_ext,
             "music_generate",
+            MediaKind::Audio,
         )
         .await;
     }
@@ -1286,6 +1275,7 @@ async fn generate_dashscope_image(
                     &url,
                     "png",
                     "image_generate",
+                    MediaKind::Image,
                 )
                 .await;
             }
@@ -1559,7 +1549,16 @@ async fn generate_dashscope_tts(
         .ok_or_else(|| format!("阿里云语音合成响应缺少 audio 字段: {response_text}"))?;
     if let Some(url) = audio.url.filter(|u| !u.is_empty()) {
         // Qwen-TTS 非流式返回 wav 文件 url，扩展名以 wav 为准（忽略用户所选格式）。
-        return download_generated_media(cfg, model, &endpoint, &url, "wav", "tts_generate").await;
+        return download_generated_media(
+            cfg,
+            model,
+            &endpoint,
+            &url,
+            "wav",
+            "tts_generate",
+            MediaKind::Audio,
+        )
+        .await;
     }
     if let Some(data) = audio.data.filter(|d| !d.is_empty()) {
         log_provider_event(
@@ -2033,10 +2032,7 @@ async fn response_to_generated_media(
         log_provider_event(action, cfg, model, endpoint, false, &text);
         return Err(format!("音频生成失败 ({status}): {text}"));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("读取音频生成响应失败: {e}"))?;
+    let bytes = collect_media_response(response, MediaKind::Audio).await?;
     log_provider_event(action, cfg, model, endpoint, true, "audio generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -2072,7 +2068,16 @@ async fn parse_openai_image_response(
         });
     }
     if let Some(url) = item.url {
-        return download_generated_media(cfg, model, endpoint, &url, "png", "image_generate").await;
+        return download_generated_media(
+            cfg,
+            model,
+            endpoint,
+            &url,
+            "png",
+            "image_generate",
+            MediaKind::Image,
+        )
+        .await;
     }
     Err("图片生成响应中没有 b64_json 或 url".to_string())
 }
@@ -2084,6 +2089,7 @@ async fn download_generated_media(
     url: &str,
     extension: &str,
     action: &str,
+    kind: MediaKind,
 ) -> Result<GeneratedMedia, String> {
     // Refuse providers that have not declared they hand back usable media
     // URLs. Otherwise a hostile or misconfigured provider can use this
@@ -2101,265 +2107,21 @@ async fn download_generated_media(
     };
     let capability = capability_for_config(&as_chat_config)?;
     capability.require(RequiredCapability::MediaUrlOutput)?;
-    let bytes = fetch_media_bytes_with_policy(url, &SystemMediaDnsResolver, |_, ip| {
-        is_public_download_ip(ip)
-    })
+    let bytes = fetch_media(
+        url,
+        &SafeSystemMediaDnsResolver,
+        &FetchPolicy {
+            total_deadline: Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS),
+            kind,
+            allow_address: Box::new(|_, ip| super::safe_media_fetch::is_public_download_ip(ip)),
+        },
+    )
     .await?;
     log_provider_event(action, cfg, model, endpoint, true, "media generated");
     Ok(GeneratedMedia {
         base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
         extension: extension.to_string(),
     })
-}
-
-/// Reject SSRF-prone media download URLs: non-http(s) schemes and loopback/
-/// private/link-local/reserved hosts. A provider-returned media URL must point
-/// at a public endpoint, never the local machine or an internal network.
-fn validate_media_download_url(url: &str) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("无效的下载 URL: {e}"))?;
-    match parsed.scheme() {
-        "https" | "http" => {}
-        other => return Err(format!("不允许的下载协议: {other}")),
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
-    if is_private_download_host(host) {
-        return Err(format!("拒绝下载内部/保留地址: {host}"));
-    }
-    Ok(())
-}
-
-fn is_private_download_host(host: &str) -> bool {
-    let lower = host.to_ascii_lowercase();
-    if lower == "localhost" || lower.ends_with(".localhost") || lower.ends_with(".local") {
-        return true;
-    }
-    // host_str() brackets IPv6 literals; strip them before parsing.
-    let bare = lower.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = bare.parse::<IpAddr>() {
-        return !is_public_download_ip(ip);
-    }
-    false
-}
-
-trait MediaDnsResolver: Send + Sync {
-    fn resolve<'a>(
-        &'a self,
-        host: &'a str,
-        port: u16,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>>;
-}
-
-struct SystemMediaDnsResolver;
-
-impl MediaDnsResolver for SystemMediaDnsResolver {
-    fn resolve<'a>(
-        &'a self,
-        host: &'a str,
-        port: u16,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>> {
-        Box::pin(async move {
-            let addresses = tokio::net::lookup_host((host, port))
-                .await
-                .map_err(|error| {
-                    format!("解析媒体下载主机 {host} 失败：{error}。请检查网络后重试。")
-                })?
-                .collect::<Vec<_>>();
-            if addresses.is_empty() {
-                return Err(format!("媒体下载主机 {host} 没有可用地址，请稍后重试。"));
-            }
-            Ok(addresses)
-        })
-    }
-}
-
-async fn fetch_media_bytes_with_policy<P>(
-    initial_url: &str,
-    resolver: &dyn MediaDnsResolver,
-    allow_address: P,
-) -> Result<Vec<u8>, String>
-where
-    P: Fn(&reqwest::Url, IpAddr) -> bool,
-{
-    let mut current =
-        reqwest::Url::parse(initial_url).map_err(|error| format!("无效的下载 URL: {error}"))?;
-
-    for redirect_count in 0..=MAX_MEDIA_REDIRECTS {
-        validate_media_download_url(current.as_str())?;
-        let host = current
-            .host_str()
-            .ok_or_else(|| "下载 URL 缺少主机名".to_string())?;
-        let port = current
-            .port_or_known_default()
-            .ok_or_else(|| "下载 URL 缺少有效端口".to_string())?;
-        let bare_host = host.trim_start_matches('[').trim_end_matches(']');
-        let resolved = match bare_host.parse::<IpAddr>() {
-            Ok(ip) => vec![SocketAddr::new(ip, port)],
-            Err(_) => tokio::time::timeout(
-                Duration::from_secs(MEDIA_DNS_TIMEOUT_SECS),
-                resolver.resolve(host, port),
-            )
-            .await
-            .map_err(|_| {
-                format!(
-                    "媒体下载 DNS 解析 {host} 超时（{} 秒）。请检查网络后重试。",
-                    MEDIA_DNS_TIMEOUT_SECS
-                )
-            })??,
-        };
-        let mut public_addresses = resolved
-            .into_iter()
-            .filter(|address| allow_address(&current, address.ip()))
-            .collect::<Vec<_>>();
-        public_addresses.sort_unstable();
-        public_addresses.dedup();
-        if public_addresses.is_empty() {
-            return Err(format!("拒绝下载内部/保留地址: {host}"));
-        }
-
-        // Disable environment proxies and pin this hop's validated addresses.
-        // Otherwise a proxy or a second resolver lookup could bypass the DNS
-        // result that was just checked (DNS rebinding / TOCTOU).
-        let mut builder = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS));
-        if bare_host.parse::<IpAddr>().is_err() {
-            builder = builder.resolve_to_addrs(host, &public_addresses);
-        }
-        let client = builder
-            .build()
-            .map_err(|error| format!("创建安全下载客户端失败: {error}"))?;
-        let response = client
-            .get(current.clone())
-            .send()
-            .await
-            .map_err(|error| format!("下载生成媒体失败: {error}。可稍后重试。"))?;
-
-        if response.status().is_redirection() {
-            if redirect_count == MAX_MEDIA_REDIRECTS {
-                return Err("媒体下载重定向次数过多，请重试或检查供应商返回地址。".to_string());
-            }
-            let location = response
-                .headers()
-                .get(reqwest::header::LOCATION)
-                .ok_or_else(|| {
-                    "媒体下载返回重定向，但缺少 Location 地址。可稍后重试。".to_string()
-                })?
-                .to_str()
-                .map_err(|_| "媒体下载重定向地址不是有效文本。可稍后重试。".to_string())?;
-            current = current
-                .join(location)
-                .map_err(|error| format!("媒体下载重定向地址无效: {error}"))?;
-            continue;
-        }
-
-        if !response.status().is_success() {
-            return Err(format!(
-                "媒体下载失败（HTTP {}）。可稍后重试。",
-                response.status()
-            ));
-        }
-        // Reject oversized responses before allocating the full buffer: a
-        // declared Content-Length above the cap is a hard failure; chunked
-        // / unknown-length responses are bounded by MAX_MEDIA_BYTES while
-        // streaming so the producer cannot OOM the process.
-        if let Some(declared) = response.content_length() {
-            if declared > MAX_MEDIA_BYTES {
-                return Err(format!(
-                    "媒体下载 Content-Length {} 超过上限 {} 字节",
-                    declared, MAX_MEDIA_BYTES
-                ));
-            }
-        }
-        if let Some(content_type) = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-        {
-            let mime = content_type.split(';').next().unwrap_or("").trim();
-            let normalized_mime = mime.to_ascii_lowercase();
-            if !MEDIA_ALLOWED_PREFIXES
-                .iter()
-                .any(|prefix| normalized_mime.starts_with(prefix))
-            {
-                return Err(format!("媒体下载 Content-Type 不被接受: {mime}"));
-            }
-        }
-        let mut stream = response.bytes_stream();
-        let mut collected = Vec::new();
-        let mut received: u64 = 0;
-        while let Some(chunk) = stream
-            .try_next()
-            .await
-            .map_err(|error| format!("读取生成媒体失败: {error}。可稍后重试。"))?
-        {
-            // A single chunk larger than the cap (e.g. an attacker setting
-            // a huge Content-Length and never actually streaming it) would
-            // blow past the cumulative check on the next iteration, so
-            // fail fast on chunk size first.
-            if chunk.len() as u64 > MAX_MEDIA_BYTES {
-                return Err(format!(
-                    "媒体下载单个分块 {} 字节超过上限 {}",
-                    chunk.len(),
-                    MAX_MEDIA_BYTES
-                ));
-            }
-            received = received.saturating_add(chunk.len() as u64);
-            if received > MAX_MEDIA_BYTES {
-                return Err(format!("媒体下载实际大小超过上限 {} 字节", MAX_MEDIA_BYTES));
-            }
-            collected.extend_from_slice(&chunk);
-        }
-        return Ok(collected);
-    }
-
-    unreachable!("redirect loop returns at its configured bound")
-}
-
-fn is_public_download_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            let [a, b, c, _] = ip.octets();
-            !(a == 0
-                || a == 10
-                || a == 127
-                || (a == 100 && (64..=127).contains(&b))
-                || (a == 169 && b == 254)
-                || (a == 172 && (16..=31).contains(&b))
-                || (a == 192 && b == 0 && c == 0)
-                || (a == 192 && b == 0 && c == 2)
-                || (a == 192 && b == 88 && c == 99)
-                || (a == 192 && b == 168)
-                || (a == 198 && (b == 18 || b == 19))
-                || (a == 198 && b == 51 && c == 100)
-                || (a == 203 && b == 0 && c == 113)
-                || a >= 224)
-        }
-        IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4() {
-                return is_public_download_ip(IpAddr::V4(mapped));
-            }
-            let segments = ip.segments();
-            let globally_allocated = segments[0] & 0xe000 == 0x2000;
-            let documentation = segments[0] == 0x2001 && segments[1] == 0x0db8;
-            let benchmarking = segments[0] == 0x2001 && segments[1] == 0x0002;
-            let teredo = segments[0] == 0x2001 && segments[1] == 0;
-            let orchid = segments[0] == 0x2001 && (0x0010..=0x002f).contains(&segments[1]);
-            let six_to_four = segments[0] == 0x2002;
-            let documentation_v2 = segments[0] & 0xfff0 == 0x3ff0;
-            let segment_routing = segments[0] == 0x5f00;
-            globally_allocated
-                && !documentation
-                && !benchmarking
-                && !teredo
-                && !orchid
-                && !six_to_four
-                && !documentation_v2
-                && !segment_routing
-        }
-    }
 }
 
 fn dashscope_endpoint(cfg: &AiProviderConfig, path: &str) -> String {

@@ -10,10 +10,15 @@
 //!    socket. Filtering out the bad answer and connecting to a public one
 //!    is not acceptable — a resolver bug, a hostile resolver, or DNS
 //!    rebinding could still send bytes to the wrong endpoint.
-//! 3. **Per-kind Content-Type allowlist.** Image fetches accept `image/*`
-//!    only, audio fetches accept `audio/*` only, missing/invalid CT is a
-//!    hard reject (we cannot trust a `text/html` or `application/json`
-//!    response to actually be a media file).
+//! 3. **Per-kind Content-Type allowlist, scaled to the trust level.** For a
+//!    Provider-returned URL the declared type must positively match the
+//!    requested kind — `image/*` for images, `audio/*` for audio — and a
+//!    missing or generic type is a hard reject, because a `text/html` or
+//!    `application/json` body from an arbitrary host cannot be trusted to be
+//!    a media file. For the endpoint the operator configured themselves the
+//!    generic binary types that custom gateways actually emit
+//!    (`application/octet-stream`, `binary/*`) and an unlabelled body are
+//!    accepted, so the documented byte-stream contract keeps working.
 //!
 //! Plus the existing protections: per-hop URL validation, no-proxy client
 //! (so environment proxies cannot bypass the DNS-pinned address), streaming
@@ -52,12 +57,41 @@ impl MediaKind {
             MediaKind::Audio => "audio/",
         }
     }
+
+    /// Whether a declared `Content-Type` means "this body *is* the media",
+    /// as opposed to a structured envelope we should parse instead. Covers
+    /// the exact media type plus the generic byte-stream types that custom
+    /// gateways emit when they do not label the payload precisely.
+    pub fn declares_media_bytes(self, mime: &str) -> bool {
+        let mime = mime.to_ascii_lowercase();
+        mime.starts_with(self.allowed_prefix()) || is_generic_binary_type(&mime)
+    }
+}
+
+/// Types that say "some bytes" rather than naming the media. Accepting them
+/// is only safe for an endpoint the operator chose to trust.
+fn is_generic_binary_type(mime: &str) -> bool {
+    mime == "application/octet-stream" || mime.starts_with("binary/")
+}
+
+/// How strictly a media response's declared type is enforced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContentTypeCheck {
+    /// The declared type must positively match the requested kind. Used for
+    /// Provider-returned URLs, which are attacker-influenced.
+    Required,
+    /// The requested kind, a generic binary type, or no declared type at
+    /// all. Used for the endpoint the operator configured themselves.
+    ConfiguredEndpoint,
 }
 
 /// Per-fetch policy. `total_deadline` covers DNS resolution, connection,
 /// every redirect, and the response body — exceeding it for *any* reason
 /// aborts the fetch. `allow_address` decides whether a resolved IP is a
-/// safe target (loopback / private / reserved are rejected).
+/// safe target (loopback / private / reserved are rejected). `kind` also
+/// drives the *strict* Content-Type check: on this path a missing or generic
+/// type is a rejection, because the URL came from the Provider rather than
+/// from the operator.
 pub struct FetchPolicy {
     pub total_deadline: Duration,
     pub kind: MediaKind,
@@ -205,39 +239,62 @@ async fn fetch_media_inner(
             ));
         }
 
-        collect_body(response, policy.kind).await
+        return collect_body(response, policy.kind, ContentTypeCheck::Required).await;
     }
 
     unreachable!("redirect loop returns at its configured bound")
 }
 
-/// Read a media response body (e.g. from a configured Provider's direct
-/// media endpoint) with the same Content-Type and streaming cap guarantees
-/// as URL fetches. The provider URL is trusted; only the response shape is
-/// validated.
+/// Read the body of a direct media response from the endpoint the operator
+/// configured, with the same streaming cap as URL fetches.
+///
+/// The Content-Type check is deliberately looser here than on the
+/// Provider-returned URL path: the operator already chose who to talk to,
+/// and custom gateways conventionally answer with raw bytes under
+/// `application/octet-stream` (or with no type at all), which is the
+/// documented byte-stream contract. Anything that is not the expected media
+/// kind, a generic binary type, or an unlabelled body is still rejected.
 pub async fn collect_media_response(
     response: reqwest::Response,
     kind: MediaKind,
 ) -> Result<Vec<u8>, String> {
-    collect_body(response, kind).await
+    collect_body(response, kind, ContentTypeCheck::ConfiguredEndpoint).await
 }
 
-async fn collect_body(response: reqwest::Response, kind: MediaKind) -> Result<Vec<u8>, String> {
-    // Reject missing/invalid Content-Type before allocating the buffer.
-    // We must know what the endpoint actually returned — a `text/html` or
-    // `application/json` response would otherwise be base64-embedded as a
+async fn collect_body(
+    response: reqwest::Response,
+    kind: MediaKind,
+    check: ContentTypeCheck,
+) -> Result<Vec<u8>, String> {
+    // Check the Content-Type before allocating the buffer. A `text/html` or
+    // `application/json` body would otherwise be base64-embedded as a
     // "media" file and surface in the user's project as garbage.
-    let content_type = response
+    let declared = response
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| "媒体下载响应缺少 Content-Type 头部".to_string())?;
-    let mime = content_type.split(';').next().unwrap_or("").trim();
-    if !mime.to_ascii_lowercase().starts_with(kind.allowed_prefix()) {
-        return Err(format!(
-            "媒体下载 Content-Type {mime} 不被接受（需要 {}*）",
-            kind.allowed_prefix()
-        ));
+        .map(|value| value.split(';').next().unwrap_or("").trim())
+        .filter(|mime| !mime.is_empty());
+    match declared {
+        Some(mime) => {
+            let accepted = match check {
+                ContentTypeCheck::Required => {
+                    mime.to_ascii_lowercase().starts_with(kind.allowed_prefix())
+                }
+                ContentTypeCheck::ConfiguredEndpoint => kind.declares_media_bytes(mime),
+            };
+            if !accepted {
+                return Err(format!(
+                    "媒体下载 Content-Type {mime} 不被接受（需要 {}*）",
+                    kind.allowed_prefix()
+                ));
+            }
+        }
+        None => {
+            if check == ContentTypeCheck::Required {
+                return Err("媒体下载响应缺少 Content-Type 头部".to_string());
+            }
+        }
     }
     if let Some(declared) = response.content_length() {
         if declared > MAX_MEDIA_BYTES {
@@ -269,7 +326,7 @@ async fn collect_body(response: reqwest::Response, kind: MediaKind) -> Result<Ve
     Ok(collected)
 }
 
-fn validate_download_url(url: &reqwest::Url) -> Result<(), String> {
+pub(crate) fn validate_download_url(url: &reqwest::Url) -> Result<(), String> {
     match url.scheme() {
         "https" | "http" => {}
         other => return Err(format!("不允许的下载协议: {other}")),
@@ -293,7 +350,7 @@ fn validate_download_url(url: &reqwest::Url) -> Result<(), String> {
     Ok(())
 }
 
-fn is_public_download_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_public_download_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
             let [a, b, c, _] = ip.octets();
@@ -334,5 +391,199 @@ fn is_public_download_ip(ip: IpAddr) -> bool {
                 && !documentation_v2
                 && !segment_routing
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    struct StaticResolver {
+        host: String,
+        address: SocketAddr,
+    }
+
+    impl MediaDnsResolver for StaticResolver {
+        fn resolve<'a>(
+            &'a self,
+            host: &'a str,
+            _port: u16,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, String>> + Send + 'a>> {
+            Box::pin(async move {
+                if host == self.host {
+                    Ok(vec![self.address])
+                } else {
+                    Err(format!("unexpected DNS host: {host}"))
+                }
+            })
+        }
+    }
+
+    async fn media_response(content_type: Option<&'static str>) -> (String, StaticResolver) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            let body = b"media";
+            let declared = match content_type {
+                Some(value) => format!("Content-Type: {value}\r\n"),
+                None => String::new(),
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\n{declared}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.write_all(body).await.unwrap();
+        });
+        (
+            format!("http://public-media.test:{}/media", address.port()),
+            StaticResolver {
+                host: "public-media.test".to_string(),
+                address,
+            },
+        )
+    }
+
+    /// Serve one fixed response and hand back a URL for it. `collect_media_response`
+    /// does not validate the URL (it validates the *shape* of a response the
+    /// operator's own endpoint already returned), so a loopback address is a
+    /// faithful stand-in for a configured endpoint.
+    async fn configured_endpoint_url(content_type: Option<&'static str>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            let body = b"media";
+            let declared = match content_type {
+                Some(value) => format!("Content-Type: {value}\r\n"),
+                None => String::new(),
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\n{declared}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.write_all(body).await.unwrap();
+        });
+        format!("http://127.0.0.1:{}/media", address.port())
+    }
+
+    async fn get_without_proxy(url: &str) -> reqwest::Response {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    fn loopback_test_policy(kind: MediaKind) -> FetchPolicy {
+        FetchPolicy {
+            total_deadline: Duration::from_secs(1),
+            kind,
+            allow_address: Box::new(|url, ip| {
+                url.host_str() == Some("public-media.test") || is_public_download_ip(ip)
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_media_accepts_case_insensitive_content_type_for_expected_kind() {
+        let (url, resolver) = media_response(Some("Image/PNG")).await;
+
+        let bytes = fetch_media(&url, &resolver, &loopback_test_policy(MediaKind::Image))
+            .await
+            .unwrap();
+
+        assert_eq!(bytes, b"media");
+    }
+
+    #[tokio::test]
+    async fn fetch_media_rejects_a_different_media_kind() {
+        let (url, resolver) = media_response(Some("Audio/MPEG")).await;
+
+        let error = fetch_media(&url, &resolver, &loopback_test_policy(MediaKind::Image))
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("Content-Type Audio/MPEG"));
+        assert!(error.contains("image/*"));
+    }
+
+    #[tokio::test]
+    async fn fetch_media_rejects_a_generic_binary_type_from_a_provider_url() {
+        // The relaxed rule is scoped to the operator's own endpoint. A URL the
+        // Provider handed us must positively declare the media it serves.
+        let (url, resolver) = media_response(Some("application/octet-stream")).await;
+
+        let error = fetch_media(&url, &resolver, &loopback_test_policy(MediaKind::Image))
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("application/octet-stream"), "{error}");
+        assert!(error.contains("image/*"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn fetch_media_rejects_a_provider_response_without_content_type() {
+        let (url, resolver) = media_response(None).await;
+
+        let error = fetch_media(&url, &resolver, &loopback_test_policy(MediaKind::Image))
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("Content-Type"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn collect_media_response_accepts_the_custom_gateway_byte_stream_contract() {
+        // `application/octet-stream` / `binary/*` are what custom gateways
+        // actually emit; rejecting them would break a documented contract.
+        for content_type in [
+            "audio/mpeg",
+            "application/octet-stream",
+            "binary/octet-stream",
+        ] {
+            let url = configured_endpoint_url(Some(content_type)).await;
+            let response = get_without_proxy(&url).await;
+
+            let bytes = collect_media_response(response, MediaKind::Audio)
+                .await
+                .unwrap_or_else(|error| panic!("{content_type} was rejected: {error}"));
+
+            assert_eq!(bytes, b"media");
+        }
+    }
+
+    #[tokio::test]
+    async fn collect_media_response_accepts_an_unlabelled_body_from_a_configured_endpoint() {
+        let url = configured_endpoint_url(None).await;
+        let response = get_without_proxy(&url).await;
+
+        let bytes = collect_media_response(response, MediaKind::Audio)
+            .await
+            .unwrap();
+
+        assert_eq!(bytes, b"media");
+    }
+
+    #[tokio::test]
+    async fn collect_media_response_still_rejects_an_unrelated_content_type() {
+        let url = configured_endpoint_url(Some("text/html")).await;
+        let response = get_without_proxy(&url).await;
+
+        let error = collect_media_response(response, MediaKind::Audio)
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("Content-Type text/html"), "{error}");
     }
 }
