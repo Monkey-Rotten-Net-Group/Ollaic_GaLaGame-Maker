@@ -11,7 +11,8 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 | [会话与记忆](./sessions-and-memory.md) | 多会话(按项目持久化)、历史截断、项目记忆(世界观/文风/偏好) |
 | [参考资料上传](./reference-uploads.md) | 上传本地文本供 AI 取材、存储位置与安全边界、只读参考工具 |
 | [AI 素材与立绘生成](./media-generation.md) | 图像生成、TTS 语音生成、进度反馈、分模态配置 |
-| [供应商与模型配置](./providers.md) | Chat/Image/TTS 三类供应商与模型、连接测试、调用日志 |
+| [供应商与模型配置](./providers.md) | Chat/Image/TTS/Music 四类供应商与模型、连接测试、调用日志 |
+| [媒体网关](./gateway.md) | 多供应商协议统一、adaptor 分发、URL 解析、扩展新供应商 |
 
 ## 总览
 
@@ -34,6 +35,8 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 - `design/src/app/lib/ai-ipc.ts` — 与后端的 RPC(聊天/图像/TTS/配置)
 - `design/src/app/lib/ai-uploads-ipc.ts` — 参考资料 RPC 与提示词上下文
 - `src-tauri/src/ai/uploads.rs` — 参考资料存储与读取
+- `src-tauri/src/ai/gateway/` — 图片/语音/音乐的多供应商协议统一
+- `src-tauri/src/ai/registry.rs` — 供应商元数据单一真源（能力、默认端点、模型池）
 - `design/src/app/lib/story-agent.ts` — 提示词、上下文构建与截断
 - `design/src/app/lib/change-set.ts` — 变更暂存与校验
 - AI 组件:`AiAssistantPanel`/`AiInputBox`(在 `StoryEditor.tsx`)、`AiMessageBubble`、`AiPendingCard`、`AiStatusCard`、`AiMemoryPanel`、`AiUploadsButton`、`MiniNodeCard`、`PreviewNodeCard`、`AiSettingsDialog`

@@ -4,6 +4,7 @@ use crate::ai::safe_media_fetch::{
     MediaKind,
 };
 use std::{collections::BTreeSet, fs};
+use crate::ai::gateway::adaptors::dashscope::normalize_cosyvoice_voice;
 
 fn validate_media_download_url(url: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| format!("无效的下载 URL: {error}"))?;
