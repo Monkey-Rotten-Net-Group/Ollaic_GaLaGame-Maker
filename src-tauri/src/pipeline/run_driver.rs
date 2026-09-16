@@ -20,6 +20,9 @@ pub(crate) enum Action {
     Idle,
 }
 
+const SNAPSHOT_CLEANUP_PENDING_WARNING: &str =
+    "旧回滚快照正在清理；如果清理失败，系统会保留记录并在后续步骤重试。";
+
 pub(crate) fn mark_run_persistence_failed(
     state: &mut crate::pipeline::state::RunState,
     operation: &str,
@@ -78,7 +81,18 @@ pub(crate) async fn next_action(
                 );
                 (step.def.kind, prompt, removed_snapshots)
             };
+            let cleanup_was_queued = !removed_snapshots.is_empty();
             queue_rollback_snapshot_cleanup(&mut state, removed_snapshots);
+            if cleanup_was_queued {
+                if let Some(attempt) = state
+                    .find_step_mut(&id)
+                    .and_then(|step| step.history.last_mut())
+                {
+                    attempt
+                        .warnings
+                        .push(SNAPSHOT_CLEANUP_PENDING_WARNING.to_string());
+                }
+            }
             state.updated_at = clock.now_ms();
             if let Err(err) = store::save_run_state(project_path, &state) {
                 let event = mark_run_persistence_failed(&mut state, "步骤启动状态", err);
@@ -86,12 +100,23 @@ pub(crate) async fn next_action(
                 sink.emit(event);
                 return Action::Idle;
             }
-            if let Err(error) = cleanup_rollback_snapshots(project_path, &mut state) {
+            let cleanup_result = cleanup_rollback_snapshots(project_path, &mut state);
+            if cleanup_was_queued || cleanup_result.is_err() {
                 if let Some(attempt) = state
                     .find_step_mut(&id)
                     .and_then(|step| step.history.last_mut())
                 {
-                    attempt.warnings.push(error.to_string());
+                    // The provisional notice is resolved by the attempt above:
+                    // either cleanup succeeded, or the concrete diagnostic
+                    // below replaces it. Leaving it behind would make a
+                    // successful step look like it still has pending work.
+                    attempt.warnings.retain(|w| w != SNAPSHOT_CLEANUP_PENDING_WARNING);
+                    if let Err(error) = &cleanup_result {
+                        let warning = error.to_string();
+                        if !attempt.warnings.contains(&warning) {
+                            attempt.warnings.push(warning);
+                        }
+                    }
                 }
                 let _ = store::save_run_state(project_path, &state);
             }

@@ -401,7 +401,11 @@ pub(crate) fn commit_step_output(
                 attempt.diff = Some(describe_output(out));
                 attempt.prompt_tokens = out.prompt_tokens;
                 attempt.completion_tokens = out.completion_tokens;
-                attempt.warnings = out.warnings.clone();
+                for warning in &out.warnings {
+                    if !attempt.warnings.contains(warning) {
+                        attempt.warnings.push(warning.clone());
+                    }
+                }
                 attempt.downgrade = out.downgrade.clone();
             }
         }

@@ -5,10 +5,15 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
+use tokio::time::Instant;
+
+const CANCELLED_MARKER_TTL: Duration = Duration::from_secs(5 * 60);
+const MAX_CANCELLED_MARKERS: usize = 1024;
 
 #[derive(Clone)]
 struct ChatRunHandle {
@@ -26,12 +31,18 @@ impl ChatRunHandle {
 }
 
 /// One slot per `run_id` in the registry. A `Live` slot hosts the in-flight
-/// Provider future; a `Cancelled` slot is a poison marker so any later
+/// Provider future; a `Cancelled` slot is a poison marker so a later
 /// `run_cancellable` for the same id rejects without ever driving a Provider
 /// future (closing the cancel-before-register race).
+///
+/// The marker is bounded rather than permanent: it expires after
+/// `CANCELLED_MARKER_TTL` and the oldest markers are evicted once the map
+/// reaches `MAX_CANCELLED_MARKERS`. A cancel that arrives more than
+/// `CANCELLED_MARKER_TTL` before its register no longer suppresses the run.
+#[derive(Clone)]
 enum RunState {
     Live(ChatRunHandle),
-    Cancelled,
+    Cancelled { inserted_at: Instant, sequence: u64 },
 }
 
 /// Frontend → backend chat-turn ownership. Caller cancels through
@@ -40,6 +51,7 @@ enum RunState {
 #[derive(Default)]
 pub struct ChatRunRegistry {
     states: Mutex<HashMap<String, RunState>>,
+    next_cancelled_sequence: AtomicU64,
 }
 
 impl ChatRunRegistry {
@@ -58,12 +70,10 @@ impl ChatRunRegistry {
     ) -> Result<T, String> {
         let handle = {
             let mut states = self.states.lock().await;
+            Self::prune_cancelled_markers(&mut states, Instant::now());
             match states.get(run_id) {
-                Some(RunState::Cancelled) => {
-                    // A cancel arrived before this register. Drop the marker
-                    // and reject — the Provider future must not start.
-                    states.remove(run_id);
-                    return Err(format!("chat run cancelled before registration: {run_id}"));
+                Some(RunState::Cancelled { .. }) => {
+                    return Err(format!("chat run has been cancelled: {run_id}"));
                 }
                 Some(RunState::Live(_)) => {
                     return Err(format!("chat run already active: {run_id}"));
@@ -82,9 +92,8 @@ impl ChatRunRegistry {
             result = future => result,
         };
         let mut states = self.states.lock().await;
-        // Only remove the slot if it still belongs to *this* future. A newer
-        // call for the same id would have inserted a different handle and
-        // must not be evicted by an old future finishing late.
+        // Only remove the slot if it still belongs to *this* future. Cancel
+        // replaces the Live slot with a sticky marker before signalling it.
         if let Some(RunState::Live(current)) = states.get(run_id) {
             if Arc::ptr_eq(&current.cancelled, &handle.cancelled) {
                 states.remove(run_id);
@@ -95,30 +104,75 @@ impl ChatRunRegistry {
 
     /// Cancel a previously registered run. Returns `true` if a live run was
     /// signalled, `false` if the id was already cancelled, completed, or
-    /// never started. In every `false` case the id is poisoned: any later
-    /// `run_cancellable` for the same id rejects immediately. Safe to call
-    /// repeatedly.
+    /// never started. In the `false` cases the id is poisoned for
+    /// `CANCELLED_MARKER_TTL`: a later `run_cancellable` for the same id
+    /// rejects while the marker lives, or until the oldest markers are
+    /// evicted at `MAX_CANCELLED_MARKERS`. Safe to call repeatedly.
     pub async fn cancel(&self, run_id: &str) -> bool {
         let mut states = self.states.lock().await;
+        let now = Instant::now();
+        Self::prune_cancelled_markers(&mut states, now);
         match states.remove(run_id) {
             Some(RunState::Live(handle)) => {
                 if !handle.cancelled.swap(true, Ordering::SeqCst) {
                     handle.notify.notify_one();
                 }
+                states.insert(run_id.to_string(), self.cancelled_marker(now));
+                Self::enforce_cancelled_marker_limit(&mut states);
                 true
             }
-            Some(RunState::Cancelled) => {
+            Some(marker @ RunState::Cancelled { .. }) => {
                 // Re-insert the marker so the poison remains sticky across
                 // repeated cancels, and return false (no live run to signal).
-                states.insert(run_id.to_string(), RunState::Cancelled);
+                states.insert(run_id.to_string(), marker);
                 false
             }
             None => {
                 // No run registered yet. Mark the id so a later
                 // `run_cancellable` rejects instead of starting a Provider
                 // future after Stop.
-                states.insert(run_id.to_string(), RunState::Cancelled);
+                states.insert(run_id.to_string(), self.cancelled_marker(now));
+                Self::enforce_cancelled_marker_limit(&mut states);
                 false
+            }
+        }
+    }
+
+    fn cancelled_marker(&self, inserted_at: Instant) -> RunState {
+        RunState::Cancelled {
+            inserted_at,
+            sequence: self.next_cancelled_sequence.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+
+    fn prune_cancelled_markers(states: &mut HashMap<String, RunState>, now: Instant) {
+        states.retain(|_, state| match state {
+            RunState::Live(_) => true,
+            RunState::Cancelled { inserted_at, .. } => {
+                now.saturating_duration_since(*inserted_at) < CANCELLED_MARKER_TTL
+            }
+        });
+    }
+
+    fn enforce_cancelled_marker_limit(states: &mut HashMap<String, RunState>) {
+        while states
+            .values()
+            .filter(|state| matches!(state, RunState::Cancelled { .. }))
+            .count()
+            > MAX_CANCELLED_MARKERS
+        {
+            let oldest = states
+                .iter()
+                .filter_map(|(run_id, state)| match state {
+                    RunState::Cancelled { sequence, .. } => Some((run_id.clone(), *sequence)),
+                    RunState::Live(_) => None,
+                })
+                .min_by_key(|(_, sequence)| *sequence)
+                .map(|(run_id, _)| run_id);
+            if let Some(run_id) = oldest {
+                states.remove(&run_id);
+            } else {
+                break;
             }
         }
     }
@@ -129,6 +183,16 @@ impl ChatRunRegistry {
     pub async fn is_active(&self, run_id: &str) -> bool {
         let states = self.states.lock().await;
         matches!(states.get(run_id), Some(RunState::Live(_)))
+    }
+
+    #[cfg(test)]
+    async fn cancelled_marker_count(&self) -> usize {
+        self.states
+            .lock()
+            .await
+            .values()
+            .filter(|state| matches!(state, RunState::Cancelled { .. }))
+            .count()
     }
 }
 
@@ -152,8 +216,7 @@ mod tests {
         // Give the spawned task a chance to register before we cancel.
         tokio::task::yield_now().await;
         assert!(registry.cancel("run-a").await);
-        // A repeat cancel after the run is signalled: the slot is already
-        // Cancelled, so this returns false but does not panic.
+        // A repeat cancel after the run is signalled is idempotent.
         assert!(!registry.cancel("run-a").await);
         let error = tokio::time::timeout(Duration::from_secs(1), task)
             .await
@@ -162,6 +225,11 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("cancelled"));
         assert!(!registry.is_active("run-a").await);
+        assert!(registry
+            .run_cancellable("run-a", async { Ok::<_, String>(()) })
+            .await
+            .unwrap_err()
+            .contains("has been cancelled"));
     }
 
     #[tokio::test]
@@ -226,17 +294,13 @@ mod tests {
             .run_cancellable("never-started", async { Ok::<_, String>(()) })
             .await
             .unwrap_err();
-        assert!(err.contains("cancelled before registration"));
+        assert!(err.contains("has been cancelled"));
         assert!(!registry.is_active("never-started").await);
-        // The poison is consumed by the failed register, so a fresh id can
-        // still be started.
-        assert_eq!(
-            registry
-                .run_cancellable("never-started", async { Ok::<_, String>(99) })
-                .await
-                .unwrap(),
-            99
-        );
+        assert!(registry
+            .run_cancellable("never-started", async { Ok::<_, String>(99) })
+            .await
+            .unwrap_err()
+            .contains("has been cancelled"));
     }
 
     /// Once a run completes naturally, a subsequent cancel on the same id
@@ -258,6 +322,55 @@ mod tests {
             .run_cancellable("done", async { Ok::<_, String>(99) })
             .await
             .unwrap_err();
-        assert!(err.contains("cancelled before registration"));
+        assert!(err.contains("has been cancelled"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_markers_expire_without_weakening_the_registration_race_window() {
+        let registry = ChatRunRegistry::new();
+        assert!(!registry.cancel("expiring").await);
+        tokio::time::advance(CANCELLED_MARKER_TTL - Duration::from_millis(1)).await;
+        assert!(registry
+            .run_cancellable("expiring", async { Ok::<_, String>(()) })
+            .await
+            .unwrap_err()
+            .contains("has been cancelled"));
+
+        assert!(!registry.cancel("expired").await);
+        tokio::time::advance(CANCELLED_MARKER_TTL).await;
+        assert_eq!(
+            registry
+                .run_cancellable("expired", async { Ok::<_, String>(7) })
+                .await
+                .unwrap(),
+            7
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_marker_storage_is_bounded_and_keeps_recent_cancellations() {
+        let registry = ChatRunRegistry::new();
+        for index in 0..=MAX_CANCELLED_MARKERS {
+            assert!(!registry.cancel(&format!("cancelled-{index}")).await);
+        }
+
+        assert_eq!(
+            registry.cancelled_marker_count().await,
+            MAX_CANCELLED_MARKERS
+        );
+        assert!(registry
+            .run_cancellable(&format!("cancelled-{MAX_CANCELLED_MARKERS}"), async {
+                Ok::<_, String>(())
+            },)
+            .await
+            .unwrap_err()
+            .contains("has been cancelled"));
+        assert_eq!(
+            registry
+                .run_cancellable("cancelled-0", async { Ok::<_, String>(9) })
+                .await
+                .unwrap(),
+            9
+        );
     }
 }
