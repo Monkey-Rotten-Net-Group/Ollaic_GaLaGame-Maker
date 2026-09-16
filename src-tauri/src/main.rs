@@ -185,6 +185,7 @@ fn main() {
             get_runtime_info,
             install_runtime,
             // AI
+            ai::commands::list_ai_providers,
             ai::commands::get_ai_config,
             ai::commands::set_ai_config,
             ai::commands::get_ai_provider_capability,

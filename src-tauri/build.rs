@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
-/// 抠图模型（BiRefNet-lite fp16，MIT）的下载地址与预期大小。
+/// 抠图模型（BiRefNet-lite fp16，MIT）的下载候选地址与预期大小。
 /// 模型不入 git 仓库（115MB），改由构建时下载到 `models/`，再由 Tauri 打进安装包。
-const MODEL_URL: &str =
-    "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx";
+const DEFAULT_MODEL_URLS: &[&str] = &[
+    "https://hf-mirror.com/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx",
+    "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx",
+];
 const MODEL_EXPECTED_BYTES: u64 = 114_538_221;
 const MODEL_FILENAME: &str = "birefnet-lite-fp16.onnx";
 /// 下载读取上限（略高于预期大小，绕过 ureq 默认 10MB 限制）。
@@ -14,13 +16,14 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=MATTING_MODEL_PATH");
     println!("cargo:rerun-if-env-changed=MATTING_SKIP_MODEL_DOWNLOAD");
+    println!("cargo:rerun-if-env-changed=HF_ENDPOINT");
 
     if let Err(e) = ensure_matting_model() {
         // 不让构建直接崩溃在网络问题上：打印醒目警告，指明手动补救方式。
         // 运行时若仍找不到模型，remove_background 会返回明确错误。
         println!("cargo:warning=抠图模型准备失败：{e}");
         println!(
-            "cargo:warning=可手动下载 {MODEL_URL} 到 src-tauri/models/{MODEL_FILENAME}，或设置 MATTING_MODEL_PATH 指向已有模型。"
+            "cargo:warning=可手动下载 https://hf-mirror.com/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx 到 src-tauri/models/{MODEL_FILENAME}，或设置 MATTING_MODEL_PATH 指向已有模型。"
         );
     }
 
@@ -64,29 +67,61 @@ fn ensure_matting_model() -> Result<(), String> {
         "cargo:warning=正在下载抠图模型 {MODEL_FILENAME}（约 115MB，首次构建需要一些时间）..."
     );
 
+    let mut candidate_urls: Vec<String> = Vec::new();
+    if let Ok(endpoint) = std::env::var("HF_ENDPOINT") {
+        let endpoint = endpoint.trim_end_matches('/');
+        candidate_urls.push(format!(
+            "{endpoint}/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx"
+        ));
+    }
+    for url in DEFAULT_MODEL_URLS {
+        if !candidate_urls.iter().any(|u| u == *url) {
+            candidate_urls.push(url.to_string());
+        }
+    }
+
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(600)))
         .build()
         .into();
 
-    let mut response = agent
-        .get(MODEL_URL)
-        .call()
-        .map_err(|e| format!("请求模型下载地址失败: {e}"))?;
+    let mut last_error = String::new();
+    let mut downloaded_bytes: Option<Vec<u8>> = None;
 
-    let bytes = response
-        .body_mut()
-        .with_config()
-        .limit(DOWNLOAD_LIMIT_BYTES)
-        .read_to_vec()
-        .map_err(|e| format!("读取模型下载内容失败: {e}"))?;
-
-    let downloaded = bytes.len() as u64;
-    if downloaded != MODEL_EXPECTED_BYTES {
-        return Err(format!(
-            "下载的模型大小不符：得到 {downloaded} 字节，预期 {MODEL_EXPECTED_BYTES}。可能是网络中断或地址失效。"
-        ));
+    for url in &candidate_urls {
+        match agent.get(url).call() {
+            Ok(mut response) => {
+                match response
+                    .body_mut()
+                    .with_config()
+                    .limit(DOWNLOAD_LIMIT_BYTES)
+                    .read_to_vec()
+                {
+                    Ok(bytes) => {
+                        let downloaded = bytes.len() as u64;
+                        if downloaded == MODEL_EXPECTED_BYTES {
+                            downloaded_bytes = Some(bytes);
+                            break;
+                        } else {
+                            last_error = format!(
+                                "从 {url} 下载的模型大小不符：得到 {downloaded} 字节，预期 {MODEL_EXPECTED_BYTES}"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        last_error = format!("读取 {url} 下载内容失败: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                last_error = format!("请求 {url} 失败: {e}");
+            }
+        }
     }
+
+    let bytes = downloaded_bytes.ok_or_else(|| {
+        format!("所有镜像源下载均失败。最后错误: {last_error}")
+    })?;
 
     // 先写临时文件再原子重命名，避免构建中断留下半截文件。
     let tmp_path = models_dir.join(format!("{MODEL_FILENAME}.part"));

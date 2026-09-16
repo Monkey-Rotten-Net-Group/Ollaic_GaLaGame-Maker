@@ -18,6 +18,9 @@ import {
   type AiConfig,
   type AiProviderConfig,
   type AiValidationResult,
+  type ProviderCatalog,
+  type ProviderOption,
+  listAiProviders,
   getAiConfig,
   setAiConfig,
   getAiImageConfig,
@@ -32,75 +35,35 @@ import {
   getAiLogPath,
 } from '../lib/ai-ipc';
 
-interface ProviderPreset {
-  value: string;
-  label: string;
-  defaultModel: string;
-  models?: string[];
-  defaultBaseUrl: string;
-  needsBaseUrl: boolean;
-  keyHint?: string;
-}
-
 type AiSettingsTab = 'chat' | 'image' | 'tts' | 'music';
 
-const CHAT_PROVIDERS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI', defaultModel: 'gpt-5.5', models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'anthropic', label: 'Anthropic', defaultModel: 'claude-opus-4-8', models: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-3-7-sonnet-latest', 'claude-3-5-haiku-latest'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'gemini', label: 'Gemini', defaultModel: 'gemini-3.5-flash', models: ['gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-flash-latest'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'deepseek', label: 'DeepSeek', defaultModel: 'deepseek-v4-flash', models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'groq', label: 'Groq', defaultModel: 'llama-3.3-70b-versatile', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'groq/compound', 'qwen-2.5-32b', 'deepseek-r1-distill-llama-70b'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'xai', label: 'xAI', defaultModel: 'grok-4.3', models: ['grok-4.3', 'grok-4.20', 'grok-build-0.1'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'ollama', label: 'Ollama (本地)', defaultModel: 'qwen2.5:7b', models: ['qwen2.5:7b', 'qwen2.5:14b', 'qwen2.5:32b', 'llama3.3:70b', 'llama3.2:3b', 'deepseek-r1:7b', 'deepseek-r1:14b', 'gemma2:9b', 'mistral:7b', 'phi4:14b'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'custom', label: '自定义 (OpenAI 兼容)', defaultModel: 'gpt-4o-mini', defaultBaseUrl: 'https://api.example.com/v1/', needsBaseUrl: true },
-];
-
-const IMAGE_PROVIDERS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI Images', defaultModel: 'gpt-image-1', models: ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest', 'dall-e-3', 'dall-e-2'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'gemini', label: 'Google Gemini / Imagen', defaultModel: 'gemini-3-pro-image-preview', models: ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview', 'gemini-2.5-flash-image', 'nano-banana-pro-preview', 'imagen-4.0-ultra-generate-001', 'imagen-4.0-generate-001', 'imagen-4.0-fast-generate-001'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'aliyun', label: '阿里云 DashScope / 通义万相', defaultModel: 'wanx2.1-t2i-turbo', models: ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus', 'wanx2.1-imageedit', 'wanx-v1', 'wan2.2-t2i-flash', 'wan2.2-t2i-plus', 'wan2.5-t2i-preview', 'wan2.6-t2i', 'wan2.7-image', 'wan2.7-image-pro', 'qwen-image', 'qwen-image-edit', 'qwen-image-plus', 'qwen-image-max', 'qwen-image-2.0-pro', 'z-image-turbo'], defaultBaseUrl: 'https://dashscope.aliyuncs.com/api/v1', needsBaseUrl: false },
-  { value: 'volcengine', label: '火山引擎 / 即梦 / 豆包', defaultModel: 'doubao-seedream-4-5-251128', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-5-0-lite', 'doubao-seedream-4-0-250828', 'doubao-seededit-3-0-i2i-250628', 'jimeng_high_aes_general_v21_L', 'jimeng_high_aes_general_v20_L', 'doubao-seedream-3-0-t2i-250415'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'zhipu', label: '智谱 CogView', defaultModel: 'cogview-3-flash', models: ['cogview-3-flash', 'cogview-3-plus', 'cogview-4'], defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', needsBaseUrl: false },
-  { value: 'siliconflow', label: 'SiliconFlow', defaultModel: 'Kwai-Kolors/Kolors', models: ['Kwai-Kolors/Kolors', 'black-forest-labs/FLUX.1-schnell', 'black-forest-labs/FLUX.1-dev', 'stabilityai/stable-diffusion-3-5-large', 'stabilityai/stable-diffusion-xl-base-1.0', 'Qwen/Qwen-Image', 'Qwen/Qwen-Image-Edit'], defaultBaseUrl: 'https://api.siliconflow.cn/v1', needsBaseUrl: false },
-  { value: 'sd-webui', label: 'Stable Diffusion WebUI (本地)', defaultModel: 'local', models: ['local', 'sdxl', 'sd1.5', 'sd3.5-large', 'flux', 'kolors'], defaultBaseUrl: 'http://127.0.0.1:7860', needsBaseUrl: true, keyHint: '本地服务通常不需要 Key' },
-  { value: 'custom', label: '自定义', defaultModel: 'image-model', models: ['image-model'], defaultBaseUrl: 'https://api.example.com/v1/images/generations', needsBaseUrl: true },
-];
-
-const TTS_PROVIDERS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI TTS', defaultModel: 'gpt-4o-mini-tts', models: ['gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-03-20', 'gpt-4o-mini-tts-2025-12-15', 'tts-1', 'tts-1-1106', 'tts-1-hd', 'tts-1-hd-1106'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'elevenlabs', label: 'ElevenLabs', defaultModel: 'eleven_multilingual_v2', models: ['eleven_v3', 'eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_flash_v2', 'eleven_turbo_v2_5', 'eleven_turbo_v2', 'eleven_multilingual_sts_v2', 'eleven_monolingual_v1'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'aliyun', label: '阿里云 DashScope / CosyVoice', defaultModel: 'cosyvoice-v2', models: ['cosyvoice-v2', 'cosyvoice-v1', 'cosyvoice-v3-flash', 'cosyvoice-v3-plus', 'qwen3-tts-flash', 'qwen-tts', 'qwen-tts-latest'], defaultBaseUrl: '', needsBaseUrl: false, keyHint: 'Base URL 留空即可' },
-  { value: 'volcengine', label: '火山引擎 / 豆包语音', defaultModel: 'seed-tts', models: ['seed-tts', 'seed-tts-2.0', 'mega-tts', 'doubao-tts'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'custom', label: '自定义', defaultModel: 'tts-model', models: ['tts-model'], defaultBaseUrl: 'https://api.example.com/v1/audio/speech', needsBaseUrl: true },
-];
-
-const MUSIC_PROVIDERS: ProviderPreset[] = [
-  { value: 'custom', label: '自定义 (OpenAI 兼容音乐端点)', defaultModel: 'music-1', models: ['music-1'], defaultBaseUrl: 'https://api.example.com/v1/audio/music', needsBaseUrl: true, keyHint: 'Base URL 指向返回音频字节的音乐生成端点' },
-  { value: 'openai', label: 'OpenAI 兼容', defaultModel: 'music-1', models: ['music-1'], defaultBaseUrl: '', needsBaseUrl: false },
-  { value: 'siliconflow', label: 'SiliconFlow', defaultModel: 'music-1', models: ['music-1'], defaultBaseUrl: 'https://api.siliconflow.cn/v1', needsBaseUrl: false },
-];
-
-function configFromPreset(preset: ProviderPreset): AiProviderConfig {
+// Base URL is deliberately left empty: the backend falls back to the
+// provider's built-in endpoint, and a provider that has none shows the
+// requirement as an input placeholder instead of pre-filling an example
+// address the backend would later reject.
+function configFromOption(option: ProviderOption): AiProviderConfig {
   return {
-    provider: preset.value,
-    model: preset.defaultModel,
+    provider: option.value,
+    model: option.defaultModel,
     api_key: '',
-    base_url: preset.needsBaseUrl ? preset.defaultBaseUrl : '',
+    base_url: '',
   };
 }
 
-function normalizeImageConfig(config: AiProviderConfig): AiProviderConfig {
-  if (IMAGE_PROVIDERS.some((provider) => provider.value === config.provider)) {
+/**
+ * Keep a saved config only while its provider is still offered for this tab.
+ * A provider that the backend dropped falls back to the first option rather
+ * than leaving the picker showing a value that is not in its list.
+ */
+function normalizeConfig(
+  config: AiProviderConfig,
+  options: ProviderOption[],
+): AiProviderConfig {
+  if (options.length === 0) return config;
+  if (options.some((option) => option.value === config.provider)) {
     return config;
   }
-  return configFromPreset(IMAGE_PROVIDERS[0]);
-}
-
-function normalizeMusicConfig(config: AiProviderConfig): AiProviderConfig {
-  if (MUSIC_PROVIDERS.some((provider) => provider.value === config.provider)) {
-    return config;
-  }
-  return configFromPreset(MUSIC_PROVIDERS[0]);
+  return configFromOption(options[0]);
 }
 
 interface Props {
@@ -111,6 +74,7 @@ interface Props {
 
 export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [activeTab, setActiveTab] = useState<AiSettingsTab>('chat');
+  const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [imageConfig, setImageConfig] = useState<AiProviderConfig | null>(null);
   const [ttsConfig, setTtsConfig] = useState<AiProviderConfig | null>(null);
@@ -135,13 +99,20 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     configRef.current = null;
     setLogs([]);
     setLogPath('');
-    Promise.all([getAiConfig(), getAiImageConfig(), getAiTtsConfig(), getAiMusicConfig()])
-      .then(([chat, image, tts, music]) => {
+    Promise.all([
+      listAiProviders(),
+      getAiConfig(),
+      getAiImageConfig(),
+      getAiTtsConfig(),
+      getAiMusicConfig(),
+    ])
+      .then(([providers, chat, image, tts, music]) => {
+        setCatalog(providers);
         setConfig(chat);
         configRef.current = chat;
-        setImageConfig(normalizeImageConfig(image));
-        setTtsConfig(tts);
-        setMusicConfig(normalizeMusicConfig(music));
+        setImageConfig(normalizeConfig(image, providers.image));
+        setTtsConfig(normalizeConfig(tts, providers.tts));
+        setMusicConfig(normalizeConfig(music, providers.music));
       })
       .catch((e) => setError(String(e)));
   }, [open]);
@@ -171,11 +142,11 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const handleProviderChange = (
     value: string,
     current: AiConfig,
-    providers: ProviderPreset[],
+    options: ProviderOption[],
     update: (patch: Partial<AiConfig>) => void,
   ) => {
-    const preset = providers.find((p) => p.value === value);
-    if (!preset) {
+    const option = options.find((p) => p.value === value);
+    if (!option) {
       update({ provider: value });
       setValidation(null);
       setVerifiedSaved(false);
@@ -183,8 +154,11 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     }
     update({
       provider: value,
-      model: preset.defaultModel,
-      base_url: preset.needsBaseUrl ? (current.base_url || preset.defaultBaseUrl) : '',
+      model: option.defaultModel,
+      // A Base URL typed for the previous provider almost never applies to the
+      // new one, so keep it only where the new provider has no built-in
+      // endpoint and the user would otherwise have to retype it.
+      base_url: option.needsBaseUrl ? current.base_url : '',
     });
     setValidation(null);
     setVerifiedSaved(false);
@@ -272,7 +246,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     }
   };
 
-  const loaded = config && imageConfig && ttsConfig && musicConfig;
+  const loaded = catalog && config && imageConfig && ttsConfig && musicConfig;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -309,22 +283,10 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   <fieldset disabled={verifying} className="disabled:opacity-70">
                     <ConfigFields
                       config={config}
-                      providers={CHAT_PROVIDERS}
+                      options={catalog.chat}
                       multiModel={false}
-                      onProviderChange={(value) => handleProviderChange(value, config, CHAT_PROVIDERS, updateChat)}
+                      onProviderChange={(value) => handleProviderChange(value, config, catalog.chat, updateChat)}
                       onUpdate={updateChat}
-                      apiKeyHint={
-                        config.provider === 'ollama'
-                          ? '本地 Ollama 通常不需要 Key'
-                          : config.provider === 'custom'
-                            ? 'OpenAI 兼容接口可按服务端要求决定是否填写'
-                            : '存储在本地配置文件中'
-                      }
-                      baseUrlHint={
-                        config.provider === 'custom'
-                          ? '必填，OpenAI 兼容端点（DeepSeek/Moonshot/通义/本地 vLLM 等）'
-                          : '留空使用供应商默认地址'
-                      }
                     />
                   </fieldset>
 
@@ -349,9 +311,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                 <ProviderConfigPanel
                   title="图片生成配置"
                   config={imageConfig}
-                  providers={IMAGE_PROVIDERS}
+                  options={catalog.image}
                   onUpdate={updateImage}
-                  onProviderChange={(value) => handleProviderChange(value, imageConfig, IMAGE_PROVIDERS, updateImage)}
+                  onProviderChange={(value) => handleProviderChange(value, imageConfig, catalog.image, updateImage)}
                 />
               )}
 
@@ -359,9 +321,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                 <ProviderConfigPanel
                   title="音频 / TTS 配置"
                   config={ttsConfig}
-                  providers={TTS_PROVIDERS}
+                  options={catalog.tts}
                   onUpdate={updateTts}
-                  onProviderChange={(value) => handleProviderChange(value, ttsConfig, TTS_PROVIDERS, updateTts)}
+                  onProviderChange={(value) => handleProviderChange(value, ttsConfig, catalog.tts, updateTts)}
                 />
               )}
 
@@ -369,9 +331,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                 <ProviderConfigPanel
                   title="背景音乐 (BGM) 生成配置"
                   config={musicConfig}
-                  providers={MUSIC_PROVIDERS}
+                  options={catalog.music}
                   onUpdate={updateMusic}
-                  onProviderChange={(value) => handleProviderChange(value, musicConfig, MUSIC_PROVIDERS, updateMusic)}
+                  onProviderChange={(value) => handleProviderChange(value, musicConfig, catalog.music, updateMusic)}
                 />
               )}
 
@@ -440,17 +402,16 @@ function TabButton({
 function ProviderConfigPanel({
   title,
   config,
-  providers,
+  options,
   onUpdate,
   onProviderChange,
 }: {
   title: string;
   config: AiProviderConfig;
-  providers: ProviderPreset[];
+  options: ProviderOption[];
   onUpdate: (patch: Partial<AiProviderConfig>) => void;
   onProviderChange: (value: string) => void;
 }) {
-  const preset = providers.find((p) => p.value === config.provider);
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-secondary/20 p-3">
@@ -461,12 +422,10 @@ function ProviderConfigPanel({
 
       <ConfigFields
         config={config}
-        providers={providers}
+        options={options}
         multiModel
         onProviderChange={onProviderChange}
         onUpdate={onUpdate}
-        apiKeyHint={preset?.keyHint || '存储在本地配置文件中'}
-        baseUrlHint={config.provider === 'custom' ? '按目标服务填写图片或音频接口端点' : '留空使用供应商默认地址'}
       />
     </div>
   );
@@ -548,23 +507,25 @@ function ModelSelectField({
 
 function ConfigFields({
   config,
-  providers,
+  options,
   multiModel = false,
   onProviderChange,
   onUpdate,
-  apiKeyHint,
-  baseUrlHint,
 }: {
   config: AiConfig;
-  providers: ProviderPreset[];
+  options: ProviderOption[];
   multiModel?: boolean;
   onProviderChange: (value: string) => void;
   onUpdate: (patch: Partial<AiConfig>) => void;
-  apiKeyHint: string;
-  baseUrlHint: string;
 }) {
-  const provider = providers.find((p) => p.value === config.provider);
+  const provider = options.find((p) => p.value === config.provider);
   const modelOptions = provider?.models?.length ? provider.models : provider ? [provider.defaultModel] : [];
+  const apiKeyHint = provider && !provider.requiresApiKey
+    ? '该供应商通常不需要 Key，可留空'
+    : '存储在本地配置文件中';
+  const baseUrlHint = provider?.needsBaseUrl
+    ? '必填，该供应商没有内置地址'
+    : '留空使用供应商默认地址';
   return (
     <div className="space-y-4">
       <Field label="供应商">
@@ -574,7 +535,7 @@ function ConfigFields({
           className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
           aria-label="选择 AI 供应商"
         >
-          {providers.map((p) => (
+          {options.map((p) => (
             <option key={p.value} value={p.value}>
               {p.label}
             </option>
@@ -622,7 +583,7 @@ function ConfigFields({
           type="text"
           value={config.base_url}
           onChange={(e) => onUpdate({ base_url: e.target.value })}
-          placeholder={provider?.needsBaseUrl ? provider.defaultBaseUrl : '(默认)'}
+          placeholder={provider?.baseUrlPlaceholder ?? '(默认)'}
           className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
         />
       </Field>
