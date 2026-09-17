@@ -29,11 +29,16 @@ AI 出图大多是白底/纯色底,不带透明通道。立绘生成后会自动
 
 ## 分模态配置
 
-聊天、图像、TTS 各自独立配置,可路由到不同供应商:
-- `getAiConfig`(聊天)/ `getAiImageConfig`(图像)/ `getAiTtsConfig`(TTS)。
+聊天、图像、TTS、音乐各自独立配置,可路由到不同供应商:
+- `getAiConfig`(聊天)/ `getAiImageConfig`(图像)/ `getAiTtsConfig`(TTS)/ `getAiMusicConfig`(音乐)。
 - 例如:聊天用 OpenAI、图像用 Gemini、TTS 用 ElevenLabs。详见[供应商与模型配置](./providers.md)。
 
+## 请求如何发出
+
+图像 / 语音 / 音乐的实际请求统一经过 `src-tauri/src/ai/gateway/`:调用方只构造统一的请求 DTO,由 adaptor 翻译成各供应商协议,再把响应收敛回统一的 `GeneratedMedia`。批量 TTS 与单条 TTS 走同一条路径,因此支持的供应商集合始终一致。详见[媒体网关](./gateway.md)。
+
 ## 相关源码
-- `design/src/app/lib/ai-ipc.ts`(`aiGenerateImage` / `aiGenerateTts` / `removeBackground` / 进度监听 / 各模态配置)
+- `design/src/app/lib/ai-ipc.ts`(`aiGenerateImage` / `aiGenerateTts` / `generateMusic` / `removeBackground` / 进度监听 / 各模态配置)
 - `design/src/app/components/AssetManager.tsx`、`design/src/app/components/CharacterPanel.tsx`
+- `src-tauri/src/ai/gateway/`(多供应商协议统一与分发)
 - `src-tauri/src/matting/`(`remove_background` 命令与本地 ONNX 抠图实现)

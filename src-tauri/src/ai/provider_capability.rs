@@ -1,11 +1,16 @@
-//! Single source of truth for what a configured AI provider/model can do.
-//! Frontend routing, conversational deadlines, Flow Step timeouts, and the
-//! media-fetch policy all read from this struct so settings changes take
-//! effect on the next new Flow / Run.
+//! Resolves what a configured AI provider/model can do. Frontend routing,
+//! conversational deadlines, Flow Step timeouts, and the media-fetch policy
+//! all read from this struct so settings changes take effect on the next new
+//! Flow / Run.
+//!
+//! The provider facts themselves live in [`super::registry`]; this module only
+//! applies the per-config overlays on top of them (an explicit `custom`
+//! declaration, model-class exceptions, and deadline validation).
 
 use serde::Serialize;
 
 use super::config::{AiConfig, AiProviderConfig, ProviderCapabilityDeclaration};
+use super::registry::{self, Modality};
 
 const DEFAULT_CHAT_DEADLINE_MS: u64 = 120_000;
 const DEFAULT_FLOW_DEADLINE_MS: u64 = 180_000;
@@ -49,46 +54,42 @@ pub enum MediaCapability {
     MusicGeneration,
 }
 
+impl MediaCapability {
+    fn modality(self) -> Modality {
+        match self {
+            MediaCapability::ImageGeneration => Modality::Image,
+            MediaCapability::TtsGeneration => Modality::Tts,
+            MediaCapability::MusicGeneration => Modality::Music,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            MediaCapability::ImageGeneration => "图片生成",
+            MediaCapability::TtsGeneration => "语音生成",
+            MediaCapability::MusicGeneration => "音乐生成",
+        }
+    }
+}
+
 pub fn require_media_capability(
     config: &AiProviderConfig,
     required: MediaCapability,
 ) -> Result<(), String> {
-    let provider = config.provider.trim().to_ascii_lowercase();
-    let supported = match required {
-        MediaCapability::ImageGeneration => matches!(
-            provider.as_str(),
-            "openai"
-                | "custom"
-                | "zhipu"
-                | "siliconflow"
-                | "midjourney"
-                | "volcengine"
-                | "aliyun"
-                | "gemini"
-                | "sd-webui"
-        ),
-        MediaCapability::TtsGeneration => matches!(
-            provider.as_str(),
-            "openai" | "custom" | "elevenlabs" | "aliyun" | "volcengine"
-        ),
-        MediaCapability::MusicGeneration => {
-            matches!(provider.as_str(), "openai" | "custom" | "siliconflow")
-        }
-    };
-    let label = match required {
-        MediaCapability::ImageGeneration => "图片生成",
-        MediaCapability::TtsGeneration => "语音生成",
-        MediaCapability::MusicGeneration => "音乐生成",
-    };
-    if !supported {
-        return Err(format!(
+    let label = required.label();
+    let spec = registry::modality_spec(&config.provider, required.modality()).ok_or_else(|| {
+        format!(
             "当前媒体供应商 '{}' 未声明支持{label}；请更换供应商、允许本地素材降级，或禁用素材步骤",
             config.provider.trim()
-        ));
-    }
-    if provider == "custom" && config.base_url.trim().is_empty() {
+        )
+    })?;
+    // Providers without a built-in endpoint cannot be reached at all until the
+    // user supplies one, so surface that here rather than letting the request
+    // fail against a half-built URL.
+    if spec.needs_base_url() && config.base_url.trim().is_empty() {
         return Err(format!(
-            "自定义{label}端点未填写 Base URL；请填写真实接口地址或允许本地素材降级"
+            "{label}供应商 '{}' 未填写 Base URL；请填写真实接口地址或允许本地素材降级",
+            config.provider.trim()
         ));
     }
     Ok(())
@@ -116,21 +117,19 @@ impl ProviderCapability {
 /// next Run, not the singleton Orchestrator's startup snapshot.
 pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, String> {
     let provider = config.provider.trim().to_ascii_lowercase();
+    if provider.is_empty() {
+        return Err("尚未选择 AI 供应商".to_string());
+    }
     let model = config.model.trim().to_ascii_lowercase();
-    let mut capability = match provider.as_str() {
-        "openai" => builtin(true, true, true, true, 180_000),
-        "anthropic" => builtin(true, false, true, false, 180_000),
-        "gemini" => builtin(true, true, true, true, 180_000),
-        "deepseek" => builtin(true, true, true, false, 180_000),
-        "groq" | "xai" | "cohere" => builtin(true, true, true, false, 120_000),
-        "ollama" => builtin(false, true, false, false, 600_000),
-        "aliyun" | "volcengine" | "zhipu" | "siliconflow" | "elevenlabs" => {
-            builtin(false, false, true, true, 600_000)
-        }
-        "sd-webui" | "comfyui" | "edge-tts" => builtin(false, false, false, false, 900_000),
-        "custom" => from_custom(config.capabilities.as_ref()),
-        "" => return Err("尚未选择 AI 供应商".to_string()),
-        _ => return Err(format!("未知 AI 供应商：{}", config.provider.trim())),
+    let spec = registry::find(&provider)
+        .ok_or_else(|| format!("未知 AI 供应商：{}", config.provider.trim()))?;
+
+    // `custom` is the one provider whose capabilities the table cannot know,
+    // so the user's own declaration wins there.
+    let mut capability = if provider == "custom" {
+        from_custom(config.capabilities.as_ref())
+    } else {
+        builtin(&spec.capability)
     };
 
     // Reasoning-only DeepSeek models do not accept tool definitions even
@@ -142,20 +141,14 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
     Ok(capability)
 }
 
-fn builtin(
-    chat_tools: bool,
-    json_mode: bool,
-    streaming_cancellation: bool,
-    media_url_output: bool,
-    flow_step_deadline_ms: u64,
-) -> ProviderCapability {
+fn builtin(spec: &registry::CapabilitySpec) -> ProviderCapability {
     ProviderCapability {
-        chat_tools,
-        json_mode,
-        streaming_cancellation,
-        media_url_output,
+        chat_tools: spec.chat_tools,
+        json_mode: spec.json_mode,
+        streaming_cancellation: spec.streaming_cancellation,
+        media_url_output: spec.media_url_output,
         chat_deadline_ms: DEFAULT_CHAT_DEADLINE_MS,
-        flow_step_deadline_ms,
+        flow_step_deadline_ms: spec.flow_step_deadline_ms,
         media_fetch_deadline_ms: DEFAULT_MEDIA_FETCH_DEADLINE_MS,
     }
 }
@@ -211,6 +204,61 @@ mod tests {
             api_key: String::new(),
             base_url: String::new(),
             capabilities: None,
+        }
+    }
+
+    /// The settings pickers are generated from the registry, so anything a
+    /// user can select must also resolve to a capability. A provider listed in
+    /// a picker but missing from the capability path used to surface as
+    /// "未知 AI 供应商" only once the user actually ran a generation.
+    #[test]
+    fn every_selectable_provider_resolves_a_capability() {
+        for modality in [
+            Modality::Chat,
+            Modality::Image,
+            Modality::Tts,
+            Modality::Music,
+        ] {
+            for option in registry::options_for(modality) {
+                let resolved = capability_for_config(&config(&option.value, &option.default_model));
+                assert!(
+                    resolved.is_ok(),
+                    "{} is selectable but has no capability: {:?}",
+                    option.value,
+                    resolved.err()
+                );
+            }
+        }
+    }
+
+    /// Every media provider the pickers offer must pass its own modality gate
+    /// once a key and (where required) a Base URL are present. Otherwise the
+    /// UI would offer a choice that the pipeline rejects before running.
+    #[test]
+    fn every_selectable_media_provider_passes_its_own_gate() {
+        for (modality, required) in [
+            (Modality::Image, MediaCapability::ImageGeneration),
+            (Modality::Tts, MediaCapability::TtsGeneration),
+            (Modality::Music, MediaCapability::MusicGeneration),
+        ] {
+            for option in registry::options_for(modality) {
+                let cfg = AiProviderConfig {
+                    provider: option.value.clone(),
+                    model: option.default_model.clone(),
+                    api_key: "key".to_string(),
+                    base_url: if option.needs_base_url {
+                        "https://gateway.test/v1".to_string()
+                    } else {
+                        String::new()
+                    },
+                };
+                assert!(
+                    require_media_capability(&cfg, required).is_ok(),
+                    "{} is selectable for {:?} but fails its own gate",
+                    option.value,
+                    modality
+                );
+            }
         }
     }
 
