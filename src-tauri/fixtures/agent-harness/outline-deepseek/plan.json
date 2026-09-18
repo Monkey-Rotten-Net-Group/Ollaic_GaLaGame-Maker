@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "prompt": "写一个关于夏天与秘密的校园故事，三章，带一次分支选择",
+  "synopsis": "转学生在即将拆除的旧校舍里听见不存在的回声，遇见似乎知道真相的少女，两人在夏天结束前必须决定是否揭开回声的来历。",
+  "memory": {
+    "worldbook": "故事发生在一所即将拆除的沿海高中。旧校舍被封了十年，据说十年前那里发生过一起没有结论的事故。",
+    "glossary": { "回声": "只有少数人能听见的声音残留", "静默协议": "校方对旧校舍事故的封口约定" }
+  },
+  "chapters": [], "characters": [], "scenePlans": [],
+  "branches": { "entryScene": "", "edges": [] },
+  "sceneDrafts": [], "assetPlan": [], "scenes": [], "pipelineRuns": []
+}

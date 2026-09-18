@@ -12,6 +12,7 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 | [参考资料上传](./reference-uploads.md) | 上传本地文本供 AI 取材、存储位置与安全边界、只读参考工具 |
 | [AI 素材与立绘生成](./media-generation.md) | 图像生成、TTS 语音生成、进度反馈、分模态配置 |
 | [供应商与模型配置](./providers.md) | Chat/Image/TTS 三类供应商与模型、连接测试、调用日志 |
+| [agent-harness 调试与回归](./agent-harness.md) | 命令行驱动真实 AI 链路、供应商排查、单 Agent 试跑、录制/离线重放与 CI 回归 |
 
 ## 总览
 
@@ -24,6 +25,7 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 
 ## 相关源码
 
+- `src-tauri/src/agent_harness/` — `agent-harness` CLI：无界面驱动上述真实链路、cassette 录制与重放
 - `src-tauri/src/agents/` — P1 多 Agent 内容生成、结构校验与 WebGAL 编译
 - `src-tauri/src/pipeline/` — Agent Flow 编排、恢复、历史与 StoryPlan 更新
 - [`../agent-flow-contracts.md`](../agent-flow-contracts.md) — 节点输入输出、引用、校验与恢复契约

@@ -77,3 +77,8 @@ jobs:
 
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # Replays recorded provider output through the real agents, offline.
+      # Also the only build that compiles the agent-harness binary.
+      - name: Test agent-harness (cassette replay)
+        run: cargo test --features agent-harness --manifest-path src-tauri/Cargo.toml
