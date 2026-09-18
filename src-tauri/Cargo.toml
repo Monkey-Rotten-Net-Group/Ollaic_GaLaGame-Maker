@@ -3,6 +3,15 @@ name = "ollaic"
 version = "0.1.0"
 description = "A Tauri desktop shell for Ollaic GaLaGame Maker"
 edition = "2021"
+default-run = "ollaic"
+
+[lib]
+name = "ollaic"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ollaic"
+path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

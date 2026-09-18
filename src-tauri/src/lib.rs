@@ -1,0 +1,269 @@
+//! Ollaic library crate.
+//!
+//! The Tauri desktop app (`src/main.rs`) is a thin shell over [`run`]. Keeping
+//! every module in a lib target lets auxiliary binaries drive the same code
+//! paths without starting a window.
+
+// Modules stay crate-private: the app's internals should not become a
+// published API just because the crate grew a lib target.
+pub(crate) mod agents;
+pub(crate) mod ai;
+pub(crate) mod asset_queue;
+pub(crate) mod assets;
+pub(crate) mod characters;
+pub(crate) mod flow_edit_lock;
+pub(crate) mod json_store;
+pub(crate) mod matting;
+pub(crate) mod pipeline;
+pub(crate) mod project_lock;
+pub(crate) mod story_plan;
+pub(crate) mod webgal;
+
+use pipeline::commands::Orchestrator;
+use std::path::PathBuf;
+use tauri::Manager;
+use webgal::runtime_manager::{self, RuntimeInfo};
+use webgal::runtime_server::RuntimeServer;
+
+const DEFAULT_WEBGAL_VERSION: &str = "4.6.0";
+
+#[tauri::command]
+async fn get_runtime_url(server: tauri::State<'_, RuntimeServer>) -> Result<String, String> {
+    Ok(server.url())
+}
+
+#[tauri::command]
+async fn set_runtime_project(
+    server: tauri::State<'_, RuntimeServer>,
+    project_path: Option<String>,
+) -> Result<(), String> {
+    server.set_project(project_path.map(PathBuf::from)).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_runtime_template_dir(
+    server: tauri::State<'_, RuntimeServer>,
+    template_dir: String,
+) -> Result<(), String> {
+    let path = PathBuf::from(template_dir);
+    if !path.exists() {
+        return Err(format!(
+            "WebGAL template directory not found: {}",
+            path.display()
+        ));
+    }
+    server.set_template_dir(path).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn runtime_broadcast(
+    server: tauri::State<'_, RuntimeServer>,
+    message: String,
+) -> Result<(), String> {
+    server.broadcast(message);
+    Ok(())
+}
+
+#[tauri::command]
+fn open_in_browser(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd")
+        .args(["/C", "start", "", &url])
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    result.map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_runtime_info(server: tauri::State<'_, RuntimeServer>) -> Result<RuntimeInfo, String> {
+    let dir = server.template_dir().await;
+    Ok(runtime_manager::read_info(&dir))
+}
+
+fn user_install_target(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("runtime/WebGAL_Template"))
+}
+
+#[tauri::command]
+async fn install_runtime(
+    app: tauri::AppHandle,
+    server: tauri::State<'_, RuntimeServer>,
+    version: Option<String>,
+) -> Result<RuntimeInfo, String> {
+    let version = version.unwrap_or_else(|| DEFAULT_WEBGAL_VERSION.to_string());
+    let target = user_install_target(&app)?;
+    runtime_manager::install(&version, &target).await?;
+    server.set_template_dir(target.clone()).await;
+    Ok(runtime_manager::read_info(&target))
+}
+
+fn resolve_template_dir(app: &tauri::AppHandle) -> PathBuf {
+    // 1. Explicit override (debug builds, custom setups).
+    if let Ok(p) = std::env::var("WEBGAL_TEMPLATE_DIR") {
+        return PathBuf::from(p);
+    }
+    // 2. User-installed runtime (via Settings → 安装/重装).
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let candidate = data_dir.join("runtime/WebGAL_Template");
+        if candidate.join("index.html").is_file() {
+            return candidate;
+        }
+    }
+    // 3. Source tree path (dev builds — populated by scripts/setup-runtime.sh).
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/WebGAL_Template");
+    if dev_path.join("index.html").is_file() {
+        return dev_path;
+    }
+    // 4. Last-resort legacy path.
+    dirs::home_dir()
+        .map(|h| h.join("Downloads/webgal/WebGAL/assets/templates/WebGAL_Template"))
+        .unwrap_or_else(|| PathBuf::from("./WebGAL_Template"))
+}
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let template_dir = resolve_template_dir(app.handle());
+            if !template_dir.exists() {
+                eprintln!(
+                    "[main] WebGAL template missing: {} — run scripts/setup-runtime.sh or set WEBGAL_TEMPLATE_DIR",
+                    template_dir.display()
+                );
+            }
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match RuntimeServer::start(template_dir).await {
+                    Ok(server) => {
+                        handle.manage(server);
+                    }
+                    Err(e) => {
+                        eprintln!("[main] failed to start runtime server: {e}");
+                    }
+                }
+            });
+            app.manage(Orchestrator::new(app.handle()));
+            app.manage(ai::chat_runs::ChatRunRegistry::new());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            // Scene parsing & serialization
+            webgal::commands::parse_scene,
+            webgal::commands::serialize_scene,
+            webgal::commands::load_scene,
+            webgal::commands::save_scene,
+            webgal::commands::list_scenes,
+            webgal::commands::read_file_text,
+            webgal::commands::write_file_text,
+            webgal::commands::delete_scene,
+            webgal::commands::rename_scene,
+            // Project management
+            webgal::project::init_project,
+            webgal::project::open_project,
+            webgal::project::save_config,
+            webgal::project::get_scene_path,
+            webgal::project::create_scene,
+            webgal::project::export_project,
+            webgal::project::read_project_memory,
+            webgal::project::save_project_memory,
+            webgal::project::read_project_metadata,
+            webgal::project::save_project_metadata,
+            webgal::project::create_project_snapshot,
+            webgal::project::list_project_snapshots,
+            webgal::project::rename_project_snapshot,
+            webgal::project::delete_project_snapshot,
+            webgal::project::restore_project_snapshot,
+            // Runtime preview server
+            get_runtime_url,
+            set_runtime_project,
+            set_runtime_template_dir,
+            runtime_broadcast,
+            open_in_browser,
+            get_runtime_info,
+            install_runtime,
+            // AI
+            ai::commands::get_ai_config,
+            ai::commands::set_ai_config,
+            ai::commands::get_ai_provider_capability,
+            ai::commands::get_ai_image_config,
+            ai::commands::set_ai_image_config,
+            ai::commands::get_ai_tts_config,
+            ai::commands::set_ai_tts_config,
+            ai::commands::get_ai_music_config,
+            ai::commands::set_ai_music_config,
+            ai::commands::validate_ai_config,
+            ai::commands::ai_generate_image,
+            ai::commands::ai_generate_tts,
+            ai::commands::generate_music,
+            ai::commands::ai_chat_stream,
+            ai::commands::ai_chat_turn_owned,
+            ai::commands::ai_chat_cancel,
+            ai::commands::list_ai_logs,
+            ai::commands::clear_ai_logs,
+            ai::commands::get_ai_log_path,
+            ai::commands::get_ai_agent_trace_path,
+            ai::commands::append_ai_agent_trace,
+            ai::change_set::apply_ai_change_set,
+            ai::commands::generate_batch_tts,
+            asset_queue::commands::asset_queue_get,
+            asset_queue::commands::asset_queue_preview_artifact,
+            asset_queue::commands::asset_queue_delete_artifact,
+            asset_queue::commands::asset_queue_promote_artifact,
+            // AI reference uploads
+            ai::uploads::list_ai_uploads,
+            ai::uploads::import_ai_upload,
+            ai::uploads::read_ai_upload,
+            ai::uploads::delete_ai_upload,
+            // Matting (background removal)
+            matting::commands::remove_background,
+            // Assets
+            assets::commands::list_assets,
+            assets::commands::list_all_assets,
+            assets::commands::import_asset,
+            assets::commands::save_generated_asset,
+            assets::commands::delete_asset,
+            assets::commands::rename_asset,
+            assets::commands::find_asset_usages,
+            assets::commands::load_asset_metadata,
+            assets::commands::save_asset_metadata,
+            assets::commands::sync_scene_voice_cards,
+            assets::commands::fill_voice_card,
+            assets::commands::delete_voice_card,
+            // Characters
+            characters::commands::list_characters,
+            characters::commands::get_character,
+            characters::commands::create_character,
+            characters::commands::update_character,
+            characters::commands::delete_character,
+            characters::commands::list_character_names,
+            characters::commands::save_characters,
+            // V2 Pipeline (Agent Flow)
+            pipeline::commands::pipeline_start,
+            pipeline::commands::pipeline_pause,
+            pipeline::commands::pipeline_resume,
+            pipeline::commands::pipeline_stop,
+            pipeline::commands::pipeline_step_once,
+            pipeline::commands::pipeline_resume_run,
+            pipeline::commands::pipeline_retry_step,
+            pipeline::commands::pipeline_skip_step,
+            pipeline::commands::pipeline_update_dependencies,
+            pipeline::commands::pipeline_update_step_prompt,
+            pipeline::commands::pipeline_set_run_pinned,
+            pipeline::commands::pipeline_clear_run_history,
+            pipeline::commands::pipeline_export_run_history,
+            pipeline::commands::pipeline_get_state,
+            pipeline::commands::pipeline_get_plan,
+            pipeline::commands::pipeline_list_runs,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
