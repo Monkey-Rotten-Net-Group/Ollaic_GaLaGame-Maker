@@ -1,11 +1,16 @@
 //! Ollaic library crate.
 //!
 //! The Tauri desktop app (`src/main.rs`) is a thin shell over [`run`]. Keeping
-//! every module in a lib target lets auxiliary binaries drive the same code
-//! paths without starting a window.
+//! every module in a lib target lets auxiliary binaries — notably the
+//! `agent-harness` CLI behind the feature of the same name — drive the same
+//! code paths without starting a window.
 
-// Modules stay crate-private: the app's internals should not become a
-// published API just because the crate grew a lib target.
+// Only `agent_harness` is reachable from outside the crate;
+// `src/bin/agent-harness.rs` is its sole consumer. Everything else stays
+// crate-private so the app's internals do not become a published API just
+// because a second binary exists.
+#[cfg(feature = "agent-harness")]
+pub mod agent_harness;
 pub(crate) mod agents;
 pub(crate) mod ai;
 pub(crate) mod asset_queue;

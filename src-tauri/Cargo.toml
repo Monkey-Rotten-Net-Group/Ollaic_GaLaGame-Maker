@@ -3,6 +3,8 @@ name = "ollaic"
 version = "0.1.0"
 description = "A Tauri desktop shell for Ollaic GaLaGame Maker"
 edition = "2021"
+# Two bin targets exist once the `agent-harness` feature is on; name the app
+# explicitly so `cargo run` is never ambiguous.
 default-run = "ollaic"
 
 [lib]
@@ -13,11 +15,23 @@ path = "src/lib.rs"
 name = "ollaic"
 path = "src/main.rs"
 
+# `agent-harness`: headless CLI over the same AI code paths. Feature-gated so a
+# normal `cargo build` / `tauri build` never pulls clap or sha2 into the app.
+[[bin]]
+name = "agent-harness"
+path = "src/bin/agent-harness.rs"
+required-features = ["agent-harness"]
+
+[features]
+agent-harness = ["dep:clap", "dep:sha2"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 ureq = "3.3"
 
 [dependencies]
+clap = { version = "4", features = ["derive"], optional = true }
+sha2 = { version = "0.10", optional = true }
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

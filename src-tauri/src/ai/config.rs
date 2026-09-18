@@ -127,8 +127,20 @@ Use only asset filenames listed by the app. If a required asset is missing, retu
     .to_string()
 }
 
+/// Directory holding every AI config and log file.
+///
+/// `OLLAIC_CONFIG_DIR` overrides the per-user location so headless callers —
+/// the `agent-harness` CLI, CI — can point at a throwaway profile instead of
+/// reading (or clobbering) the desktop app's saved settings.
+pub fn config_root() -> Option<PathBuf> {
+    match std::env::var("OLLAIC_CONFIG_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => Some(PathBuf::from(dir.trim())),
+        _ => Some(dirs::config_dir()?.join(CONFIG_DIR)),
+    }
+}
+
 fn config_path(file_name: &str) -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join(CONFIG_DIR).join(file_name))
+    Some(config_root()?.join(file_name))
 }
 
 pub fn load_config() -> AiConfig {
@@ -201,16 +213,14 @@ fn save_provider_config(file_name: &str, config: &AiProviderConfig) -> Result<()
 }
 
 pub fn log_path() -> Result<PathBuf, String> {
-    Ok(dirs::config_dir()
+    Ok(config_root()
         .ok_or_else(|| "Unable to locate user config directory".to_string())?
-        .join(CONFIG_DIR)
         .join(LOG_FILE))
 }
 
 pub fn agent_trace_path() -> Result<PathBuf, String> {
-    Ok(dirs::config_dir()
+    Ok(config_root()
         .ok_or_else(|| "Unable to locate user config directory".to_string())?
-        .join(CONFIG_DIR)
         .join(AGENT_TRACE_FILE))
 }
 

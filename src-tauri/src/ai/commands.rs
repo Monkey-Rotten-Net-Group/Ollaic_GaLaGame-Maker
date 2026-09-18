@@ -1076,7 +1076,7 @@ fn default_chat_endpoint(provider: &str) -> Option<&'static str> {
     }
 }
 
-fn effective_endpoint(cfg: &AiConfig) -> String {
+pub(crate) fn effective_endpoint(cfg: &AiConfig) -> String {
     if !cfg.base_url.trim().is_empty() {
         return cfg.base_url.trim().to_string();
     }
@@ -1085,7 +1085,7 @@ fn effective_endpoint(cfg: &AiConfig) -> String {
         .to_string()
 }
 
-fn media_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
+pub(crate) fn media_endpoint(cfg: &AiProviderConfig, path: &str) -> String {
     let configured_base = cfg.base_url.trim();
     let should_use_configured_base =
         !configured_base.is_empty() && !is_placeholder_base_url(configured_base);
@@ -2336,7 +2336,10 @@ fn sanitize_log_field(value: &str) -> String {
     truncate_log_field(&redact_common_secrets(value))
 }
 
-fn redact_known_secret(value: &str, secret: &str) -> String {
+/// Replace a known secret (typically the configured API key) wherever it
+/// appears. Also used by the `agent-harness` cassette writer, which must never
+/// persist credentials into a fixture.
+pub(crate) fn redact_known_secret(value: &str, secret: &str) -> String {
     let secret = secret.trim();
     if secret.is_empty() {
         value.to_string()
@@ -2345,7 +2348,10 @@ fn redact_known_secret(value: &str, secret: &str) -> String {
     }
 }
 
-fn redact_common_secrets(value: &str) -> String {
+/// Blank out credential-shaped substrings (`bearer …`, `api_key=…`, …).
+/// Shared with the `agent-harness` cassette writer; unlike [`sanitize_log_field`] it
+/// does not truncate, because a cassette must keep the full prompt to replay.
+pub(crate) fn redact_common_secrets(value: &str) -> String {
     let mut output = value.to_string();
     for marker in [
         "authorization=bearer ",
