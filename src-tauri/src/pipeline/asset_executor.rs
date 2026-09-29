@@ -85,14 +85,17 @@ struct ConfiguredAssetGenerator {
 
 impl AssetGenerator for ConfiguredAssetGenerator {
     fn preflight(&self, task: &AssetTask) -> Result<(), String> {
+        // BGM/SFX are deliberately manual-only. This check must run before
+        // the local-fallback shortcut so fallback mode cannot bind a silent
+        // placeholder as if it were a real user-selected audio asset.
+        if task.kind == AssetKind::Bgm || task.kind == AssetKind::Sfx {
+            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
+        }
         if self.local_fallback {
             return Ok(());
         }
         if task.kind == AssetKind::Figure {
             require_figure_matting_model(&self.figure_matting_model)?;
-        }
-        if task.kind == AssetKind::Bgm || task.kind == AssetKind::Sfx {
-            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
         }
         let (config, label, required) = match task.kind {
             AssetKind::Background | AssetKind::Figure => (
@@ -279,8 +282,11 @@ impl AssetGenerator for PlaceholderAssetGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model};
+    use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model, AssetGeneratorFactory, ConfiguredAssetGeneratorFactory};
     use crate::ai::config::AiProviderConfig;
+    use crate::asset_queue::{AssetKind, AssetTask};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
     use crate::ai::provider_capability::MediaCapability;
     use std::path::PathBuf;
 
@@ -324,5 +330,28 @@ mod tests {
         assert!(error.contains("立绘抠图能力不可用"));
         assert!(error.contains("model file not found"));
         assert!(require_figure_matting_model(&Ok(PathBuf::from("model.onnx"))).is_ok());
+    }
+
+    #[test]
+    fn manual_audio_stays_pending_even_when_local_fallback_is_allowed() {
+        let factory = ConfiguredAssetGeneratorFactory::new(Ok(PathBuf::from("model.onnx")));
+        let generator = factory.create(true, Arc::new(AtomicBool::new(false)));
+        let task = AssetTask {
+            id: "bgm_theme".into(),
+            kind: AssetKind::Bgm,
+            target_stem: "theme".into(),
+            prompt: "epic theme".into(),
+            scene_ref: None,
+            character_ref: None,
+            emotion: None,
+            dialogue_index: None,
+            text: None,
+            status: Default::default(),
+            attempts: Vec::new(),
+            asset_file: None,
+            error: None,
+            used_local_fallback: false,
+        };
+        assert!(generator.preflight(&task).unwrap_err().contains("手动导入"));
     }
 }

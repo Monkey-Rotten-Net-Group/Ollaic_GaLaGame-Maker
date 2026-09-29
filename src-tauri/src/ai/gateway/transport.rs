@@ -50,7 +50,7 @@ pub fn resolved_base_url(provider: &str, modality: Modality, base_url: &str) -> 
 }
 
 /// Join the resolved base URL with an API path. The only URL builder for
-/// image/TTS/music requests, so a provider's endpoint cannot differ between
+/// image/TTS requests, so a provider's endpoint cannot differ between
 /// the request and the log line.
 pub fn media_endpoint(cfg: &AiProviderConfig, modality: Modality, path: &str) -> String {
     let base = resolved_base_url(&cfg.provider, modality, &cfg.base_url);

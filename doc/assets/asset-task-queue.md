@@ -11,7 +11,7 @@ P2 的 AssetTaskQueue 在 Agent Flow 完成 SceneScript 后执行，把 AssetPla
 
 ## 调度与绑定
 
-- 默认并发上限为 2 个图片、4 个 TTS、1 个音乐任务，三类任务分别限流。
+- 默认并发上限为 2 个图片、4 个 TTS、1 个音频任务，三类任务分别限流。音频任务中的 BGM/音效只生成本地占位或等待用户导入，不调用 AI 音乐端点；队列文件中的 `limits.music` 是历史兼容字段。
 - 背景、BGM、音效和立绘通过 WebGAL parser / serializer 写入 Scene；TTS 按 Scene 对白序号写入语音引用。
 - 立绘同时更新 `game/config/characters.json`，所有生成素材同步写入素材元数据。
 - FlowBoard 的 `assetQueue` Step 显示完成比例、失败数、prompt、目标 Scene / 角色和重试记录；候选 Artifact 可直接预览、删除或手动提升并绑定为正式素材。
@@ -25,5 +25,5 @@ P2 的 AssetTaskQueue 在 Agent Flow 完成 SceneScript 后执行，把 AssetPla
 ## 相关源码
 
 - `src-tauri/src/asset_queue/` — 队列持久化、调度、Artifact 与自动绑定
-- `src-tauri/src/ai/commands.rs` — 队列复用的图片、TTS、音乐生成入口
+- `src-tauri/src/ai/commands.rs` — 队列复用的图片与 TTS 生成入口
 - `design/src/app/components/FlowBoard.tsx`、`FlowStepInspector.tsx` — 进度与任务详情
