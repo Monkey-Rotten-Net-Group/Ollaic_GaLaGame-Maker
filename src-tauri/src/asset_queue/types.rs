@@ -90,6 +90,8 @@ pub struct AssetTask {
 pub struct QueueLimits {
     pub image: usize,
     pub tts: usize,
+    /// Legacy JSON key retained for queue compatibility. It limits manual
+    /// audio tasks (BGM/SFX) and is never an AI music generation limit.
     pub music: usize,
     pub max_retries: u32,
 }

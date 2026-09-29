@@ -71,6 +71,7 @@ fn validate_queue(queue: &AssetQueue) -> Result<(), String> {
     for (field, value) in [
         ("image", queue.limits.image),
         ("tts", queue.limits.tts),
+        // `music` is a legacy persisted key; it limits manual BGM/SFX tasks.
         ("music", queue.limits.music),
     ] {
         if value == 0 {

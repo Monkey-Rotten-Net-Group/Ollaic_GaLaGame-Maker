@@ -33,8 +33,7 @@ use crate::ai::provider_capability::{require_media_capability, MediaCapability};
 use crate::ai::registry::Modality;
 use adaptors::adaptor_for;
 use types::{
-    AiMediaGenerationProgress, GeneratedMedia, ImageReference, ImageRequest, MusicRequest,
-    TtsRequest,
+    AiMediaGenerationProgress, GeneratedMedia, ImageReference, ImageRequest, TtsRequest,
 };
 
 /// Everything an adaptor needs beyond its request: the resolved provider
@@ -113,33 +112,6 @@ pub async fn generate_tts(
     resolve(&cfg, Modality::Tts)?.tts(&ctx, &request).await
 }
 
-/// Generate background music with the saved music provider.
-pub async fn generate_music(
-    prompt: &str,
-    model: &str,
-    format: &str,
-) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_music_config();
-    let model = prepare(
-        &cfg,
-        model,
-        prompt,
-        Modality::Music,
-        "音乐",
-        "音乐生成描述",
-    )?;
-    let ctx = MediaCtx {
-        cfg: &cfg,
-        app_handle: None,
-    };
-    let request = MusicRequest {
-        model: &model,
-        prompt,
-        format: types::normalize_audio_format(format),
-    };
-    resolve(&cfg, Modality::Music)?.music(&ctx, &request).await
-}
-
 /// Reusable TTS entry for callers that already hold a config and want to
 /// generate many clips without re-reading it from disk on every item.
 pub async fn generate_tts_with(
@@ -190,7 +162,6 @@ fn media_capability(modality: Modality) -> MediaCapability {
     match modality {
         Modality::Image => MediaCapability::ImageGeneration,
         Modality::Tts => MediaCapability::TtsGeneration,
-        Modality::Music => MediaCapability::MusicGeneration,
         Modality::Video => unreachable!("video uses its asynchronous provider gateway"),
         Modality::Chat => unreachable!("chat does not route through the media gateway"),
     }

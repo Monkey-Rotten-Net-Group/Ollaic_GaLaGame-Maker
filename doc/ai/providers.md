@@ -1,6 +1,6 @@
 # 供应商与模型配置
 
-`AiSettingsDialog` 提供 **Chat / Image / TTS / Music 四个标签页**，每类可独立选择供应商、模型、API Key，并可为自建/兼容端点设置 Base URL。Chat 标签页带「测试连接」实时校验。
+`AiSettingsDialog` 提供 **Chat / Image / TTS 三个标签页**，每类可独立选择供应商、模型、API Key，并可为自建/兼容端点设置 Base URL。Chat 标签页带「测试连接」实时校验。
 
 ## 供应商清单来自后端
 
@@ -24,10 +24,6 @@ OpenAI TTS、ElevenLabs、阿里云 DashScope / CosyVoice、火山引擎 / 豆�
 
 > CosyVoice 走 WebSocket 协议，Qwen-TTS 走 HTTP；Sambert 系列协议更老，未适配。
 
-### Music
-
-custom（OpenAI 兼容音乐端点）、OpenAI 兼容、SiliconFlow。
-
 ## Base URL 与 API Key
 
 - **Base URL 留空**时使用该供应商在 registry 中的内置端点。只有内置端点为空的供应商（custom、Midjourney Proxy）才必须填写，UI 会在提示里注明「必填」。
@@ -36,18 +32,18 @@ custom（OpenAI 兼容音乐端点）、OpenAI 兼容、SiliconFlow。
 
 ## 配置存储与保存时机
 
-供应商配置是**全局的，不按项目隔离**：存放在用户配置目录 `<config>/ollaic/` 下的 `ai.json`、`ai-image.json`、`ai-tts.json`、`ai-music.json`，所有项目共用同一份。
+供应商配置是**全局的，不按项目隔离**：存放在用户配置目录 `<config>/ollaic/` 下的 `ai.json`、`ai-image.json`、`ai-tts.json`，所有项目共用同一份。
 
 对话框每次打开都从磁盘重新读取，因此未保存的草稿会被丢弃。为避免"填好、测通、忘了保存"导致配置丢失：
 
 - **聊天标签页的「测试连接」成功后会自动保存该配置**，并在成功提示里注明「已自动保存」。
 - 任何后续编辑（改 Key/模型/供应商）会清除验证结果与自动保存标记，需要重新验证或点底部「保存」。
-- 图片 / 音频 / 音乐标签页仍以底部「保存」为准。
+- 图片 / 音频标签页仍以底部「保存」为准。
 - 保存的供应商如果在后续版本中被移除，打开对话框时会自动回退到该标签页的第一个可选供应商。
 
 ## 调用日志
 
-`listAiLogs` / `clearAiLogs` 记录供应商、模型、动作（chat/image/tts/music）、端点、成功/失败与消息；可查看最近 80 条并清空。写入前会对 Key、Token、Authorization 做脱敏。
+`listAiLogs` / `clearAiLogs` 记录供应商、模型、动作（chat/image/tts）、端点、成功/失败与消息；可查看最近 80 条并清空。写入前会对 Key、Token、Authorization 做脱敏。
 
 ## 相关源码
 

@@ -52,13 +52,6 @@ pub struct TtsRequest<'a> {
     pub format: &'a str,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct MusicRequest<'a> {
-    pub model: &'a str,
-    pub prompt: &'a str,
-    pub format: &'a str,
-}
-
 /// Progress for long-running media jobs (currently DashScope's async image
 /// task). Emitted on the `ai-media-generation-progress` Tauri event.
 #[derive(Debug, Serialize, Clone)]

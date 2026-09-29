@@ -120,7 +120,10 @@ pub async fn run_queue_cancellable(
     let queue = Arc::new(Mutex::new(queue));
     let image = Arc::new(Semaphore::new(queue.lock().await.limits.image));
     let tts = Arc::new(Semaphore::new(queue.lock().await.limits.tts));
-    let music = Arc::new(Semaphore::new(queue.lock().await.limits.music));
+    // BGM/SFX are manual-import placeholders only. Keep the persisted
+    // `music` limit for backwards compatibility while treating it as the
+    // audio-task concurrency limit.
+    let audio = Arc::new(Semaphore::new(queue.lock().await.limits.music));
     let project_path = project_path.to_path_buf();
     let mut futures = FuturesUnordered::new();
 
@@ -133,7 +136,7 @@ pub async fn run_queue_cancellable(
             match task.kind {
                 AssetKind::Background | AssetKind::Figure => image.clone(),
                 AssetKind::Tts => tts.clone(),
-                AssetKind::Bgm | AssetKind::Sfx => music.clone(),
+                AssetKind::Bgm | AssetKind::Sfx => audio.clone(),
             }
         };
         futures.push(async move {
