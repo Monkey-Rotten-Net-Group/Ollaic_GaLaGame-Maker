@@ -15,14 +15,13 @@
 
 use serde::Serialize;
 
-/// The four kinds of generation the app configures independently. Each has its
+/// The kinds of generation the app configures independently. Each has its
 /// own saved config file and its own provider picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Modality {
     Chat,
     Image,
     Tts,
-    Music,
     Video,
 }
 
@@ -71,7 +70,6 @@ pub struct ProviderSpec {
     pub chat: Option<ModalitySpec>,
     pub image: Option<ModalitySpec>,
     pub tts: Option<ModalitySpec>,
-    pub music: Option<ModalitySpec>,
     pub video: Option<ModalitySpec>,
 }
 
@@ -81,7 +79,6 @@ impl ProviderSpec {
             Modality::Chat => self.chat.as_ref(),
             Modality::Image => self.image.as_ref(),
             Modality::Tts => self.tts.as_ref(),
-            Modality::Music => self.music.as_ref(),
             Modality::Video => self.video.as_ref(),
         }
     }
@@ -277,7 +274,6 @@ const ALIYUN_TTS_MODELS: &[&str] = &[
 
 const VOLCENGINE_TTS_MODELS: &[&str] = &["seed-tts", "seed-tts-2.0", "mega-tts", "doubao-tts"];
 
-const MUSIC_MODELS: &[&str] = &["music-1"];
 const MINIMAX_VIDEO_MODELS: &[&str] = &[
     "MiniMax-Hailuo-2.3",
     "MiniMax-Hailuo-02",
@@ -317,13 +313,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.openai.com/v1",
             base_url_placeholder: "(默认 https://api.openai.com/v1)",
         }),
-        music: Some(ModalitySpec {
-            label: "OpenAI 兼容",
-            default_model: "music-1",
-            models: MUSIC_MODELS,
-            default_base_url: "",
-            base_url_placeholder: "必填，指向 OpenAI 兼容的 /audio/music 接口",
-        }),
         video: None,
     },
     ProviderSpec {
@@ -339,7 +328,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -361,7 +349,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://generativelanguage.googleapis.com/v1beta)",
         }),
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -377,7 +364,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -393,7 +379,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -409,7 +394,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -425,7 +409,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -441,7 +424,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -463,7 +445,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://dashscope.aliyuncs.com/api/v1",
             base_url_placeholder: "(默认 https://dashscope.aliyuncs.com/api/v1)",
         }),
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -486,7 +467,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder:
                 "(默认 https://openspeech.bytedance.com/api/v3/tts/unidirectional)",
         }),
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -502,7 +482,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://open.bigmodel.cn/api/paas/v4)",
         }),
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -518,13 +497,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://api.siliconflow.cn/v1)",
         }),
         tts: None,
-        music: Some(ModalitySpec {
-            label: "SiliconFlow",
-            default_model: "music-1",
-            models: MUSIC_MODELS,
-            default_base_url: "https://api.siliconflow.cn/v1",
-            base_url_placeholder: "(默认 https://api.siliconflow.cn/v1)",
-        }),
         video: None,
     },
     ProviderSpec {
@@ -540,7 +512,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.elevenlabs.io",
             base_url_placeholder: "(默认 https://api.elevenlabs.io)",
         }),
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -556,7 +527,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "必填，Midjourney-Proxy 的 OpenAI 兼容端点",
         }),
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -572,7 +542,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 http://127.0.0.1:7860)",
         }),
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -600,13 +569,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "",
             base_url_placeholder: "必填，OpenAI 兼容的语音接口端点",
         }),
-        music: Some(ModalitySpec {
-            label: "自定义 (OpenAI 兼容音乐端点)",
-            default_model: "music-1",
-            models: MUSIC_MODELS,
-            default_base_url: "",
-            base_url_placeholder: "必填，指向返回音频字节的音乐生成端点",
-        }),
         video: None,
     },
     ProviderSpec {
@@ -616,7 +578,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: None,
         tts: None,
-        music: None,
         video: Some(ModalitySpec {
             label: "MiniMax 视频",
             default_model: "MiniMax-Hailuo-2.3",
@@ -634,7 +595,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
     ProviderSpec {
@@ -644,7 +604,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: None,
         tts: None,
-        music: None,
         video: None,
     },
 ];
@@ -711,7 +670,6 @@ pub struct ProviderCatalog {
     pub chat: Vec<ProviderOption>,
     pub image: Vec<ProviderOption>,
     pub tts: Vec<ProviderOption>,
-    pub music: Vec<ProviderOption>,
     pub video: Vec<ProviderOption>,
 }
 
@@ -739,7 +697,6 @@ pub fn catalog() -> ProviderCatalog {
         chat: options_for(Modality::Chat),
         image: options_for(Modality::Image),
         tts: options_for(Modality::Tts),
-        music: options_for(Modality::Music),
         video: options_for(Modality::Video),
     }
 }
@@ -760,9 +717,7 @@ mod tests {
     #[test]
     fn every_modality_entry_offers_its_default_model() {
         for provider in PROVIDERS {
-            for modality in [
-                Modality::Chat, Modality::Image, Modality::Tts, Modality::Music, Modality::Video,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts, Modality::Video] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -786,9 +741,7 @@ mod tests {
     #[test]
     fn base_url_requirement_matches_the_built_in_default() {
         for provider in PROVIDERS {
-            for modality in [
-                Modality::Chat, Modality::Image, Modality::Tts, Modality::Music, Modality::Video,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts, Modality::Video] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -813,9 +766,7 @@ mod tests {
     #[test]
     fn placeholders_never_contain_the_rejected_example_host() {
         for provider in PROVIDERS {
-            for modality in [
-                Modality::Chat, Modality::Image, Modality::Tts, Modality::Music, Modality::Video,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts, Modality::Video] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -853,7 +804,6 @@ mod tests {
                 Modality::Chat,
                 Modality::Image,
                 Modality::Tts,
-                Modality::Music,
             ] {
                 assert!(
                     modality_spec(retired, modality).is_none(),
@@ -874,6 +824,5 @@ mod tests {
             "midjourney must be selectable"
         );
         assert!(!catalog.tts.is_empty());
-        assert!(!catalog.music.is_empty());
     }
 }

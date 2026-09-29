@@ -1,5 +1,4 @@
-//! OpenAI-compatible adaptor: `/images/generations`, `/audio/speech`, and a
-//! `/audio/music` convention for BGM gateways.
+//! OpenAI-compatible adaptor: `/images/generations` and `/audio/speech`.
 //!
 //! Also covers every provider that speaks the same dialect behind a different
 //! host (Zhipu, SiliconFlow, Volcengine Ark, Midjourney-Proxy, and any
@@ -11,10 +10,10 @@ use serde::Deserialize;
 use crate::ai::media_support::download_generated_media;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{
-    bearer_post, media_endpoint, post_audio_bytes, post_json_text, response_to_generated_media,
+    media_endpoint, post_audio_bytes, post_json_text,
 };
 use crate::ai::gateway::types::{
-    strip_data_url_prefix, GeneratedMedia, ImageRequest, MusicRequest, TtsRequest,
+    strip_data_url_prefix, GeneratedMedia, ImageRequest, TtsRequest,
 };
 use crate::ai::registry::Modality;
 
@@ -123,171 +122,6 @@ pub async fn generate_tts(
     .await
 }
 
-/// BGM generation. Unlike speech, music gateways disagree about whether they
-/// return audio bytes or a JSON envelope, so the Content-Type decides which
-/// path to take rather than assuming one and saving a JSON body as a broken
-/// audio file.
-pub async fn generate_music(
-    cfg: &AiProviderConfig,
-    request: &MusicRequest<'_>,
-) -> Result<GeneratedMedia, String> {
-    let endpoint = media_endpoint(cfg, Modality::Music, "audio/music");
-    // Send both `input` and `prompt` so the same body works across gateways
-    // that name the field differently.
-    let body = serde_json::json!({
-        "model": request.model,
-        "input": request.prompt,
-        "prompt": request.prompt,
-        "response_format": request.format
-    });
-    let body = serde_json::to_string(&body).map_err(|e| format!("序列化音乐生成请求失败: {e}"))?;
-    let response = bearer_post(cfg, &endpoint, body)
-        .send()
-        .await
-        .map_err(|e| format!("音乐生成请求失败: {e}"))?;
-
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let mime = content_type
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-
-    if response.status().is_success() && is_audio_mime(&mime) {
-        return response_to_generated_media(
-            response,
-            cfg,
-            request.model,
-            &endpoint,
-            &crate::ai::gateway::types::extension_from_mime(&mime, request.format),
-            "music_generate",
-        )
-        .await;
-    }
-
-    let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|e| format!("读取音乐生成响应失败: {e}"))?;
-    if !status.is_success() {
-        crate::ai::media_support::log_provider_event(
-            "music_generate",
-            cfg,
-            request.model,
-            &endpoint,
-            false,
-            &text,
-        );
-        return Err(format!("音乐生成失败 ({status}): {text}"));
-    }
-    parse_music_json_response(cfg, request.model, &endpoint, &text, request.format).await
-}
-
-fn is_audio_mime(mime: &str) -> bool {
-    mime.starts_with("audio/") || mime == "application/octet-stream" || mime.starts_with("binary/")
-}
-
-async fn parse_music_json_response(
-    cfg: &AiProviderConfig,
-    model: &str,
-    endpoint: &str,
-    text: &str,
-    fallback_ext: &str,
-) -> Result<GeneratedMedia, String> {
-    let value: serde_json::Value = serde_json::from_str(text)
-        .map_err(|e| format!("解析音乐生成响应失败: {e}; 响应: {}", truncate(text)))?;
-    if let Some(b64) = find_audio_base64(&value) {
-        crate::ai::media_support::log_provider_event(
-            "music_generate",
-            cfg,
-            model,
-            endpoint,
-            true,
-            "music generated (base64)",
-        );
-        return Ok(GeneratedMedia {
-            base64_data: strip_data_url_prefix(&b64).to_string(),
-            extension: fallback_ext.to_string(),
-        });
-    }
-    if let Some(url) = find_audio_url(&value) {
-        return download_generated_media(cfg, model, endpoint, &url, fallback_ext, "music_generate")
-            .await;
-    }
-    crate::ai::media_support::log_provider_event("music_generate", cfg, model, endpoint, false, text);
-    Err(format!(
-        "音乐生成响应中未找到音频数据。请让自定义端点直接返回音频字节（Content-Type: audio/*），或返回含 data/audio/b64_json/url 字段的 JSON。响应: {}",
-        truncate(text)
-    ))
-}
-
-fn truncate(value: &str) -> String {
-    crate::ai::media_support::truncate_log_field(value)
-}
-
-/// Locate base64-encoded audio in common custom-gateway JSON shapes.
-fn find_audio_base64(v: &serde_json::Value) -> Option<String> {
-    for key in ["b64_json", "audio_base64", "audioContent", "audio", "data"] {
-        if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
-            if !s.starts_with("http") && s.len() > 64 {
-                return Some(s.to_string());
-            }
-        }
-    }
-    if let Some(first) = v
-        .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|a| a.first())
-    {
-        for key in ["b64_json", "audio_base64", "audio"] {
-            if let Some(s) = first.get(key).and_then(|x| x.as_str()) {
-                if !s.starts_with("http") {
-                    return Some(s.to_string());
-                }
-            }
-        }
-    }
-    // DashScope-like multimodal shape.
-    v.pointer("/output/audio/data")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
-}
-
-/// Locate a downloadable audio URL in common custom-gateway JSON shapes.
-fn find_audio_url(v: &serde_json::Value) -> Option<String> {
-    for key in ["url", "audio_url", "output_url"] {
-        if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
-            if s.starts_with("http") {
-                return Some(s.to_string());
-            }
-        }
-    }
-    if let Some(first) = v
-        .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|a| a.first())
-    {
-        for key in ["url", "audio_url"] {
-            if let Some(s) = first.get(key).and_then(|x| x.as_str()) {
-                if s.starts_with("http") {
-                    return Some(s.to_string());
-                }
-            }
-        }
-    }
-    v.pointer("/output/audio/url")
-        .and_then(|x| x.as_str())
-        .filter(|s| s.starts_with("http"))
-        .map(|s| s.to_string())
-}
-
 fn voice_from_prompt(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
     for voice in [
@@ -318,43 +152,5 @@ mod tests {
     fn voice_prompt_maps_onto_a_known_openai_voice() {
         assert_eq!(voice_from_prompt("温柔的 nova 音色"), "nova");
         assert_eq!(voice_from_prompt("没有提到音色"), "alloy");
-    }
-
-    #[test]
-    fn audio_mime_detection_accepts_the_shapes_gateways_actually_send() {
-        assert!(is_audio_mime("audio/mpeg"));
-        assert!(is_audio_mime("application/octet-stream"));
-        assert!(!is_audio_mime("application/json"));
-    }
-
-    #[test]
-    fn base64_audio_is_found_across_common_envelope_shapes() {
-        let long = "A".repeat(80);
-        let flat = serde_json::json!({ "b64_json": long });
-        assert!(find_audio_base64(&flat).is_some());
-
-        let nested = serde_json::json!({ "data": [{ "audio": "QUJD" }] });
-        assert_eq!(find_audio_base64(&nested).as_deref(), Some("QUJD"));
-
-        let dashscope = serde_json::json!({ "output": { "audio": { "data": "QUJD" } } });
-        assert_eq!(find_audio_base64(&dashscope).as_deref(), Some("QUJD"));
-    }
-
-    /// A URL must never be mistaken for base64 payload, or the caller would
-    /// save the URL text as the audio file.
-    #[test]
-    fn a_url_is_never_returned_as_base64() {
-        let value = serde_json::json!({ "url": "https://cdn.test/a.mp3" });
-        assert!(find_audio_base64(&value).is_none());
-        assert_eq!(
-            find_audio_url(&value).as_deref(),
-            Some("https://cdn.test/a.mp3")
-        );
-    }
-
-    #[test]
-    fn non_http_url_fields_are_ignored() {
-        let value = serde_json::json!({ "output": { "audio": { "url": "not-a-url" } } });
-        assert!(find_audio_url(&value).is_none());
     }
 }

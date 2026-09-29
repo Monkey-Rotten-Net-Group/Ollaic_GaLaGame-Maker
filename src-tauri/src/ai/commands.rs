@@ -176,15 +176,6 @@ pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
     config::save_tts_config(&config)
 }
 
-#[tauri::command]
-pub fn get_ai_music_config() -> AiProviderConfig {
-    config::load_music_config()
-}
-
-#[tauri::command]
-pub fn set_ai_music_config(config: AiProviderConfig) -> Result<(), String> {
-    config::save_music_config(&config)
-}
 
 #[tauri::command]
 pub fn get_ai_video_config() -> AiProviderConfig {
@@ -321,25 +312,6 @@ pub(crate) async fn generate_tts_media(
     gateway::generate_tts(&text, &voice_prompt, &model, &format).await
 }
 
-/// Generate background music (BGM) from a text prompt. The configured endpoint
-/// is expected to accept `{model, input, response_format}` and return raw audio
-/// bytes, or a JSON envelope carrying base64 audio or a downloadable URL.
-#[tauri::command]
-pub async fn generate_music(
-    prompt: String,
-    model: String,
-    format: String,
-) -> Result<GeneratedMedia, String> {
-    generate_music_media(prompt, model, format).await
-}
-
-pub(crate) async fn generate_music_media(
-    prompt: String,
-    model: String,
-    format: String,
-) -> Result<GeneratedMedia, String> {
-    gateway::generate_music(&prompt, &model, &format).await
-}
 
 #[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {

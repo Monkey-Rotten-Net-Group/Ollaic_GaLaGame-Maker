@@ -11,7 +11,6 @@ import {
   MessageSquareText,
   Image,
   Volume2,
-  Music,
   Film,
 } from 'lucide-react';
 import {
@@ -28,8 +27,6 @@ import {
   setAiImageConfig,
   getAiTtsConfig,
   setAiTtsConfig,
-  getAiMusicConfig,
-  setAiMusicConfig,
   getAiVideoConfig,
   setAiVideoConfig,
   validateAiConfig,
@@ -38,7 +35,7 @@ import {
   getAiLogPath,
 } from '../lib/ai-ipc';
 
-type AiSettingsTab = 'chat' | 'image' | 'tts' | 'music' | 'video';
+type AiSettingsTab = 'chat' | 'image' | 'tts' | 'video';
 
 // Base URL is deliberately left empty: the backend falls back to the
 // provider's built-in endpoint, and a provider that has none shows the
@@ -93,7 +90,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [imageConfig, setImageConfig] = useState<AiProviderConfig | null>(null);
   const [ttsConfig, setTtsConfig] = useState<AiProviderConfig | null>(null);
-  const [musicConfig, setMusicConfig] = useState<AiProviderConfig | null>(null);
   const [videoConfig, setVideoConfig] = useState<AiProviderConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -120,16 +116,14 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       getAiConfig(),
       getAiImageConfig(),
       getAiTtsConfig(),
-      getAiMusicConfig(),
       getAiVideoConfig(),
     ])
-      .then(([providers, chat, image, tts, music, video]) => {
+      .then(([providers, chat, image, tts, video]) => {
         setCatalog(providers);
         setConfig(chat);
         configRef.current = chat;
         setImageConfig(normalizeConfig(image, providers.image));
         setTtsConfig(normalizeConfig(tts, providers.tts, true));
-        setMusicConfig(normalizeConfig(music, providers.music));
         setVideoConfig(normalizeConfig(video, providers.video));
       })
       .catch((e) => setError(String(e)));
@@ -153,9 +147,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   const updateTts = (patch: Partial<AiProviderConfig>) =>
     setTtsConfig((c) => (c ? { ...c, ...patch } : c));
-
-  const updateMusic = (patch: Partial<AiProviderConfig>) =>
-    setMusicConfig((c) => (c ? { ...c, ...patch } : c));
 
   const updateVideo = (patch: Partial<AiProviderConfig>) =>
     setVideoConfig((c) => (c ? { ...c, ...patch } : c));
@@ -248,7 +239,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   };
 
   const handleSave = async () => {
-    if (!config || !imageConfig || !ttsConfig || !musicConfig || !videoConfig) return;
+    if (!config || !imageConfig || !ttsConfig || !videoConfig) return;
     setSaving(true);
     setError(null);
     try {
@@ -260,7 +251,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
         setAiConfig(config),
         setAiImageConfig(imageConfig),
         setAiTtsConfig(normalizedTtsConfig),
-        setAiMusicConfig(musicConfig),
         setAiVideoConfig(videoConfig),
       ]);
       onSaved?.();
@@ -272,7 +262,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     }
   };
 
-  const loaded = catalog && config && imageConfig && ttsConfig && musicConfig && videoConfig;
+  const loaded = catalog && config && imageConfig && ttsConfig && videoConfig;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -295,7 +285,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
             <TabButton active={activeTab === 'chat'} icon={<MessageSquareText className="h-4 w-4" />} label="聊天" onClick={() => setActiveTab('chat')} />
             <TabButton active={activeTab === 'image'} icon={<Image className="h-4 w-4" />} label="图片" onClick={() => setActiveTab('image')} />
             <TabButton active={activeTab === 'tts'} icon={<Volume2 className="h-4 w-4" />} label="音频" onClick={() => setActiveTab('tts')} />
-            <TabButton active={activeTab === 'music'} icon={<Music className="h-4 w-4" />} label="音乐" onClick={() => setActiveTab('music')} />
             <TabButton active={activeTab === 'video'} icon={<Film className="h-4 w-4" />} label="视频" onClick={() => setActiveTab('video')} />
           </div>
         </div>
@@ -352,16 +341,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   multiModel={false}
                   onUpdate={updateTts}
                   onProviderChange={(value) => handleProviderChange(value, ttsConfig, catalog.tts, updateTts)}
-                />
-              )}
-
-              {activeTab === 'music' && (
-                <ProviderConfigPanel
-                  title="背景音乐 (BGM) 生成配置"
-                  config={musicConfig}
-                  options={catalog.music}
-                  onUpdate={updateMusic}
-                  onProviderChange={(value) => handleProviderChange(value, musicConfig, catalog.music, updateMusic)}
                 />
               )}
 

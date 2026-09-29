@@ -13,7 +13,7 @@ pub mod openai;
 pub mod sd_webui;
 pub mod volcengine;
 
-use super::types::{GeneratedMedia, ImageRequest, MusicRequest, TtsRequest};
+use super::types::{GeneratedMedia, ImageRequest, TtsRequest};
 use super::MediaCtx;
 use crate::ai::registry::Modality;
 
@@ -53,10 +53,6 @@ pub fn adaptor_for(provider: &str, modality: Modality) -> Option<MediaAdaptor> {
         ("aliyun", Modality::Tts) => Some(MediaAdaptor::DashScope),
         ("volcengine", Modality::Tts) => Some(MediaAdaptor::Volcengine),
 
-        ("openai" | "custom" | "siliconflow", Modality::Music) => {
-            Some(MediaAdaptor::OpenAiCompatible)
-        }
-
         _ => None,
     }
 }
@@ -93,21 +89,6 @@ impl MediaAdaptor {
             }
         }
     }
-
-    pub async fn music(
-        self,
-        ctx: &MediaCtx<'_>,
-        request: &MusicRequest<'_>,
-    ) -> Result<GeneratedMedia, String> {
-        match self {
-            MediaAdaptor::OpenAiCompatible => openai::generate_music(ctx.cfg, request).await,
-            MediaAdaptor::DashScope
-            | MediaAdaptor::Gemini
-            | MediaAdaptor::SdWebUi
-            | MediaAdaptor::ElevenLabs
-            | MediaAdaptor::Volcengine => Err(unsupported(ctx.cfg.provider.trim(), "音乐生成")),
-        }
-    }
 }
 
 fn unsupported(provider: &str, label: &str) -> String {
@@ -125,7 +106,7 @@ mod tests {
     /// to prevent.
     #[test]
     fn every_registry_modality_has_an_adaptor() {
-        for modality in [Modality::Image, Modality::Tts, Modality::Music] {
+        for modality in [Modality::Image, Modality::Tts] {
             for option in registry::options_for(modality) {
                 assert!(
                     adaptor_for(&option.value, modality).is_some(),
@@ -141,7 +122,7 @@ mod tests {
     /// is dead code the UI can never reach.
     #[test]
     fn every_adaptor_pairing_is_offered_by_the_registry() {
-        for modality in [Modality::Image, Modality::Tts, Modality::Music] {
+        for modality in [Modality::Image, Modality::Tts] {
             let offered: Vec<String> = registry::options_for(modality)
                 .into_iter()
                 .map(|option| option.value)
@@ -170,6 +151,6 @@ mod tests {
     #[test]
     fn unknown_pairings_resolve_to_nothing() {
         assert_eq!(adaptor_for("anthropic", Modality::Image), None);
-        assert_eq!(adaptor_for("elevenlabs", Modality::Music), None);
+        assert_eq!(adaptor_for("elevenlabs", Modality::Image), None);
     }
 }

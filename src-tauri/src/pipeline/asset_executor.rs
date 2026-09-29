@@ -45,11 +45,6 @@ impl AssetGeneratorFactory for ConfiguredAssetGeneratorFactory {
             &crate::ai::config::load_tts_config(),
             "音频",
             crate::ai::provider_capability::MediaCapability::TtsGeneration,
-        )?;
-        preflight_media_config(
-            &crate::ai::config::load_music_config(),
-            "音乐",
-            crate::ai::provider_capability::MediaCapability::MusicGeneration,
         )
     }
 
@@ -96,6 +91,9 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         if task.kind == AssetKind::Figure {
             require_figure_matting_model(&self.figure_matting_model)?;
         }
+        if task.kind == AssetKind::Bgm || task.kind == AssetKind::Sfx {
+            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
+        }
         let (config, label, required) = match task.kind {
             AssetKind::Background | AssetKind::Figure => (
                 crate::ai::config::load_image_config(),
@@ -107,11 +105,7 @@ impl AssetGenerator for ConfiguredAssetGenerator {
                 "音频",
                 crate::ai::provider_capability::MediaCapability::TtsGeneration,
             ),
-            AssetKind::Bgm | AssetKind::Sfx => (
-                crate::ai::config::load_music_config(),
-                "音乐",
-                crate::ai::provider_capability::MediaCapability::MusicGeneration,
-            ),
+            AssetKind::Bgm | AssetKind::Sfx => unreachable!(),
         };
         preflight_media_config(&config, label, required)
     }
@@ -165,13 +159,7 @@ async fn generate_configured_asset(
             .await?
         }
         AssetKind::Bgm | AssetKind::Sfx => {
-            let config = crate::ai::config::load_music_config();
-            crate::ai::commands::generate_music_media(
-                task.prompt.clone(),
-                configured_model(&config.model)?,
-                "mp3".to_string(),
-            )
-            .await?
+            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
         }
     };
     let encoded = media
@@ -323,7 +311,6 @@ mod tests {
         for (label, required) in [
             ("图片", MediaCapability::ImageGeneration),
             ("音频", MediaCapability::TtsGeneration),
-            ("音乐", MediaCapability::MusicGeneration),
         ] {
             let error = preflight_media_config(&config, label, required).unwrap_err();
             assert!(error.contains("Base URL"), "{required:?}: {error}");

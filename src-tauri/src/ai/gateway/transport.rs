@@ -232,8 +232,6 @@ mod tests {
     fn builtin_media_contract_endpoints_are_stable() {
         assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Image, "images/generations"), "https://api.openai.com/v1/images/generations");
         assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Tts, "audio/speech"), "https://api.openai.com/v1/audio/speech");
-        assert_eq!(media_endpoint(&cfg("openai", "https://gateway.test/v1"), Modality::Music, "audio/music"), "https://gateway.test/v1/audio/music");
-        assert_eq!(media_endpoint(&cfg("custom", "https://gateway.test/v1"), Modality::Music, "audio/music"), "https://gateway.test/v1/audio/music");
         assert_eq!(media_endpoint(&cfg("aliyun", ""), Modality::Image, "tasks/abc"), "https://dashscope.aliyuncs.com/api/v1/tasks/abc");
         assert_eq!(media_endpoint(&cfg("elevenlabs", ""), Modality::Tts, "v1/text-to-speech/voice"), "https://api.elevenlabs.io/v1/text-to-speech/voice");
     }
@@ -289,8 +287,8 @@ mod tests {
     #[test]
     fn provider_without_a_default_yields_the_bare_path() {
         assert_eq!(
-            media_endpoint(&cfg("custom", ""), Modality::Music, "audio/music"),
-            "audio/music"
+            media_endpoint(&cfg("custom", ""), Modality::Tts, "audio/speech"),
+            "audio/speech"
         );
     }
 }
