@@ -48,6 +48,8 @@ pub struct AcceptedNarrativeFact {
     pub id: String,
     pub accepted_at: String,
     pub summary: String,
+    #[serde(default)]
+    pub values: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,12 +289,18 @@ fn narrative_context_path(project_path: &str) -> PathBuf {
         .join("narrative-context.json")
 }
 
-fn validate_narrative_context(document: &NarrativeContextDocument) -> Result<(), String> {
+pub(crate) fn validate_narrative_context(
+    document: &NarrativeContextDocument,
+) -> Result<(), String> {
     if document.version != 1 || document.accepted_facts.len() > 50 {
         return Err("Unsupported or oversized narrative context document".to_string());
     }
     if document.accepted_facts.iter().any(|fact| {
-        fact.id.len() > 128 || fact.accepted_at.len() > 64 || fact.summary.chars().count() > 320
+        fact.id.len() > 128
+            || fact.accepted_at.len() > 64
+            || fact.summary.chars().count() > 320
+            || fact.values.len() > 16
+            || fact.values.iter().any(|value| value.chars().count() > 320)
     }) {
         return Err("Invalid narrative context fact".to_string());
     }
@@ -1512,6 +1520,7 @@ mod tests {
                 id: "set-1".to_string(),
                 accepted_at: "2026-08-23T00:00:00Z".to_string(),
                 summary: "主角接受了委托".to_string(),
+                values: vec!["主角接受了港口调查委托".to_string()],
             }],
         };
         save_narrative_context(tmp.to_string_lossy().to_string(), document).unwrap();
@@ -1526,9 +1535,22 @@ mod tests {
                 id: "set-2".to_string(),
                 accepted_at: "2026-08-23T00:00:00Z".to_string(),
                 summary: "x".repeat(321),
+                values: Vec::new(),
             }],
         };
         assert!(save_narrative_context(tmp.to_string_lossy().to_string(), oversized).is_err());
+        let oversized_value = NarrativeContextDocument {
+            version: 1,
+            accepted_facts: vec![AcceptedNarrativeFact {
+                id: "set-3".to_string(),
+                accepted_at: "2026-08-23T00:00:00Z".to_string(),
+                summary: "bounded summary".to_string(),
+                values: vec!["x".repeat(321)],
+            }],
+        };
+        assert!(
+            save_narrative_context(tmp.to_string_lossy().to_string(), oversized_value).is_err()
+        );
         let _ = fs::remove_dir_all(&tmp);
     }
 

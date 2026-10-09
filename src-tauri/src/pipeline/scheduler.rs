@@ -93,11 +93,18 @@ enum Action {
     Idle,
 }
 
+enum StepWait<T> {
+    Completed(T),
+    TimedOut,
+    Cancelled,
+}
+
 /// The testable orchestrator core.
 pub struct Pipeline {
     agents: AgentRegistry,
     figure_matting_model: Result<std::path::PathBuf, String>,
     step_timeout: Duration,
+    asset_generator: Option<Arc<dyn AssetGenerator>>,
 }
 
 const DEFAULT_PROVIDER_STEP_TIMEOUT: Duration = Duration::from_secs(180);
@@ -351,6 +358,7 @@ impl Pipeline {
             agents,
             figure_matting_model: Err("figure matting model is not configured".to_string()),
             step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
+            asset_generator: None,
         }
     }
 
@@ -365,6 +373,7 @@ impl Pipeline {
             agents: AgentRegistry::with_defaults(),
             figure_matting_model,
             step_timeout: DEFAULT_PROVIDER_STEP_TIMEOUT,
+            asset_generator: None,
         }
     }
 
@@ -372,6 +381,12 @@ impl Pipeline {
     /// the run terminates as `RunStatus::Timeout` instead of hanging forever.
     pub fn with_step_timeout(mut self, timeout: Duration) -> Self {
         self.step_timeout = timeout;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_asset_generator(mut self, generator: Arc<dyn AssetGenerator>) -> Self {
+        self.asset_generator = Some(generator);
         self
     }
 
@@ -863,96 +878,114 @@ impl Pipeline {
             let state = handle.state.lock().await;
             state.find_step(&id).and_then(|step| step.def.agent.clone())
         };
-        let mut asset_output_transaction = None;
-        let result = if agent_key.as_deref() == Some("assetQueue") {
-            let run_id = handle.state.lock().await.run_id.clone();
-            let generator = Arc::new(ConfiguredAssetGenerator {
-                local_fallback: allow_local_fallback,
-                cancelled: handle.cancelled.clone(),
-                figure_matting_model: self.figure_matting_model.clone(),
-            });
-            match crate::asset_queue::run_queue_cancellable_transactional(
-                project_path,
-                &run_id,
-                &plan,
-                generator,
-                handle.cancelled.clone(),
-                handle.asset_binding_gate.clone(),
-            )
-            .await
-            {
-                Ok(run) => {
-                    let queue = run.queue;
-                    asset_output_transaction = Some(run.transaction);
-                    let failed = queue
-                        .tasks
-                        .iter()
-                        .filter(|task| task.status == AssetTaskStatus::Failed)
-                        .count();
-                    if failed == 0 {
-                        let downgraded = queue.tasks.iter().any(|task| {
-                            task.status == AssetTaskStatus::Succeeded && task.used_local_fallback
-                        });
-                        let pending_configuration = queue
-                            .tasks
-                            .iter()
-                            .filter(|task| {
-                                task.status == AssetTaskStatus::Pending
-                                    && task.error.as_deref().is_some_and(|error| {
-                                        error.starts_with("pending configuration:")
-                                    })
-                            })
-                            .count();
-                        let mut warnings = downgraded
-                            .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
-                            .into_iter()
-                            .collect::<Vec<_>>();
-                        if pending_configuration > 0 {
-                            warnings
-                                .push(format!("{pending_configuration} 个媒体任务等待供应商配置"));
-                        }
-                        Ok(AgentOutput {
-                            asset_queue: serde_json::to_value(queue).ok(),
-                            warnings,
-                            downgrade: downgraded
-                                .then(|| "local-placeholder-assets".to_string())
-                                .or_else(|| {
-                                    (pending_configuration > 0)
-                                        .then(|| "media-capability-pending".to_string())
-                                }),
-                            ..AgentOutput::default()
+        let step_wait = {
+            let step_future = async {
+                if agent_key.as_deref() == Some("assetQueue") {
+                    let run_id = handle.state.lock().await.run_id.clone();
+                    let generator = self.asset_generator.clone().unwrap_or_else(|| {
+                        Arc::new(ConfiguredAssetGenerator {
+                            local_fallback: allow_local_fallback,
+                            cancelled: handle.cancelled.clone(),
+                            figure_matting_model: self.figure_matting_model.clone(),
                         })
-                    } else {
-                        Err(AgentError(format!(
-                            "asset queue finished with {failed} failed task(s)"
-                        )))
-                    }
-                }
-                Err(error) => Err(AgentError(error)),
-            }
-        } else {
-            match self.agents.get(kind, agent_key.as_deref()) {
-                Some(agent) => {
-                    let timeout_sleep = tokio::time::sleep(self.step_timeout);
-                    tokio::select! {
-                        result = agent.run(&ctx) => result,
-                        _ = timeout_sleep => {
-                            self.fail_step_timeout(project_path, handle, sink, clock, id, self.step_timeout)
-                                .await;
-                            return;
+                    });
+                    match crate::asset_queue::run_queue_cancellable_transactional(
+                        project_path,
+                        &run_id,
+                        &plan,
+                        generator,
+                        handle.cancelled.clone(),
+                        handle.asset_binding_gate.clone(),
+                    )
+                    .await
+                    {
+                        Ok(run) => {
+                            let queue = run.queue;
+                            let failed = queue
+                                .tasks
+                                .iter()
+                                .filter(|task| task.status == AssetTaskStatus::Failed)
+                                .count();
+                            if failed == 0 {
+                                let downgraded = queue.tasks.iter().any(|task| {
+                                    task.status == AssetTaskStatus::Succeeded
+                                        && task.used_local_fallback
+                                });
+                                let pending_configuration = queue
+                                    .tasks
+                                    .iter()
+                                    .filter(|task| {
+                                        task.status == AssetTaskStatus::Pending
+                                            && task.error.as_deref().is_some_and(|error| {
+                                                error.starts_with("pending configuration:")
+                                            })
+                                    })
+                                    .count();
+                                let mut warnings = downgraded
+                                    .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
+                                    .into_iter()
+                                    .collect::<Vec<_>>();
+                                if pending_configuration > 0 {
+                                    warnings.push(format!(
+                                        "{pending_configuration} 个媒体任务等待供应商配置"
+                                    ));
+                                }
+                                (
+                                    Ok(AgentOutput {
+                                        asset_queue: serde_json::to_value(queue).ok(),
+                                        warnings,
+                                        downgrade: downgraded
+                                            .then(|| "local-placeholder-assets".to_string())
+                                            .or_else(|| {
+                                                (pending_configuration > 0)
+                                                    .then(|| "media-capability-pending".to_string())
+                                            }),
+                                        ..AgentOutput::default()
+                                    }),
+                                    Some(run.transaction),
+                                )
+                            } else {
+                                (
+                                    Err(AgentError(format!(
+                                        "asset queue finished with {failed} failed task(s)"
+                                    ))),
+                                    Some(run.transaction),
+                                )
+                            }
                         }
-                        _ = handle.cancel_notify.notified() => {
-                            // stop() aborted the run: drop the in-flight agent
-                            // future and return without applying anything.
-                            return;
-                        }
+                        Err(error) => (Err(AgentError(error)), None),
                     }
+                } else {
+                    let result = match self.agents.get(kind, agent_key.as_deref()) {
+                        Some(agent) => agent.run(&ctx).await,
+                        None => Err(AgentError(format!(
+                            "no agent registered for step kind '{}'",
+                            kind.as_str()
+                        ))),
+                    };
+                    (result, None)
                 }
-                None => Err(AgentError(format!(
-                    "no agent registered for step kind '{}'",
-                    kind.as_str()
-                ))),
+            };
+            tokio::pin!(step_future);
+            let timeout_sleep = tokio::time::sleep(self.step_timeout);
+            tokio::pin!(timeout_sleep);
+            tokio::select! {
+                result = &mut step_future => StepWait::Completed(result),
+                _ = &mut timeout_sleep => StepWait::TimedOut,
+                _ = handle.cancel_notify.notified() => StepWait::Cancelled,
             }
+        };
+        // Leaving the select scope drops unfinished Agent/assetQueue futures
+        // first. In particular, an asset transaction rolls back before the
+        // terminal timeout state is persisted.
+        let (result, mut asset_output_transaction) = match step_wait {
+            StepWait::Completed(result) => result,
+            StepWait::TimedOut => {
+                self.fail_step_timeout(project_path, handle, sink, clock, id, self.step_timeout)
+                    .await;
+                return;
+            }
+            StepWait::Cancelled => return,
         };
         match result {
             Ok(out) => {
@@ -1212,8 +1245,16 @@ impl Pipeline {
         step_id: String,
         error: String,
     ) {
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Failed)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Failed,
+        )
+        .await;
     }
 
     async fn fail_step_timeout(
@@ -1226,8 +1267,16 @@ impl Pipeline {
         timeout: Duration,
     ) {
         let error = format!("step timed out after {:?}", timeout);
-        self.fail_step_with_status(project_path, handle, sink, clock, step_id, error, RunStatus::Timeout)
-            .await;
+        self.fail_step_with_status(
+            project_path,
+            handle,
+            sink,
+            clock,
+            step_id,
+            error,
+            RunStatus::Timeout,
+        )
+        .await;
     }
 
     async fn fail_step_with_status(

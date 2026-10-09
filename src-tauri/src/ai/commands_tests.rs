@@ -1,6 +1,27 @@
 use super::*;
 use std::{collections::BTreeSet, fs};
 
+#[tokio::test]
+async fn chat_provider_future_uses_capability_deadline() {
+    let error = run_chat_provider_with_deadline(Duration::from_millis(10), async {
+        std::future::pending::<()>().await;
+        Ok::<_, String>(())
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error, "对话请求超时（10 毫秒）");
+}
+
+#[tokio::test]
+async fn chat_provider_future_can_complete_before_capability_deadline() {
+    let value = run_chat_provider_with_deadline(Duration::from_secs(1), async {
+        Ok::<_, String>("completed")
+    })
+    .await
+    .unwrap();
+    assert_eq!(value, "completed");
+}
+
 #[test]
 fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
     assert_eq!(
@@ -1321,4 +1342,49 @@ fn media_download_url_rejects_ssrf_targets() {
         validate_media_download_url("https://oaidalleapiprodscus.blob.core.windows.net/x.png")
             .is_ok()
     );
+}
+
+#[test]
+fn batch_tts_nth_decode_failure_is_structured_before_publish() {
+    let first = BatchTtsItem {
+        voice_card_id: "voice-1".to_string(),
+        text: "one".to_string(),
+        voice_prompt: String::new(),
+    };
+    let second = BatchTtsItem {
+        voice_card_id: "voice-2".to_string(),
+        text: "two".to_string(),
+        voice_prompt: String::new(),
+    };
+    let prepared = prepare_generated_voice_asset(
+        &first,
+        0,
+        0,
+        "one.mp3".to_string(),
+        GeneratedMedia {
+            base64_data: "b25l".to_string(),
+            extension: "mp3".to_string(),
+        },
+    )
+    .unwrap();
+    assert_eq!(prepared.bytes, b"one");
+
+    let failure = prepare_generated_voice_asset(
+        &second,
+        1,
+        1,
+        "two.mp3".to_string(),
+        GeneratedMedia {
+            base64_data: "%%%not-base64%%%".to_string(),
+            extension: "mp3".to_string(),
+        },
+    )
+    .unwrap_err();
+    let encoded = failure.encoded();
+    let structured: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(structured["code"], "batch_tts_preparation_failed");
+    assert_eq!(structured["stage"], "decode");
+    assert_eq!(structured["failedIndex"], 1);
+    assert_eq!(structured["voiceCardId"], "voice-2");
+    assert_eq!(structured["generatedCount"], 1);
 }

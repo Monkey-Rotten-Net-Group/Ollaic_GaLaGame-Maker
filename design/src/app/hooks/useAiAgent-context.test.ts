@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptedFactFromChangeSet,
   appendAcceptedFact,
   buildNarrativeContext,
   emptyNarrativeContext,
@@ -15,6 +16,7 @@ describe('mandatory narrative context', () => {
   it('is deterministic, bounded, and preserves scene and memory head/tail cues', () => {
     const document = appendAcceptedFact(emptyNarrativeContext(), {
       id: 'set-1', acceptedAt: '2026-08-23T00:00:00Z', summary: '主角接受了委托',
+      values: ['主角接受了港口调查委托'],
     });
     const input = {
       projectId: 'project-1', sceneName: 'start.txt', sceneDisplayName: '序章',
@@ -28,13 +30,14 @@ describe('mandatory narrative context', () => {
     expect(fcContext).toContain('MEMORY_TAIL');
     expect(fcContext).toContain('SCENE_HEAD');
     expect(fcContext).toContain('SCENE_TAIL');
-    expect(fcContext).toContain('主角接受了委托');
+    expect(fcContext).toContain('主角接受了港口调查委托');
   });
 
   it('keeps accepted facts outside chat sessions and excludes rejected or failed sets', () => {
     let stored = emptyNarrativeContext();
     stored = appendAcceptedFact(stored, {
       id: 'accepted', acceptedAt: '2026-08-23T00:00:00Z', summary: '已确认：雨夜发生停电',
+      values: ['项目记忆.worldSetting = 雨夜发生停电'],
     });
     // Rejected and failed sets never call appendAcceptedFact.
     const afterReload = JSON.parse(JSON.stringify(stored));
@@ -45,5 +48,24 @@ describe('mandatory narrative context', () => {
     expect(context).toContain('雨夜发生停电');
     expect(context).not.toContain('rejected');
     expect(context).not.toContain('failed');
+  });
+
+  it('reloads concrete accepted values instead of generic edit summaries', () => {
+    const accepted = acceptedFactFromChangeSet({
+      id: 'set-values', createdAt: '2026-08-23T00:00:00Z', sourceMessageId: 'a-1', status: 'pending',
+      edits: [{
+        kind: 'character', id: 'hero', name: '小艾',
+        before: { name: '小艾', personality: '谨慎' } as never,
+        after: { name: '小艾', personality: '勇敢而谨慎' } as never,
+        changedFields: ['personality'],
+      }],
+    }, '2026-08-23T00:01:00Z', '角色 小艾：修改 personality');
+    const reloaded = JSON.parse(JSON.stringify(appendAcceptedFact(emptyNarrativeContext(), accepted)));
+    const context = buildNarrativeContext({
+      projectId: 'p', sceneName: 'start.txt', sceneDisplayName: '序章', sceneSource: ':scene;',
+      memory: null, document: reloaded,
+    });
+    expect(context).toContain('角色 小艾.personality = 勇敢而谨慎');
+    expect(context).not.toContain('角色 小艾：修改 personality');
   });
 });

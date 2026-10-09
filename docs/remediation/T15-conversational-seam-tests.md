@@ -32,6 +32,18 @@ Full browser E2E, live Provider calls, Production Flow tests already covered in 
 
 Use deterministic deferred Providers, controllable filesystem failure injection, fake timers for autosave, and temporary Projects. Avoid replacing the persistence Interface with no-op mocks.
 
+The seam is split at the desktop process boundary without substituting the
+production persistence contract:
+
+- The Vitest orchestration harness drives the real `useAiAgent` staging and
+  `applyChangeSet` adapter path, then compares the emitted command request with
+  `design/src/app/integration/fixtures/create-edit-change-set.json`.
+- The Rust command test deserializes that same fixture, replaces only its
+  Project path with a real temporary Project, and calls the production
+  `apply_change_set` command. Filesystem CAS, atomic rollback, and residual-path
+  reporting remain covered through the same command core, real temporary
+  Project files, and deterministic filesystem failure injection.
+
 ## Verification Commands
 
 ```bash

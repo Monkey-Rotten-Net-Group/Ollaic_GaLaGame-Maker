@@ -100,13 +100,25 @@ mod tests {
     use crate::pipeline::state::SystemClock;
 
     fn make_run(project: &str, run_id: &str) -> ManagedRun {
-        let project_path = std::env::temp_dir().join("ollaic_registry").join(project);
-        let _ = std::fs::remove_dir_all(&project_path);
+        static NEXT_PROJECT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let project_path = std::env::temp_dir().join(format!(
+            "ollaic_registry_{}_{}_{}",
+            std::process::id(),
+            NEXT_PROJECT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            project
+        ));
         std::fs::create_dir_all(&project_path).unwrap();
         let pipeline = Pipeline::with_default_agents();
         let sink = RecordingSink::new();
         let handle = pipeline
-            .create_run(&project_path, run_id, "brief", &default_recipe(), &SystemClock, &sink)
+            .create_run(
+                &project_path,
+                run_id,
+                "brief",
+                &default_recipe(),
+                &SystemClock,
+                &sink,
+            )
             .unwrap();
         ManagedRun {
             handle,
@@ -118,9 +130,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_rejects_cross_project_access() {
         let registry = RunRegistry::new();
-        let path_a = std::env::temp_dir().join("ollaic_registry").join("a");
+        let run = make_run("a", "run_a");
+        let path_a = run.project_path.clone();
         let path_b = std::env::temp_dir().join("ollaic_registry").join("b");
-        registry.insert("run_a".to_string(), make_run("a", "run_a")).await;
+        registry.insert("run_a".to_string(), run).await;
         assert!(registry.resolve("run_a", &path_a).await.is_ok());
         let err = registry.resolve("run_a", &path_b).await.err().unwrap();
         assert!(err.contains("belongs to project"));
@@ -130,7 +143,9 @@ mod tests {
     async fn attach_if_needed_rejects_project_mismatch() {
         let registry = RunRegistry::new();
         let path_b = std::env::temp_dir().join("ollaic_registry").join("b");
-        registry.insert("run_a".to_string(), make_run("a", "run_a")).await;
+        registry
+            .insert("run_a".to_string(), make_run("a", "run_a"))
+            .await;
         let err = registry
             .attach_if_needed("run_a", &path_b, || unreachable!())
             .await

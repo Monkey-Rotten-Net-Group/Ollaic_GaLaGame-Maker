@@ -13,6 +13,7 @@ use genai::chat::{
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -925,6 +926,15 @@ fn to_chat_messages(messages: Vec<AiMessageInput>) -> Vec<ChatMessage> {
 
 /// Single non-streaming turn used by the multi-step agent loop. Returns either
 /// the model's tool calls (to be executed by the frontend) or its final text.
+async fn run_chat_provider_with_deadline<T>(
+    deadline: Duration,
+    future: impl Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    tokio::time::timeout(deadline, future)
+        .await
+        .map_err(|_| format!("对话请求超时（{} 毫秒）", deadline.as_millis()))?
+}
+
 #[tauri::command]
 pub async fn ai_chat_turn(
     messages: Vec<AiMessageInput>,
@@ -963,7 +973,18 @@ pub async fn ai_chat_turn(
     let endpoint = effective_endpoint(&cfg);
 
     let options = chat_debug_options();
-    match client.exec_chat(&cfg.model, request, Some(&options)).await {
+    let provider_future = async {
+        client
+            .exec_chat(&cfg.model, request, Some(&options))
+            .await
+            .map_err(|error| error.to_string())
+    };
+    match run_chat_provider_with_deadline(
+        Duration::from_millis(capability.chat_deadline_ms),
+        provider_future,
+    )
+    .await
+    {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
             let tool_calls = response
@@ -978,8 +999,7 @@ pub async fn ai_chat_turn(
             log_ai_event("chat_turn", &cfg, &endpoint, true, "turn completed");
             Ok(AiTurnResult { text, tool_calls })
         }
-        Err(err) => {
-            let message = err.to_string();
+        Err(message) => {
             log_ai_event("chat_turn", &cfg, &endpoint, false, &message);
             Err(message)
         }
@@ -2458,14 +2478,50 @@ pub struct BatchTtsProgress {
     pub asset_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct BatchTtsFailure {
     code: &'static str,
+    stage: &'static str,
     failed_index: usize,
     voice_card_id: String,
     generated_count: usize,
     message: String,
+}
+
+impl BatchTtsFailure {
+    fn encoded(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|error| error.to_string())
+    }
+}
+
+fn prepare_generated_voice_asset(
+    item: &BatchTtsItem,
+    index: usize,
+    generated_count: usize,
+    filename: String,
+    media: GeneratedMedia,
+) -> Result<PreparedVoiceAsset, BatchTtsFailure> {
+    let encoded = media
+        .base64_data
+        .split_once(',')
+        .map(|(_, payload)| payload)
+        .unwrap_or(media.base64_data.as_str());
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|error| BatchTtsFailure {
+            code: "batch_tts_preparation_failed",
+            stage: "decode",
+            failed_index: index,
+            voice_card_id: item.voice_card_id.clone(),
+            generated_count,
+            message: format!("解析批量语音结果失败: {error}"),
+        })?;
+    Ok(PreparedVoiceAsset::new(
+        item.voice_card_id.clone(),
+        filename,
+        bytes,
+    ))
 }
 
 /// Generate TTS audio for multiple voice cards in sequence, emitting progress
@@ -2558,14 +2614,13 @@ pub async fn generate_batch_tts(
                 let _ = app_handle.emit("batch-tts-progress", &progress);
                 let failure = BatchTtsFailure {
                     code: "batch_tts_generation_failed",
+                    stage: "generation",
                     failed_index: index,
                     voice_card_id: item.voice_card_id.clone(),
                     generated_count: prepared.len(),
                     message,
                 };
-                return Err(
-                    serde_json::to_string(&failure).unwrap_or_else(|error| error.to_string())
-                );
+                return Err(failure.encoded());
             }
         };
         let stem = stem_map
@@ -2573,19 +2628,23 @@ pub async fn generate_batch_tts(
             .cloned()
             .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
         let filename = format!("{}.{}", stem, media.extension);
-        let encoded = media
-            .base64_data
-            .split_once(',')
-            .map(|(_, payload)| payload)
-            .unwrap_or(media.base64_data.as_str());
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded.trim())
-            .map_err(|error| format!("解析批量语音结果失败: {error}"))?;
-        prepared.push(PreparedVoiceAsset::new(
-            item.voice_card_id.clone(),
-            filename,
-            bytes,
-        ));
+        let prepared_asset =
+            match prepare_generated_voice_asset(item, index, prepared.len(), filename, media) {
+                Ok(asset) => asset,
+                Err(failure) => {
+                    let progress = BatchTtsProgress {
+                        voice_card_id: item.voice_card_id.clone(),
+                        index,
+                        total,
+                        status: "error".to_string(),
+                        message: format!("准备失败: {}", failure.message),
+                        asset_name: None,
+                    };
+                    let _ = app_handle.emit("batch-tts-progress", &progress);
+                    return Err(failure.encoded());
+                }
+            };
+        prepared.push(prepared_asset);
     }
 
     let published = publish_batch(std::path::Path::new(&project_path), prepared).await?;

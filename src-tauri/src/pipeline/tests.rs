@@ -12,6 +12,7 @@ use tokio::sync::{Mutex as AsyncMutex, Notify};
 use tokio::time::{sleep, timeout, Duration};
 
 use crate::agents::{Agent, AgentContext, AgentError, AgentOutput, AgentRegistry};
+use crate::asset_queue::{AssetGenerator, AssetTask, GeneratedArtifact};
 use crate::pipeline::dsl::{default_recipe, FlowRecipe, RecipeError, StepDef, StepKind};
 use crate::pipeline::events::{PipelineEvent, RecordingSink};
 use crate::pipeline::scheduler::{cleanup_rollback_snapshots, project_has_story_content, Pipeline};
@@ -84,6 +85,35 @@ impl Agent for HangingAgent {
     ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
         Box::pin(std::future::pending())
     }
+}
+
+struct HangingAssetGenerator;
+impl AssetGenerator for HangingAssetGenerator {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+        Box::pin(std::future::pending())
+    }
+}
+
+fn asset_queue_recipe() -> FlowRecipe {
+    FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).agent("assetQueue"))
+}
+
+fn seed_asset_queue_plan(project: &std::path::Path) {
+    let mut plan = crate::story_plan::load_plan(project).unwrap().unwrap();
+    plan.asset_plan = vec![crate::story_plan::types::AssetTaskPlan {
+        id: "bg_hanging".to_string(),
+        kind: "background".to_string(),
+        target_stem: "bg_hanging".to_string(),
+        prompt: "never completes".to_string(),
+        scene_ref: None,
+        character_ref: None,
+        emotion: None,
+        status: "pending".to_string(),
+    }];
+    crate::story_plan::save_plan(project, &plan).unwrap();
 }
 
 struct TimeoutOnceAgent {
@@ -743,11 +773,98 @@ async fn step_timeout_terminates_run_as_timeout() {
     assert_eq!(run_state.status, RunStatus::Timeout);
     let plan = run_state.find_step("plan").unwrap();
     assert_eq!(plan.status, StepStatus::Failed);
-    assert!(plan
-        .error
-        .as_deref()
+    assert!(plan.error.as_deref().unwrap().contains("timed out"));
+}
+
+#[tokio::test]
+async fn asset_queue_step_timeout_terminates_run_as_timeout() {
+    let project = fresh_project("asset_queue_timeout");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents()
+        .with_asset_generator(Arc::new(HangingAssetGenerator))
+        .with_step_timeout(Duration::from_millis(30));
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_asset_queue_timeout",
+            "brief",
+            &asset_queue_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    seed_asset_queue_plan(&project);
+
+    timeout(
+        Duration::from_secs(3),
+        pipeline.execute(&project, handle.clone(), sink.as_ref(), &clock),
+    )
+    .await
+    .expect("assetQueue ignored the step deadline");
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_asset_queue_timeout")
         .unwrap()
-        .contains("timed out"));
+        .unwrap();
+    assert_eq!(persisted.status, RunStatus::Timeout);
+    let step = persisted.find_step("assetQueue").unwrap();
+    assert_eq!(step.status, StepStatus::Failed);
+    assert!(step.error.as_deref().unwrap().contains("timed out"));
+    assert!(!project.join(".ollaic/assets/queue.json").exists());
+}
+
+#[tokio::test]
+async fn stop_aborts_hanging_asset_queue_step_without_releasing_generator() {
+    let project = fresh_project("asset_queue_stop");
+    let sink = Arc::new(RecordingSink::new());
+    let clock = StepClock::new();
+    let pipeline = Arc::new(
+        Pipeline::with_default_agents().with_asset_generator(Arc::new(HangingAssetGenerator)),
+    );
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run_asset_queue_stop",
+            "brief",
+            &asset_queue_recipe(),
+            &clock,
+            sink.as_ref(),
+        )
+        .unwrap();
+    seed_asset_queue_plan(&project);
+    let task = {
+        let pipeline = pipeline.clone();
+        let project = project.clone();
+        let handle = handle.clone();
+        let sink = sink.clone();
+        tokio::spawn(async move {
+            pipeline
+                .execute(&project, handle, sink.as_ref(), &SystemClock)
+                .await;
+        })
+    };
+    wait_until(&sink, |events| {
+        events.iter().any(|event| matches!(event, PipelineEvent::StepStarted { step_id, .. } if step_id == "assetQueue"))
+    })
+    .await;
+
+    handle.stop(&project, sink.as_ref(), &clock).await.unwrap();
+    timeout(Duration::from_secs(3), task)
+        .await
+        .expect("assetQueue ignored stop notification")
+        .unwrap();
+
+    let persisted = crate::pipeline::load_run_state(&project, "run_asset_queue_stop")
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted.status, RunStatus::Cancelled);
+    let step = persisted.find_step("assetQueue").unwrap();
+    assert_eq!(step.status, StepStatus::Pending);
+    assert_eq!(
+        step.history.last().unwrap().error.as_deref(),
+        Some("cancelled before completion")
+    );
+    assert!(!project.join(".ollaic/assets/queue.json").exists());
 }
 
 #[tokio::test]

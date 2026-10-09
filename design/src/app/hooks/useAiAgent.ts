@@ -61,11 +61,11 @@ import {
   type ProjectMemory,
 } from '../lib/project-memory';
 import {
+  acceptedFactFromChangeSet,
   appendAcceptedFact,
   buildNarrativeContext,
   emptyNarrativeContext,
   readNarrativeContext,
-  saveNarrativeContext,
   type NarrativeContextDocument,
 } from '../lib/narrative-context';
 import {
@@ -1059,6 +1059,17 @@ export function useAiAgent(params: UseAiAgentParams) {
         request.operations.push({ kind: 'asset_metadata', baseline, metadata });
       }
 
+      const acceptedSummary = summarizeChangeSet(set, sceneHeaders);
+      const nextNarrativeDocument = appendAcceptedFact(
+        narrativeDocument,
+        acceptedFactFromChangeSet(set, new Date().toISOString(), acceptedSummary),
+      );
+      request.operations.push({
+        kind: 'narrative_context',
+        baseline: narrativeDocument,
+        document: nextNarrativeDocument,
+      });
+
       const result = await changeSetAdapter(request);
       if (result.status === 'conflict') {
         setStatus('conflict');
@@ -1084,18 +1095,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         return;
       }
 
-      let narrativeWarning: string | null = null;
-      const nextNarrativeDocument = appendAcceptedFact(narrativeDocument, {
-        id: set.id,
-        acceptedAt: new Date().toISOString(),
-        summary: summarizeChangeSet(set, sceneHeaders),
-      });
-      try {
-        await saveNarrativeContext(projectPath, nextNarrativeDocument);
-        setNarrativeDocument(nextNarrativeDocument);
-      } catch (error) {
-        narrativeWarning = `修改已提交，但叙事上下文保存失败：${String(error)}`;
-      }
+      setNarrativeDocument(nextNarrativeDocument);
 
       if (currentSceneEdit) {
         if (reconcileCurrentScene) {
@@ -1112,16 +1112,12 @@ export function useAiAgent(params: UseAiAgentParams) {
       if (set.edits.some((edit) => edit.kind === 'memory')) setMemory(memoryEdit!.after);
       if (set.edits.some((edit) => edit.kind === 'create_scene')) onScenesChanged?.();
       if (characterEdits.length > 0) onCharactersChanged?.();
-      replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
+      replaceAssistantMessage(set.sourceMessageId, `已同意修改：${acceptedSummary}`, {
         diff: currentSceneEdit?.diff,
       });
       setPendingChangeSet({ ...set, status: 'accepted' });
       setStatus('accepted');
-      setError(narrativeWarning ? {
-        kind: 'other',
-        retryable: true,
-        message: narrativeWarning,
-      } : null);
+      setError(null);
     } catch (error) {
       setStatus('error');
       setError({
