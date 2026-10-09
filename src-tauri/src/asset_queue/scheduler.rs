@@ -199,7 +199,22 @@ pub async fn run_queue_cancellable(
             return Err(ASSET_QUEUE_CANCELLED.to_string());
         }
         let task_id = queue.lock().await.tasks[index].id.clone();
-        let bound = bind_imported_audio(&project_path, &task_id, &filename)?;
+        // A file can disappear between the scan and the binding, so a failed
+        // manual binding must fail only its own task instead of aborting the
+        // whole queue run.
+        let bound = match bind_imported_audio(&project_path, &task_id, &filename) {
+            Ok(bound) => bound,
+            Err(error) => {
+                let mut state = queue.lock().await;
+                if let Some(task) = state.tasks.get_mut(index) {
+                    task.status = AssetTaskStatus::Pending;
+                    task.error = Some(format!("{PENDING_MANUAL_IMPORT_PREFIX}{error}"));
+                }
+                state.updated_at = now_ms();
+                save_queue(&project_path, &state)?;
+                continue;
+            }
+        };
         *queue.lock().await = bound;
     }
 

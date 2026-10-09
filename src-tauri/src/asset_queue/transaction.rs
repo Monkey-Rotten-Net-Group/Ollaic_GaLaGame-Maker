@@ -174,10 +174,9 @@ pub(crate) fn bind_imported_audio(
         {
             return rebind_imported_audio_locked(project_path, queue, task_index);
         }
+        // Keep the full attempt history so numbers stay monotonic; repeating a
+        // bind is already handled by the Succeeded short-circuit above.
         let mut candidate = task;
-        candidate
-            .attempts
-            .retain(|attempt| attempt.imported_file.is_none());
         let attempt_number = candidate.attempts.len() as u32 + 1;
         let started_at = now_ms();
         let pending = begin_binding_transaction_locked(project_path, &queue)?;
@@ -189,8 +188,11 @@ pub(crate) fn bind_imported_audio(
                         .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
                     let mut failed = queue.clone();
                     let mut failed_task = failed.tasks[task_index].clone();
+                    // The failure is recorded on the untouched task, so its
+                    // attempt number has to follow that task's own history.
+                    let failed_attempt = failed_task.attempts.len() as u32 + 1;
                     failed_task.attempts.push(AssetAttempt {
-                        attempt: attempt_number,
+                        attempt: failed_attempt,
                         started_at,
                         finished_at: now_ms(),
                         artifact: None,
@@ -432,8 +434,12 @@ fn begin_artifact_deletion_locked(
     let root = project_path
         .canonicalize()
         .map_err(|error| format!("failed to resolve project root: {error}"))?;
-    let original = artifact
+    let canonical_artifact = artifact
+        .canonicalize()
+        .unwrap_or_else(|_| artifact.to_path_buf());
+    let original = canonical_artifact
         .strip_prefix(&root)
+        .or_else(|_| artifact.strip_prefix(project_path))
         .map_err(|_| "artifact is outside the project".to_string())?
         .to_path_buf();
     let staged = PathBuf::from(".ollaic/assets/transaction-artifact");
