@@ -1,6 +1,6 @@
 # 供应商与模型配置
 
-`AiSettingsDialog` 提供 **Chat / Image / TTS 三个标签页**，每类可独立选择供应商、模型、API Key，并可为自建/兼容端点设置 Base URL。Chat 标签页带「测试连接」实时校验。
+`AiSettingsDialog` 提供 **Chat / Image / TTS / Video 四个标签页**，每类可独立选择供应商、模型、API Key，并可为自建/兼容端点设置 Base URL。Chat 标签页带「测试连接」实时校验。
 
 ## 供应商清单来自后端
 

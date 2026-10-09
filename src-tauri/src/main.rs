@@ -213,6 +213,7 @@ fn main() {
             asset_queue::commands::asset_queue_preview_artifact,
             asset_queue::commands::asset_queue_delete_artifact,
             asset_queue::commands::asset_queue_promote_artifact,
+            asset_queue::commands::asset_queue_bind_imported_audio,
             // AI reference uploads
             ai::uploads::list_ai_uploads,
             ai::uploads::import_ai_upload,

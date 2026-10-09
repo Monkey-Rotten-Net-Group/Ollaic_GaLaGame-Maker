@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::agents::{AgentContext, AgentError, AgentOutput, AgentOutputPayload, AgentRegistry};
+use crate::asset_queue::types::{PENDING_CONFIGURATION_PREFIX, PENDING_MANUAL_IMPORT_PREFIX};
 use crate::asset_queue::AssetTaskStatus;
 use crate::pipeline::asset_executor::AssetGeneratorFactory;
 use crate::pipeline::dsl::{StepExecutor, StepKind};
@@ -84,10 +85,17 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
         .iter()
         .filter(|task| {
             task.status == AssetTaskStatus::Pending
-                && task
-                    .error
-                    .as_deref()
-                    .is_some_and(|error| error.starts_with("pending configuration:"))
+                && has_pending_reason(task, PENDING_CONFIGURATION_PREFIX)
+        })
+        .count();
+    // BGM/SFX have no AI route and no music provider setting to fix, so they
+    // are reported separately with an actionable "import audio" hint.
+    let pending_manual_import = queue
+        .tasks
+        .iter()
+        .filter(|task| {
+            task.status == AssetTaskStatus::Pending
+                && has_pending_reason(task, PENDING_MANUAL_IMPORT_PREFIX)
         })
         .count();
     let mut warnings = downgraded
@@ -97,10 +105,22 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
     if pending_configuration > 0 {
         warnings.push(format!("{pending_configuration} 个媒体任务等待供应商配置"));
     }
+    if pending_manual_import > 0 {
+        warnings.push(format!(
+            "{pending_manual_import} 个音频任务等待手动导入 BGM/音效"
+        ));
+    }
     let mut output = AgentOutput::new(AgentOutputPayload::AssetQueue(queue));
     output.warnings = warnings;
     output.downgrade = downgraded
         .then(|| "local-placeholder-assets".to_string())
-        .or_else(|| (pending_configuration > 0).then(|| "media-capability-pending".to_string()));
+        .or_else(|| (pending_configuration > 0).then(|| "media-capability-pending".to_string()))
+        .or_else(|| (pending_manual_import > 0).then(|| "manual-audio-import-pending".to_string()));
     Ok(output)
+}
+
+fn has_pending_reason(task: &crate::asset_queue::AssetTask, prefix: &str) -> bool {
+    task.error
+        .as_deref()
+        .is_some_and(|error| error.starts_with(prefix))
 }

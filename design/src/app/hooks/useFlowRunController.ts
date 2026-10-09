@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { initialFlowState, recordsFromSnapshot, reduceFlowEvent } from '../lib/flow-state';
+import { listAssets } from '../lib/assets-ipc';
 import {
+  assetQueueBindImportedAudio,
   assetQueueDeleteArtifact,
   assetQueueGet,
   assetQueuePreviewArtifact,
@@ -31,6 +33,7 @@ export function useFlowRunController(projectPath: string) {
   const [allowLocalFallback, setAllowLocalFallback] = useState(false);
   const [plan, setPlan] = useState<Awaited<ReturnType<typeof pipelineGetPlan>>>(null);
   const [assetQueue, setAssetQueue] = useState<AssetQueueState | null>(null);
+  const [importedAudioByDir, setImportedAudioByDir] = useState<Record<string, string[]>>({});
   const [events, setEvents] = useState<PipelineEventRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -64,6 +67,21 @@ export function useFlowRunController(projectPath: string) {
     }
   }, [projectPath]);
 
+  const refreshImportedAudio = useCallback(async () => {
+    try {
+      const [bgm, vocal] = await Promise.all([
+        listAssets(projectPath, 'bgm'),
+        listAssets(projectPath, 'vocal'),
+      ]);
+      setImportedAudioByDir({
+        bgm: bgm.map((asset) => asset.name),
+        vocal: vocal.map((asset) => asset.name),
+      });
+    } catch {
+      // Asset library availability is supplementary to Flow controls.
+    }
+  }, [projectPath]);
+
   const previewAssetArtifact = useCallback((taskId: string, attempt: number) => (
     assetQueuePreviewArtifact(projectPath, taskId, attempt)
   ), [projectPath]);
@@ -74,6 +92,14 @@ export function useFlowRunController(projectPath: string) {
     attempt: number,
   ) => {
     const queue = await action(projectPath, taskId, attempt);
+    if (queue.runId === runIdRef.current) setAssetQueue(queue);
+  }, [projectPath]);
+
+  const bindImportedAudio = useCallback(async (
+    taskId: string,
+    filename: string,
+  ) => {
+    const queue = await assetQueueBindImportedAudio(projectPath, taskId, filename);
     if (queue.runId === runIdRef.current) setAssetQueue(queue);
   }, [projectPath]);
 
@@ -172,10 +198,11 @@ export function useFlowRunController(projectPath: string) {
       return;
     }
     void refreshAssetQueue();
+    void refreshImportedAudio();
     if (assetQueueStep.status !== 'running') return;
     const timer = window.setInterval(() => void refreshAssetQueue(), 1000);
     return () => window.clearInterval(timer);
-  }, [assetQueueStep, refreshAssetQueue]);
+  }, [assetQueueStep, refreshAssetQueue, refreshImportedAudio]);
 
   const runCommand = useCallback(async (command: () => Promise<void>) => {
     if (busy) return;
@@ -333,6 +360,7 @@ export function useFlowRunController(projectPath: string) {
     setAllowLocalFallback,
     plan,
     assetQueue,
+    importedAudioByDir,
     events,
     busy,
     loading,
@@ -353,5 +381,6 @@ export function useFlowRunController(projectPath: string) {
     updateDependencies,
     previewAssetArtifact,
     updateAssetArtifact,
+    bindImportedAudio,
   };
 }

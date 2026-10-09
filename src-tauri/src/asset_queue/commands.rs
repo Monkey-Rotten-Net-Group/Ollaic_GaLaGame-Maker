@@ -3,7 +3,7 @@ use std::path::Path;
 use base64::Engine;
 
 use super::transaction::{
-    delete_artifact, load_queue_consistent, promote_artifact, resolve_artifact,
+    bind_imported_audio, delete_artifact, load_queue_consistent, promote_artifact, resolve_artifact,
 };
 use super::AssetQueue;
 
@@ -55,6 +55,19 @@ pub async fn asset_queue_promote_artifact(
     promote_artifact(project, &task_id, attempt)
 }
 
+/// Bind an already-imported audio file to a manual BGM/SFX task. This is the
+/// only completion path for those tasks since they have no AI generation route.
+#[tauri::command]
+pub async fn asset_queue_bind_imported_audio(
+    project_path: String,
+    task_id: String,
+    filename: String,
+) -> Result<AssetQueue, String> {
+    let _guard = super::lock_queue_writes().await;
+    let project = Path::new(&project_path);
+    bind_imported_audio(project, &task_id, &filename)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +103,7 @@ mod tests {
                     started_at: 1,
                     finished_at: 2,
                     artifact: Some(artifact.to_string_lossy().into_owned()),
+                    imported_file: None,
                     error: None,
                     used_local_fallback: false,
                 }],

@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+/// Task is blocked because the AI provider it needs is not configured yet.
+pub const PENDING_CONFIGURATION_PREFIX: &str = "pending configuration:";
+/// Task is blocked because BGM/SFX can only be satisfied by importing audio.
+pub const PENDING_MANUAL_IMPORT_PREFIX: &str = "pending manual import:";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AssetKind {
@@ -29,6 +34,13 @@ impl AssetKind {
             Self::Sfx | Self::Tts => "vocal",
         }
     }
+
+    /// BGM/SFX have no AI generation path. They stay pending until an imported
+    /// audio file is bound to the task, so their pending reason must never be
+    /// reported as a missing provider configuration.
+    pub fn requires_manual_import(self) -> bool {
+        matches!(self, Self::Bgm | Self::Sfx)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +62,10 @@ pub struct AssetAttempt {
     pub finished_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<String>,
+    /// Set when the attempt was satisfied by binding an already-imported file
+    /// instead of a generated artifact (BGM/SFX only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default)]

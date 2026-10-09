@@ -483,6 +483,7 @@ mod tests {
                 started_at: 1,
                 finished_at: 2,
                 artifact: Some(format!("artifact/{}.png", task.id)),
+                imported_file: None,
                 error: None,
                 used_local_fallback: false,
             });

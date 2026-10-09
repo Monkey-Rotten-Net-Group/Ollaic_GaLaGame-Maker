@@ -9,6 +9,22 @@ use crate::webgal::types::{CommandType, WebGalNode};
 
 use super::types::{AssetKind, AssetTask};
 
+/// Metadata tag written when a user-imported file is bound instead of an AI
+/// generated artifact, so the asset library can tell manual picks apart.
+pub(crate) const IMPORTED_SOURCE_TAG: &str = "source:imported";
+
+/// Reject anything that is not a plain file name inside the task's asset
+/// directory, so a crafted path can never escape `game/<dir>/`.
+pub(crate) fn validate_imported_filename(filename: &str) -> Result<(), String> {
+    if filename.is_empty()
+        || filename.contains('\\')
+        || Path::new(filename).components().count() != 1
+    {
+        return Err(format!("invalid imported asset filename: {filename}"));
+    }
+    Ok(())
+}
+
 /// Promote the most recent generated artifact and bind it into playable project data.
 /// Callers serialize calls to this function because it rewrites shared JSON and scenes.
 #[cfg(test)]
@@ -82,6 +98,45 @@ impl BindingTransaction {
         })
     }
 
+    /// Bind an audio file the user already imported into `game/<kind dir>/`.
+    /// Manual BGM/SFX tasks never produce a generated artifact, so the file is
+    /// bound in place instead of being copied out of the artifact directory.
+    pub(crate) fn apply_imported_locked(
+        project_path: &Path,
+        task: &AssetTask,
+        filename: &str,
+    ) -> Result<Self, String> {
+        if !task.kind.requires_manual_import() {
+            return Err(format!("task {} is not a manual audio task", task.id));
+        }
+        validate_stem(&task.id)?;
+        validate_stem(&task.target_stem)?;
+        validate_imported_filename(filename)?;
+        let target = project_path
+            .join("game")
+            .join(task.kind.game_dir())
+            .join(filename);
+        if !target.is_file() {
+            return Err(format!(
+                "imported audio file is missing: {}",
+                target.display()
+            ));
+        }
+        let snapshots = snapshot_binding_files(project_path, &target)?;
+        if let Err(error) =
+            apply_binding_with_source(project_path, task, filename, IMPORTED_SOURCE_TAG)
+        {
+            return match restore_binding_files(snapshots) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
+            };
+        }
+        Ok(Self {
+            filename: filename.to_string(),
+            snapshots,
+        })
+    }
+
     pub(crate) fn filename(&self) -> &str {
         &self.filename
     }
@@ -128,7 +183,16 @@ fn rebind_asset_locked(project_path: &Path, task: &AssetTask) -> Result<String, 
         )?;
     }
     let snapshots = snapshot_binding_files(project_path, &target)?;
-    if let Err(error) = apply_binding(project_path, task, filename) {
+    let source_tag = if task
+        .attempts
+        .iter()
+        .any(|item| item.imported_file.is_some())
+    {
+        IMPORTED_SOURCE_TAG
+    } else {
+        "source:ai"
+    };
+    if let Err(error) = apply_binding_with_source(project_path, task, filename, source_tag) {
         return match restore_binding_files(snapshots) {
             Ok(()) => Err(error),
             Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
@@ -137,7 +201,81 @@ fn rebind_asset_locked(project_path: &Path, task: &AssetTask) -> Result<String, 
     Ok(filename.to_string())
 }
 
+/// Locate an already-imported audio file that satisfies a manual BGM/SFX task.
+/// Matching is intentionally narrow: the file stem must be the task's target
+/// stem, optionally followed by the `-<taskId>` suffix the binder itself
+/// appends when two tasks share a target stem, so an unrelated import never
+/// silently completes a task the user has not reviewed.
+pub(crate) fn find_imported_audio_file(
+    project_path: &Path,
+    task: &AssetTask,
+) -> Result<Option<String>, String> {
+    if !task.kind.requires_manual_import() {
+        return Ok(None);
+    }
+    let dir = project_path.join("game").join(task.kind.game_dir());
+    if !dir.is_dir() {
+        return Ok(None);
+    }
+    let entries = fs::read_dir(&dir)
+        .map_err(|error| format!("failed to read audio directory {}: {error}", dir.display()))?;
+    let task_suffix = format!("-{}", task.id);
+    let mut exact = Vec::new();
+    let mut suffixed = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !is_audio_extension(extension) {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let filename = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let suffixed_stem = stem
+            .strip_suffix(&task_suffix)
+            .map(|prefix| format!("{prefix}-{task_suffix}"))
+            .unwrap_or_default();
+        if stem == task.target_stem {
+            exact.push(filename);
+        } else if stem == suffixed_stem || stem.starts_with(&format!("{suffixed_stem}-")) {
+            suffixed.push(filename);
+        }
+    }
+    exact.sort();
+    suffixed.sort();
+    Ok(exact
+        .into_iter()
+        .chain(suffixed)
+        .next()
+        .map(|filename| filename.to_string()))
+}
+
+fn is_audio_extension(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "mp3" | "ogg" | "wav" | "flac" | "aac" | "m4a" | "opus"
+    )
+}
+
 fn apply_binding(project_path: &Path, task: &AssetTask, filename: &str) -> Result<(), String> {
+    apply_binding_with_source(project_path, task, filename, "source:ai")
+}
+
+fn apply_binding_with_source(
+    project_path: &Path,
+    task: &AssetTask,
+    filename: &str,
+    source_tag: &str,
+) -> Result<(), String> {
     match task.kind {
         AssetKind::Background => {
             bind_scene_command(project_path, task, filename, CommandType::ChangeBg)?
@@ -149,7 +287,7 @@ fn apply_binding(project_path: &Path, task: &AssetTask, filename: &str) -> Resul
         }
         AssetKind::Tts => bind_tts(project_path, task, filename)?,
     }
-    update_asset_metadata(project_path, task, filename)
+    update_asset_metadata(project_path, task, filename, source_tag)
 }
 
 fn validate_stem(value: &str) -> Result<(), String> {
@@ -554,6 +692,7 @@ fn update_asset_metadata(
     project_path: &Path,
     task: &AssetTask,
     filename: &str,
+    source_tag: &str,
 ) -> Result<(), String> {
     let project = project_path.to_string_lossy();
     let mut metadata = crate::assets::commands::read_asset_metadata(&project)?;
@@ -561,10 +700,9 @@ fn update_asset_metadata(
     metadata
         .descriptions
         .insert(key.clone(), task.prompt.clone());
-    metadata.tags.insert(
-        key,
-        vec!["status:done".to_string(), "source:ai".to_string()],
-    );
+    metadata
+        .tags
+        .insert(key, vec!["status:done".to_string(), source_tag.to_string()]);
     match task.kind {
         AssetKind::Background => {
             metadata.scene_cards.insert(
@@ -669,6 +807,7 @@ mod tests {
                 started_at: 0,
                 finished_at: 1,
                 artifact: Some(artifact.to_string_lossy().into_owned()),
+                imported_file: None,
                 error: None,
                 used_local_fallback: false,
             }],
@@ -723,6 +862,7 @@ mod tests {
                 started_at: 0,
                 finished_at: 1,
                 artifact: Some(outside.to_string_lossy().into_owned()),
+                imported_file: None,
                 error: None,
                 used_local_fallback: false,
             }],
@@ -776,6 +916,7 @@ mod tests {
                         started_at: 0,
                         finished_at: 1,
                         artifact: Some(artifact.to_string_lossy().into_owned()),
+                        imported_file: None,
                         error: None,
                         used_local_fallback: false,
                     }],

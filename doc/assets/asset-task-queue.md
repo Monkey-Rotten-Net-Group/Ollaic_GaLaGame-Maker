@@ -11,7 +11,8 @@ P2 的 AssetTaskQueue 在 Agent Flow 完成 SceneScript 后执行，把 AssetPla
 
 ## 调度与绑定
 
-- 默认并发上限为 2 个图片、4 个 TTS、1 个音频任务，三类任务分别限流。音频任务中的 BGM/音效只生成本地占位或等待用户导入，不调用 AI 音乐端点；队列文件中的 `limits.music` 是历史兼容字段。
+- 默认并发上限为 2 个图片、4 个 TTS、1 个音频任务，三类任务分别限流。音频任务中的 BGM/音效没有 AI 生成路径，始终等待用户在素材库导入音频后绑定，不调用 AI 音乐端点；队列文件中的 `limits.music` 是历史兼容字段。
+- 处于等待导入状态的 BGM/音效任务可在素材步骤检查器中直接选择已导入音频完成绑定，重跑素材步骤时也会自动识别同名词干（及 `-<taskId>` 后缀）的已导入文件并完成绑定，重复重跑不会新增 attempt。
 - 背景、BGM、音效和立绘通过 WebGAL parser / serializer 写入 Scene；TTS 按 Scene 对白序号写入语音引用。
 - 立绘同时更新 `game/config/characters.json`，所有生成素材同步写入素材元数据。
 - FlowBoard 的 `assetQueue` Step 显示完成比例、失败数、prompt、目标 Scene / 角色和重试记录；候选 Artifact 可直接预览、删除或手动提升并绑定为正式素材。

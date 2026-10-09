@@ -194,4 +194,65 @@ describe('FlowStepInspector', () => {
     expect(onDeleteAssetArtifact).toHaveBeenCalledWith('bg-opening', 1);
     expect(await screen.findByRole('alert')).toHaveTextContent('artifact locked');
   });
+
+  it('binds imported audio to a manual audio task and separates pending reasons', async () => {
+    const user = userEvent.setup();
+    const onBindImportedAudio = vi.fn(() => Promise.reject(new Error('imported binding failed')));
+    const assetStep = {
+      ...step,
+      id: 'media-production',
+      kind: 'asset',
+      agent: 'assetQueue',
+      status: 'pending' as const,
+    };
+    render(
+      <FlowStepInspector
+        selected={assetStep}
+        busy={false}
+        detached={false}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onSkip={vi.fn()}
+        onPromptRerun={vi.fn()}
+        assetQueue={{
+          runId: 'run_1',
+          updatedAt: 30,
+          tasks: [
+            {
+              id: 'bgm_theme',
+              kind: 'bgm',
+              targetStem: 'bgm_theme',
+              prompt: '夜晚主题',
+              sceneRef: 'start',
+              status: 'pending',
+              attempts: [],
+              error: 'pending manual import: BGM/SFX 不支持 AI 生成',
+            },
+            {
+              id: 'bg-opening',
+              kind: 'background',
+              targetStem: 'bg_opening',
+              prompt: '黄昏',
+              sceneRef: 'start',
+              status: 'pending',
+              attempts: [],
+              error: 'pending configuration: image provider missing',
+            },
+          ],
+        }}
+        onBindImportedAudio={onBindImportedAudio}
+        importedAudioByDir={{ bgm: ['bgm_theme.mp3'], vocal: [] }}
+      />,
+    );
+
+    await user.click(screen.getByRole('tab', { name: '输出' }));
+    expect(screen.getByText(/BGM\/音效不支持 AI 生成/)).toBeInTheDocument();
+    expect(screen.getByText(/等待供应商配置/)).toBeInTheDocument();
+
+    // SFX candidates live in the vocal directory, so bgm only offers bgm files.
+    const bind = screen.getByRole('button', { name: '绑定 bgm_theme 已导入音频 bgm_theme.mp3' });
+    await user.click(bind);
+    expect(onBindImportedAudio).toHaveBeenCalledWith('bgm_theme', 'bgm_theme.mp3');
+    expect(await screen.findByRole('alert')).toHaveTextContent('imported binding failed');
+  });
 });
