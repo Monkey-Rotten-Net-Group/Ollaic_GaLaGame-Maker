@@ -21,6 +21,7 @@ import { listScenes, readFileText, parseSceneHeader } from './webgal-ipc';
 import { isEditorPatch, type EditorPatch } from './editor-patch';
 import { figureFileTail, findCharacter, resolveSpriteFile } from './figure-resolve';
 import type { Character } from './character-types';
+import type { StagingProjectView } from './staging-project-view';
 
 export type ToolKind = 'read' | 'write';
 
@@ -44,6 +45,8 @@ export interface ToolContext {
    * an answer. Undefined means "no attachment context" and is treated as empty.
    */
   attachedUploadIds?: string[];
+  /** Per-conversation read overlay for writes staged but not yet confirmed. */
+  projectView?: StagingProjectView;
 }
 
 const SCENE_READ_MAX_LINES = 200;
@@ -202,11 +205,14 @@ const readTools: AgentTool[] = [
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
-      const files = await listScenes(projectPath);
+      const files = ctx.projectView ? await ctx.projectView.listScenes() : await listScenes(projectPath);
       // Pair each filename with its chapter/outline header for comprehension.
       const scenes = await Promise.all(files.map(async (file) => {
         try {
-          const header = parseSceneHeader(await readFileText(projectPath, file));
+          const content = ctx.projectView
+            ? await ctx.projectView.readScene(file)
+            : await readFileText(projectPath, file);
+          const header = parseSceneHeader(content);
           return { file, chapter: header.chapter ?? '', outline: header.outline ?? '' };
         } catch {
           return { file, chapter: '', outline: '' };
@@ -233,7 +239,9 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const name = asString(args.name);
       if (!name) throw new Error('read_scene 需要场景文件名 name。');
-      const content = await readFileText(projectPath, name);
+      const content = ctx.projectView
+        ? await ctx.projectView.readScene(name)
+        : await readFileText(projectPath, name);
       const numbered = numberScript(content, asInt(args.fromLine) ?? 1, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
       return { name, ...numbered };
     },
@@ -271,7 +279,9 @@ const readTools: AgentTool[] = [
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
-      const characters = await listCharacterNames(projectPath);
+      const characters = ctx.projectView
+        ? await ctx.projectView.listCharacters()
+        : await listCharacterNames(projectPath);
       return { characters };
     },
   },
@@ -289,6 +299,9 @@ const readTools: AgentTool[] = [
       const id = asString(args.id);
       if (!id) throw new Error('get_character 需要角色 id 或名字。');
       const figureAssets = await listAssets(projectPath, 'figure');
+      if (ctx.projectView) {
+        return summarizeCharacterForAi(await ctx.projectView.getCharacter(id), figureAssets);
+      }
       // Tolerate the model passing a name/alias instead of the canonical id.
       try {
         return summarizeCharacterForAi(await getCharacter(projectPath, id), figureAssets);

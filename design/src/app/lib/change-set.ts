@@ -547,7 +547,7 @@ export async function stageSceneEdit(
 
   const beforeNodes = existing?.beforeNodes ?? (isCurrent ? ctx.currentNodes : await parseScene(originalBefore));
 
-  return {
+  const edit: SceneEdit = {
     kind: 'scene',
     file: staged.file,
     isCurrent,
@@ -559,6 +559,8 @@ export async function stageSceneEdit(
     summary: summarizePatches(patches),
     warnings: existing?.warnings ?? [],
   };
+  if (ctx.draft) ctx.draft.sceneFiles.set(staged.file, afterContent);
+  return edit;
 }
 
 function diffObjectFields(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
@@ -662,11 +664,15 @@ export function stageCreateCharacterEdit(
   ctx: StagingContext,
 ): CreateCharacterEdit {
   const draft = makeDraftCharacter(staged.draft, ctx.characters.length);
-  const duplicate = ctx.characters.some((character) =>
-    character.name.trim().toLowerCase() === draft.name.trim().toLowerCase()
-    || character.id === draft.id,
-  );
-  if (duplicate) throw new StageError(`角色「${draft.name}」已存在，使用 edit_character 修改它。`);
+  const identityTokens = (character: Character) => [character.id, character.name, ...character.aliases]
+    .map((value) => value.trim().toLocaleLowerCase())
+    .filter(Boolean);
+  const draftTokens = new Set(identityTokens(draft));
+  const candidates = [...ctx.characters, ...(ctx.draft ? ctx.draft.characters.values() : [])];
+  const conflict = candidates.find((character) => identityTokens(character).some((token) => draftTokens.has(token)));
+  if (conflict) {
+    throw new StageError(`角色身份「${draft.name}」与「${conflict.name}」冲突，请使用唯一的名称和别名。`);
+  }
   const baseline = {
     ...makeDraftCharacter({ name: draft.name }, ctx.characters.length),
     id: draft.id,
@@ -709,7 +715,7 @@ export function stageCharacterSpritesPlan(
     }
   }
   const after = { ...baseAfter, sprites } as Character;
-  return {
+  const edit: CharacterEdit = {
     kind: 'character',
     id: before.id,
     name: before.name,
@@ -717,6 +723,8 @@ export function stageCharacterSpritesPlan(
     after,
     changedFields: diffObjectFields(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>),
   };
+  if (ctx.draft) ctx.draft.characters.set(after.id, after);
+  return edit;
 }
 
 function sanitizeAssetStem(value: string): string {
@@ -785,12 +793,13 @@ export function stageCharacterEdit(
   staged: Extract<StagedWrite, { tool: 'edit_character' }>,
   ctx: StagingContext,
 ): CharacterEdit {
-  const before = existing?.before ?? ctx.draft?.characters.get(staged.id) ?? ctx.getCharacter(staged.id);
+  const draftCharacters = ctx.draft ? Array.from(ctx.draft.characters.values()) : [];
+  const before = existing?.before ?? findCharacter(draftCharacters, staged.id) ?? ctx.getCharacter(staged.id);
   if (!before) throw new StageError(`找不到角色 id：${staged.id}`);
   const baseAfter = existing?.after ?? before;
   const safePartial = sanitizePartial(staged.partial, CHARACTER_STRING_FIELDS, CHARACTER_STRING_ARRAY_FIELDS);
   const after = { ...baseAfter, ...safePartial } as Character;
-  return {
+  const edit: CharacterEdit = {
     kind: 'character',
     id: staged.id,
     name: before.name,
@@ -798,6 +807,8 @@ export function stageCharacterEdit(
     after,
     changedFields: diffObjectFields(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>),
   };
+  if (ctx.draft) ctx.draft.characters.set(after.id, after);
+  return edit;
 }
 
 /** Build (or merge into) a MemoryEdit from a staged partial update. */

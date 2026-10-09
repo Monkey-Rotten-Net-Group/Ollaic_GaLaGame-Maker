@@ -1,3 +1,4 @@
+pub mod batch_tts_transaction;
 pub mod chat_runs;
 pub mod commands;
 pub mod config;

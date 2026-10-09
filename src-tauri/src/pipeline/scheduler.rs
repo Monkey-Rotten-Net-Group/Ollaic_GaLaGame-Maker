@@ -20,6 +20,7 @@ use crate::pipeline::dsl::{FlowRecipe, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::state::{Clock, RunState, RunStatus, StepRunHistory, StepStatus};
 use crate::pipeline::store;
+use crate::project_transaction::ProjectFileTransaction;
 use crate::story_plan::types::PipelineRunSummary;
 use crate::story_plan::{self, StoryPlan};
 
@@ -114,10 +115,10 @@ impl AssetGenerator for ConfiguredAssetGenerator {
         }
         let (config, capability) = match task.kind {
             AssetKind::Background | AssetKind::Figure => {
-                (crate::ai::config::load_image_config(), "图片")
+                (crate::ai::config::load_image_config()?, "图片")
             }
-            AssetKind::Tts => (crate::ai::config::load_tts_config(), "音频"),
-            AssetKind::Bgm | AssetKind::Sfx => (crate::ai::config::load_music_config(), "音乐"),
+            AssetKind::Tts => (crate::ai::config::load_tts_config()?, "音频"),
+            AssetKind::Bgm | AssetKind::Sfx => (crate::ai::config::load_music_config()?, "音乐"),
         };
         crate::ai::commands::validate_provider_config_basics(&config, capability)?;
         configured_model(&config.model)?;
@@ -166,7 +167,7 @@ async fn generate_configured_asset(
 ) -> Result<GeneratedArtifact, String> {
     let media = match task.kind {
         AssetKind::Background | AssetKind::Figure => {
-            let config = crate::ai::config::load_image_config();
+            let config = crate::ai::config::load_image_config()?;
             crate::ai::commands::generate_image_media(
                 None,
                 task.prompt.clone(),
@@ -176,7 +177,7 @@ async fn generate_configured_asset(
             .await?
         }
         AssetKind::Tts => {
-            let config = crate::ai::config::load_tts_config();
+            let config = crate::ai::config::load_tts_config()?;
             crate::ai::commands::generate_tts_media(
                 task.text.clone().unwrap_or_default(),
                 task.prompt.clone(),
@@ -186,7 +187,7 @@ async fn generate_configured_asset(
             .await?
         }
         AssetKind::Bgm | AssetKind::Sfx => {
-            let config = crate::ai::config::load_music_config();
+            let config = crate::ai::config::load_music_config()?;
             crate::ai::commands::generate_music_media(
                 task.prompt.clone(),
                 configured_model(&config.model)?,
@@ -862,6 +863,7 @@ impl Pipeline {
             let state = handle.state.lock().await;
             state.find_step(&id).and_then(|step| step.def.agent.clone())
         };
+        let mut asset_output_transaction = None;
         let result = if agent_key.as_deref() == Some("assetQueue") {
             let run_id = handle.state.lock().await.run_id.clone();
             let generator = Arc::new(ConfiguredAssetGenerator {
@@ -869,7 +871,7 @@ impl Pipeline {
                 cancelled: handle.cancelled.clone(),
                 figure_matting_model: self.figure_matting_model.clone(),
             });
-            match crate::asset_queue::run_queue_cancellable(
+            match crate::asset_queue::run_queue_cancellable_transactional(
                 project_path,
                 &run_id,
                 &plan,
@@ -879,7 +881,9 @@ impl Pipeline {
             )
             .await
             {
-                Ok(queue) => {
+                Ok(run) => {
+                    let queue = run.queue;
+                    asset_output_transaction = Some(run.transaction);
                     let failed = queue
                         .tasks
                         .iter()
@@ -962,6 +966,9 @@ impl Pipeline {
                 if state.status == RunStatus::Cancelled
                     || state.find_step(&id).map(|step| step.status) != Some(StepStatus::Running)
                 {
+                    if let Some(transaction) = asset_output_transaction.as_mut() {
+                        let _ = transaction.rollback();
+                    }
                     return;
                 }
                 // Keep stop() outside the two durable writes: cancellation
@@ -969,6 +976,10 @@ impl Pipeline {
                 let previous_plan = plan.clone();
                 apply_output(&mut plan, &out);
                 if let Err(error) = story_plan::validate(&plan) {
+                    let asset_rollback = asset_output_transaction
+                        .as_mut()
+                        .map(ProjectFileTransaction::rollback)
+                        .unwrap_or(Ok(()));
                     drop(state);
                     self.fail_step(
                         project_path,
@@ -976,7 +987,11 @@ impl Pipeline {
                         sink,
                         clock,
                         id,
-                        format!("Agent output produced an invalid StoryPlan: {}", error),
+                        format!(
+                            "Agent output produced an invalid StoryPlan: {}{}",
+                            error,
+                            rollback_suffix(asset_rollback)
+                        ),
                     )
                     .await;
                     return;
@@ -985,9 +1000,20 @@ impl Pipeline {
                     match create_rollback_snapshot(project_path, &state.run_id, &id, &out) {
                         Ok(snapshot) => snapshot,
                         Err(error) => {
+                            let asset_rollback = asset_output_transaction
+                                .as_mut()
+                                .map(ProjectFileTransaction::rollback)
+                                .unwrap_or(Ok(()));
                             drop(state);
-                            self.fail_step(project_path, handle, sink, clock, id, error.0)
-                                .await;
+                            self.fail_step(
+                                project_path,
+                                handle,
+                                sink,
+                                clock,
+                                id,
+                                format!("{}{}", error.0, rollback_suffix(asset_rollback)),
+                            )
+                            .await;
                             return;
                         }
                     }
@@ -1004,6 +1030,10 @@ impl Pipeline {
                             project_path.to_string_lossy().to_string(),
                             snapshot_id,
                         );
+                        let asset_rollback = asset_output_transaction
+                            .as_mut()
+                            .map(ProjectFileTransaction::rollback)
+                            .unwrap_or(Ok(()));
                         drop(state);
                         self.fail_step(
                             project_path,
@@ -1011,7 +1041,11 @@ impl Pipeline {
                             sink,
                             clock,
                             id,
-                            format!("failed to persist rollback snapshot: {}", error),
+                            format!(
+                                "failed to persist rollback snapshot: {}{}",
+                                error,
+                                rollback_suffix(asset_rollback)
+                            ),
                         )
                         .await;
                         return;
@@ -1021,14 +1055,29 @@ impl Pipeline {
                     match OutputTransaction::apply(project_path, &out, &plan) {
                         Ok(transaction) => transaction,
                         Err(error) => {
+                            let asset_rollback = asset_output_transaction
+                                .as_mut()
+                                .map(ProjectFileTransaction::rollback)
+                                .unwrap_or(Ok(()));
                             drop(state);
-                            self.fail_step(project_path, handle, sink, clock, id, error.0)
-                                .await;
+                            self.fail_step(
+                                project_path,
+                                handle,
+                                sink,
+                                clock,
+                                id,
+                                format!("{}{}", error.0, rollback_suffix(asset_rollback)),
+                            )
+                            .await;
                             return;
                         }
                     };
                 if let Err(error) = story_plan::save_plan(project_path, &plan) {
                     let rollback = output_transaction.rollback();
+                    let asset_rollback = asset_output_transaction
+                        .as_mut()
+                        .map(ProjectFileTransaction::rollback)
+                        .unwrap_or(Ok(()));
                     drop(state);
                     self.fail_step(
                         project_path,
@@ -1037,13 +1086,39 @@ impl Pipeline {
                         clock,
                         id,
                         format!(
-                            "failed to save StoryPlan: {}{}",
+                            "failed to save StoryPlan: {}{}{}",
                             error,
-                            rollback_suffix(rollback)
+                            rollback_suffix(rollback),
+                            rollback_suffix(asset_rollback)
                         ),
                     )
                     .await;
                     return;
+                }
+                if let Some(transaction) = asset_output_transaction.as_mut() {
+                    if let Err(error) = transaction.prepare_commit() {
+                        let rollback = output_transaction.rollback();
+                        let asset_rollback = transaction.rollback();
+                        let plan_rollback = story_plan::save_plan(project_path, &previous_plan)
+                            .map_err(|error| error.to_string());
+                        drop(state);
+                        self.fail_step(
+                            project_path,
+                            handle,
+                            sink,
+                            clock,
+                            id,
+                            format!(
+                                "failed to prepare asset transaction: {}{}{}{}",
+                                error,
+                                rollback_suffix(rollback),
+                                rollback_suffix(asset_rollback),
+                                rollback_suffix(plan_rollback)
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
                 }
                 {
                     let step = state.find_step_mut(&id).expect("step exists");
@@ -1068,12 +1143,17 @@ impl Pipeline {
                 let output_ref = state.find_step(&id).expect("step exists").output.clone();
                 if let Err(err) = store::save_run_state(project_path, &state) {
                     let rollback = output_transaction.rollback();
+                    let asset_rollback = asset_output_transaction
+                        .as_mut()
+                        .map(ProjectFileTransaction::rollback)
+                        .unwrap_or(Ok(()));
                     let plan_rollback = story_plan::save_plan(project_path, &previous_plan)
                         .map_err(|error| error.to_string());
                     let error = format!(
-                        "failed to persist step success: {}{}{}",
+                        "failed to persist step success: {}{}{}{}",
                         err,
                         rollback_suffix(rollback),
+                        rollback_suffix(asset_rollback),
                         rollback_suffix(plan_rollback)
                     );
                     if let Some(step) = state.find_step_mut(&id) {
@@ -1095,6 +1175,9 @@ impl Pipeline {
                     return;
                 }
                 output_transaction.commit();
+                if let Some(transaction) = asset_output_transaction.take() {
+                    transaction.commit();
+                }
                 drop(state);
                 sink.emit(PipelineEvent::StepSucceeded {
                     run_id,
@@ -1103,8 +1186,19 @@ impl Pipeline {
                 });
             }
             Err(err) => {
-                self.fail_step(project_path, handle, sink, clock, id, err.0)
-                    .await
+                let asset_rollback = asset_output_transaction
+                    .as_mut()
+                    .map(ProjectFileTransaction::rollback)
+                    .unwrap_or(Ok(()));
+                self.fail_step(
+                    project_path,
+                    handle,
+                    sink,
+                    clock,
+                    id,
+                    format!("{}{}", err.0, rollback_suffix(asset_rollback)),
+                )
+                .await
             }
         }
     }
