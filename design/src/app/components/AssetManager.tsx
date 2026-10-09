@@ -120,6 +120,10 @@ function tabToCategories(tab: TabId): string[] {
   }
 }
 
+function supportsAssetGeneration(asset: AssetInfo): boolean {
+  return asset.category === 'background' && isImageExt(asset.extension);
+}
+
 function isImageExt(ext: string): boolean {
   const normalized = ext.toLowerCase().replace(/^\./, '');
   return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(normalized);
@@ -990,6 +994,7 @@ export function AssetManager() {
   };
 
   const handleGenerateFromAsset = (asset: AssetInfo) => {
+    if (!supportsAssetGeneration(asset)) return;
     if (asset.category === 'background') {
       const stem = asset.name.replace(/\.[^.]+$/, '');
       setEditingSceneCard({
@@ -2141,9 +2146,9 @@ export function AssetManager() {
                         value={descriptionForAsset(selectedAsset)}
                         onChange={(e) => handleDescriptionChange(selectedAsset, e.target.value)}
                         rows={6}
-                        placeholder={activeTab === 'scene'
+                        placeholder={selectedAsset.category === 'background'
                           ? '描述要生成或重绘的背景：地点、时间、天气、氛围、镜头角度、画面主体。'
-                          : '描述要生成的音频：情绪、节奏、乐器、用途或台词内容。'}
+                          : '备注这段音频的用途，例如：战斗场景循环、角色出场主题。'}
                         className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/50"
                       />
                     </div>
@@ -2180,7 +2185,7 @@ export function AssetManager() {
                     <Edit3 className="w-4 h-4" />
                     重命名
                   </button>
-                  {selectedAsset.category !== 'vocal' && (
+                  {supportsAssetGeneration(selectedAsset) && (
                     <button
                       onClick={() => handleGenerateFromAsset(selectedAsset)}
                       className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all flex items-center justify-center gap-2"
