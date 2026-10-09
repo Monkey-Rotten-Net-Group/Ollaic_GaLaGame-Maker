@@ -64,6 +64,21 @@ pub fn bind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Strin
 
 /// Restore scene/config references to an already-promoted successful asset.
 pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
+    let (filename, target) = validate_promoted_asset(project_path, task)?;
+    let snapshots = snapshot_binding_files(project_path, &target)?;
+    if let Err(error) = apply_binding(project_path, task, &filename) {
+        return match restore_binding_files(snapshots) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
+        };
+    }
+    Ok(filename)
+}
+
+pub(crate) fn validate_promoted_asset(
+    project_path: &Path,
+    task: &AssetTask,
+) -> Result<(String, PathBuf), String> {
     let filename = task
         .asset_file
         .as_deref()
@@ -89,14 +104,7 @@ pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, Str
             &bytes,
         )?;
     }
-    let snapshots = snapshot_binding_files(project_path, &target)?;
-    if let Err(error) = apply_binding(project_path, task, filename) {
-        return match restore_binding_files(snapshots) {
-            Ok(()) => Err(error),
-            Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
-        };
-    }
-    Ok(filename.to_string())
+    Ok((filename.to_string(), target))
 }
 
 fn apply_binding(project_path: &Path, task: &AssetTask, filename: &str) -> Result<(), String> {

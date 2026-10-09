@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
+use std::sync::Arc;
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SceneName(String);
@@ -57,7 +57,7 @@ impl SceneName {
 pub struct ProjectPaths {
     root: PathBuf,
     scene_dir: PathBuf,
-    write_guard: Arc<Mutex<()>>,
+    write_guard: Arc<AsyncMutex<()>>,
 }
 
 impl ProjectPaths {
@@ -75,7 +75,7 @@ impl ProjectPaths {
 
         let game = canonical_domain_dir(&root, &root.join("game"), "game")?;
         let scene_dir = canonical_domain_dir(&game, &game.join("scene"), "scene")?;
-        let write_guard = project_write_guard(&root);
+        let write_guard = crate::project_transaction::project_guard(&root);
         Ok(Self {
             root,
             scene_dir,
@@ -110,10 +110,7 @@ impl ProjectPaths {
 
     pub fn create_scene(&self, scene_name: &str, content: &[u8]) -> Result<SceneName, String> {
         let scene_name = SceneName::parse(scene_name)?;
-        let _guard = self
-            .write_guard
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _guard = self.lock_for_write();
         if self.has_case_insensitive_scene(&scene_name)? {
             return Err(format!("Scene {} already exists", scene_name.as_str()));
         }
@@ -174,10 +171,25 @@ impl ProjectPaths {
         &self.root
     }
 
-    pub fn lock_for_write(&self) -> MutexGuard<'_, ()> {
-        self.write_guard
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+    pub fn lock_for_write(&self) -> OwnedMutexGuard<()> {
+        futures::executor::block_on(self.write_guard.clone().lock_owned())
+    }
+
+    #[cfg(test)]
+    pub fn lock_for_write_with_wait_hook(&self, on_wait: impl FnOnce()) -> OwnedMutexGuard<()> {
+        use std::future::Future;
+        use std::task::{Context, Poll};
+
+        let mut lock = Box::pin(self.write_guard.clone().lock_owned());
+        let waker = futures::task::noop_waker();
+        let mut context = Context::from_waker(&waker);
+        match lock.as_mut().poll(&mut context) {
+            Poll::Ready(guard) => guard,
+            Poll::Pending => {
+                on_wait();
+                futures::executor::block_on(lock)
+            }
+        }
     }
 }
 
@@ -212,19 +224,6 @@ fn is_reserved_stem(stem: &str) -> bool {
                         .first()
                         .is_some_and(|digit| (b'1'..=b'9').contains(digit))
             })
-}
-
-fn project_write_guard(project: &Path) -> Arc<Mutex<()>> {
-    static GUARDS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
-    let guards = GUARDS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guards = guards.lock().unwrap_or_else(|error| error.into_inner());
-    if let Some(guard) = guards.get(project).and_then(Weak::upgrade) {
-        return guard;
-    }
-    guards.retain(|_, guard| guard.strong_count() > 0);
-    let guard = Arc::new(Mutex::new(()));
-    guards.insert(project.to_path_buf(), Arc::downgrade(&guard));
-    guard
 }
 
 #[cfg(test)]

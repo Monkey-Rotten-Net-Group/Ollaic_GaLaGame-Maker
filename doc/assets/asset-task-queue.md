@@ -7,6 +7,7 @@ P2 的 AssetTaskQueue 在 Agent Flow 完成 SceneScript 后执行，把 AssetPla
 - 队列保存于 `.ollaic/assets/queue.json`，状态为 `pending → running / retrying → succeeded / failed`。
 - 每项生成失败后最多自动重试 3 次，即一次初始尝试加三次重试。应用重启后跳过已成功任务，继续未完成任务。
 - 每次候选产物先写入 `.ollaic/artifacts/assets/<taskId>/<attempt>.<ext>`；只有绑定成功后才晋升到 `game/` 正式素材目录。失败记录和候选 Artifact 保留用于预览、清理或后续手动处理。
+- 生成期间不持有项目写锁；发布前才获取与场景保存共用的锁并建立回滚快照。取消或发布回滚保留已生成候选及其 attempt 记录；同一任务内容未变且候选仍存在时，重试直接重新绑定，不重复调用供应商。尚未提交的整批绑定会一起回滚，不视为已经发布成功。
 - 每次 attempt 和已绑定任务都会持久化是否使用本地占位素材；崩溃恢复后，Flow Step 仍会保留降级提示。
 
 ## 调度与绑定

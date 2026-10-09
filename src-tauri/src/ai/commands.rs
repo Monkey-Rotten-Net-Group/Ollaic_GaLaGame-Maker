@@ -2478,14 +2478,50 @@ pub struct BatchTtsProgress {
     pub asset_name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct BatchTtsFailure {
     code: &'static str,
+    stage: &'static str,
     failed_index: usize,
     voice_card_id: String,
     generated_count: usize,
     message: String,
+}
+
+impl BatchTtsFailure {
+    fn encoded(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|error| error.to_string())
+    }
+}
+
+fn prepare_generated_voice_asset(
+    item: &BatchTtsItem,
+    index: usize,
+    generated_count: usize,
+    filename: String,
+    media: GeneratedMedia,
+) -> Result<PreparedVoiceAsset, BatchTtsFailure> {
+    let encoded = media
+        .base64_data
+        .split_once(',')
+        .map(|(_, payload)| payload)
+        .unwrap_or(media.base64_data.as_str());
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|error| BatchTtsFailure {
+            code: "batch_tts_preparation_failed",
+            stage: "decode",
+            failed_index: index,
+            voice_card_id: item.voice_card_id.clone(),
+            generated_count,
+            message: format!("解析批量语音结果失败: {error}"),
+        })?;
+    Ok(PreparedVoiceAsset::new(
+        item.voice_card_id.clone(),
+        filename,
+        bytes,
+    ))
 }
 
 /// Generate TTS audio for multiple voice cards in sequence, emitting progress
@@ -2578,14 +2614,13 @@ pub async fn generate_batch_tts(
                 let _ = app_handle.emit("batch-tts-progress", &progress);
                 let failure = BatchTtsFailure {
                     code: "batch_tts_generation_failed",
+                    stage: "generation",
                     failed_index: index,
                     voice_card_id: item.voice_card_id.clone(),
                     generated_count: prepared.len(),
                     message,
                 };
-                return Err(
-                    serde_json::to_string(&failure).unwrap_or_else(|error| error.to_string())
-                );
+                return Err(failure.encoded());
             }
         };
         let stem = stem_map
@@ -2593,19 +2628,23 @@ pub async fn generate_batch_tts(
             .cloned()
             .unwrap_or_else(|| format!("vo_batch_{}", item.voice_card_id));
         let filename = format!("{}.{}", stem, media.extension);
-        let encoded = media
-            .base64_data
-            .split_once(',')
-            .map(|(_, payload)| payload)
-            .unwrap_or(media.base64_data.as_str());
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded.trim())
-            .map_err(|error| format!("解析批量语音结果失败: {error}"))?;
-        prepared.push(PreparedVoiceAsset::new(
-            item.voice_card_id.clone(),
-            filename,
-            bytes,
-        ));
+        let prepared_asset =
+            match prepare_generated_voice_asset(item, index, prepared.len(), filename, media) {
+                Ok(asset) => asset,
+                Err(failure) => {
+                    let progress = BatchTtsProgress {
+                        voice_card_id: item.voice_card_id.clone(),
+                        index,
+                        total,
+                        status: "error".to_string(),
+                        message: format!("准备失败: {}", failure.message),
+                        asset_name: None,
+                    };
+                    let _ = app_handle.emit("batch-tts-progress", &progress);
+                    return Err(failure.encoded());
+                }
+            };
+        prepared.push(prepared_asset);
     }
 
     let published = publish_batch(std::path::Path::new(&project_path), prepared).await?;
