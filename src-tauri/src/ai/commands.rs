@@ -30,14 +30,14 @@ const MAX_LOG_FIELD_CHARS: usize = 50_000;
 const MAX_TRACE_FIELD_CHARS: usize = 50_000;
 const HTTP_REQUEST_TIMEOUT_SECS: u64 = 180;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ToolCallInput {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AiMessageInput {
     pub role: String,
     #[serde(default)]
@@ -50,7 +50,7 @@ pub struct AiMessageInput {
     pub tool_call_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ToolDef {
     pub name: String,
     #[serde(default)]
@@ -59,7 +59,7 @@ pub struct ToolDef {
     pub parameters: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AiToolCall {
     pub id: String,
@@ -67,7 +67,7 @@ pub struct AiToolCall {
     pub arguments: serde_json::Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiTurnResult {
     pub text: Option<String>,
@@ -83,7 +83,7 @@ pub enum AiStreamEvent {
     Error { message: String },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiValidationResult {
     pub ok: bool,
@@ -729,7 +729,7 @@ pub(crate) fn has_agent_chat_config() -> bool {
     validate_config_basics(&config::load_config()).is_ok()
 }
 
-fn effective_endpoint(cfg: &AiConfig) -> String {
+pub(crate) fn effective_endpoint(cfg: &AiConfig) -> String {
     resolved_base_url(&cfg.provider, Modality::Chat, &cfg.base_url)
 }
 
@@ -942,7 +942,7 @@ fn sanitize_log_field(value: &str) -> String {
     truncate_log_field(&redact_common_secrets(value))
 }
 
-fn redact_known_secret(value: &str, secret: &str) -> String {
+pub(crate) fn redact_known_secret(value: &str, secret: &str) -> String {
     let secret = secret.trim();
     if secret.is_empty() {
         value.to_string()
@@ -951,7 +951,7 @@ fn redact_known_secret(value: &str, secret: &str) -> String {
     }
 }
 
-fn redact_common_secrets(value: &str) -> String {
+pub(crate) fn redact_common_secrets(value: &str) -> String {
     let mut output = value.to_string();
     for marker in [
         "authorization=bearer ",
