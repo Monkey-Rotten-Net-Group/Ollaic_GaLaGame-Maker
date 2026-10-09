@@ -8,7 +8,7 @@ const DEFAULT_MODEL_URLS: &[&str] = &[
     "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx",
 ];
 const MODEL_EXPECTED_BYTES: u64 = 114_538_221;
-const MODEL_SHA256: &str = "3577c6271cc2333089950dd91a4eca03818d636514ef03557a9678db61644821";
+const MODEL_SHA256: &str = "d39b897ceb16ae654c1731f3dba0cf9b368d9cae74b5a57459b455cc8bfec402";
 const MODEL_FILENAME: &str = "birefnet-lite-fp16.onnx";
 /// 下载读取上限（略高于预期大小，绕过 ureq 默认 10MB 限制）。
 const DOWNLOAD_LIMIT_BYTES: u64 = 150 * 1024 * 1024;
@@ -49,17 +49,27 @@ fn ensure_matting_model() -> Result<(), String> {
     let models_dir = manifest_dir.join("models");
     let model_path = models_dir.join(MODEL_FILENAME);
 
-    // 已存在且大小匹配 → 认为完好，跳过。
+    // 已存在且大小及校验和匹配 → 认为完好，跳过。
     if let Ok(meta) = std::fs::metadata(&model_path) {
-        if meta.len() == MODEL_EXPECTED_BYTES && sha256_file(&model_path)? == MODEL_SHA256 {
-            return Ok(());
+        if meta.len() == MODEL_EXPECTED_BYTES {
+            match sha256_file(&model_path) {
+                Ok(ref hash) if hash == MODEL_SHA256 => return Ok(()),
+                Ok(ref hash) => {
+                    println!(
+                        "cargo:warning=已存在的抠图模型校验和不符（得到 {hash}，预期 {MODEL_SHA256}），将重新下载。"
+                    );
+                }
+                Err(e) => {
+                    println!("cargo:warning=读取已存在模型哈希失败（{e}），将重新下载。");
+                }
+            }
+        } else {
+            println!(
+                "cargo:warning=已存在的抠图模型大小异常（{} 字节，预期 {}），将重新下载。",
+                meta.len(),
+                MODEL_EXPECTED_BYTES
+            );
         }
-        // 大小不符：可能是半截/损坏文件，删除后重新下载。
-        println!(
-            "cargo:warning=已存在的抠图模型大小异常（{} 字节，预期 {}），将重新下载。",
-            meta.len(),
-            MODEL_EXPECTED_BYTES
-        );
         let _ = std::fs::remove_file(&model_path);
     }
 
@@ -105,9 +115,13 @@ fn ensure_matting_model() -> Result<(), String> {
                         if downloaded == MODEL_EXPECTED_BYTES && digest == MODEL_SHA256 {
                             downloaded_bytes = Some(bytes);
                             break;
-                        } else {
+                        } else if downloaded != MODEL_EXPECTED_BYTES {
                             last_error = format!(
                                 "从 {url} 下载的模型大小不符：得到 {downloaded} 字节，预期 {MODEL_EXPECTED_BYTES}"
+                            );
+                        } else {
+                            last_error = format!(
+                                "从 {url} 下载的模型校验和不符：得到 {digest}，预期 {MODEL_SHA256}"
                             );
                         }
                     }
