@@ -73,7 +73,6 @@ const navItems: Array<{ id: OllaicSection; label: string; icon: LucideIcon }> = 
   { id: 'home', label: '首页', icon: Home },
   { id: 'flow', label: '生产流', icon: Workflow },
   { id: 'script', label: '脚本流', icon: BookOpen },
-  { id: 'world', label: '场景', icon: GitBranch },
   { id: 'assets', label: '资源库', icon: Boxes },
 ];
 
