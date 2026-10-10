@@ -1006,7 +1006,7 @@ export function StoryEditor() {
           onSettings={() => setAppSettingsOpen(true)}
         />
         <OllaicSideNav
-          active={viewMode === 'worldline' ? 'world' : 'script'}
+          active="script"
           projectId={projectId}
           projectLabel={gameName}
           onCreate={handleNewScene}
@@ -1051,6 +1051,14 @@ export function StoryEditor() {
             onSelectNode={handleSelectNodeWithScroll}
             onOpenScene={stableSwitchScene}
             onOpenSceneManager={() => setSceneManagerOpen(true)}
+            onNewScene={handleNewScene}
+            onRenameScene={handleRenameScene}
+            onDeleteScene={handleDeleteScene}
+            onEnlargePreview={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set('view', 'worldline');
+              setSearchParams(next, { replace: true });
+            }}
             characterColors={characterColors}
             onDeleteNode={deleteNode}
             onJumpToIndex={jumpToNode}
