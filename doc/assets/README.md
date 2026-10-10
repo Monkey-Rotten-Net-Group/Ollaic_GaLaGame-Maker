@@ -16,8 +16,8 @@
 - **素材库中心**:`AssetManager.tsx`,标签页组织背景/CG/音乐/语音/角色(立绘)。其中包含独立的 `VoiceDubbingPanel` 处理配音进度。
 - **素材选择器**:`AssetPicker.tsx`,在详情面板等处快速挑选素材,带音频试听与缩略图。
 - **元数据**:`lib/asset-metadata.ts`,为素材记录别名、描述、参考资料,以及生成用的「场景卡 / 语音卡」。
-- 素材可由用户上传,也可由 AI 生成(见 [AI 素材与立绘生成](../ai/media-generation.md))。
-- Agent Flow 通过 AssetTaskQueue 自动生成并绑定背景、立绘、BGM、音效和逐句语音。
+- 图片、立绘和配音可由 AI 生成(见 [AI 素材与立绘生成](../ai/media-generation.md)); BGM/音效由用户上传。
+- Agent Flow 通过 AssetTaskQueue 自动生成并绑定背景、立绘和逐句语音；BGM/音效任务仅保留本地占位与队列兼容能力。
 
 ## 相关源码
 - `design/src/app/components/AssetManager.tsx`、`design/src/app/components/AssetPicker.tsx`、`VoiceDubbingPanel.tsx`

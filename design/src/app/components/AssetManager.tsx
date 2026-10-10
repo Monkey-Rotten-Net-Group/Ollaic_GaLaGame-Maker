@@ -56,10 +56,8 @@ import {
 import {
   getAiImageConfig,
   getAiTtsConfig,
-  getAiMusicConfig,
   aiGenerateImage,
   aiGenerateTts,
-  generateMusic,
   listenAiMediaGenerationProgress,
   type AiProviderConfig,
   type AiMediaGenerationProgress,
@@ -120,6 +118,10 @@ function tabToCategories(tab: TabId): string[] {
     case 'character': return ['figure'];
     case 'dubbing': return ['vocal'];
   }
+}
+
+function supportsAssetGeneration(asset: AssetInfo): boolean {
+  return asset.category === 'background' && isImageExt(asset.extension);
 }
 
 function isImageExt(ext: string): boolean {
@@ -321,7 +323,6 @@ export function AssetManager() {
   const [voiceCards, setVoiceCards] = useState<VoiceAssetCard[]>([]);
   const [selectedVoiceCard, setSelectedVoiceCard] = useState<VoiceAssetCard | null>(null);
   const [aiAssetPrompt, setAiAssetPrompt] = useState('');
-  const [aiMusicFilename, setAiMusicFilename] = useState<string | null>(null);
   // BGM references scanned from scene scripts: filename + whether the file exists.
   const [bgmReferences, setBgmReferences] = useState<{ filename: string; exists: boolean }[]>([]);
 
@@ -683,7 +684,7 @@ export function AssetManager() {
 
   const importConfig = getImportConfig(activeTab, musicCategory);
   const isDubbingWorkspace = activeTab === 'music' && musicCategory === 'dubbing';
-  const showAiAction = !(activeTab === 'music' && (musicCategory === 'dubbing' || musicCategory === 'vocal'));
+  const showAiAction = activeTab !== 'music';
   const aiActionLabel = activeTab === 'scene'
     ? '新建场景'
     : activeTab === 'cg'
@@ -993,6 +994,7 @@ export function AssetManager() {
   };
 
   const handleGenerateFromAsset = (asset: AssetInfo) => {
+    if (!supportsAssetGeneration(asset)) return;
     if (asset.category === 'background') {
       const stem = asset.name.replace(/\.[^.]+$/, '');
       setEditingSceneCard({
@@ -1244,7 +1246,6 @@ export function AssetManager() {
                     }
                     setEditingSceneCard(null);
                     setAiAssetPrompt('');
-                    setAiMusicFilename(null);
                     setAiGenerateOpen(true);
                   }}
                   className="ollaic-command border-primary/30 bg-primary/10 text-primary"
@@ -1368,7 +1369,7 @@ export function AssetManager() {
             {activeTab === 'music' && musicCategory === 'bgm' && bgmReferences.length > 0 && (
               <div className="mx-6 mt-2 rounded-md border border-border bg-secondary/20 p-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  脚本引用的 BGM（{bgmReferences.filter((r) => !r.exists).length} 个待生成）
+                  脚本引用的 BGM（{bgmReferences.filter((r) => !r.exists).length} 个待导入）
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {bgmReferences.map((ref) => (
@@ -1381,23 +1382,9 @@ export function AssetManager() {
                       <Music className="h-3.5 w-3.5 opacity-70" />
                       <span className="font-mono-family">{ref.filename}</span>
                       {ref.exists ? (
-                        <span className="text-[10px] text-emerald-500">已生成</span>
+                        <span className="text-[10px] text-emerald-500">已就绪</span>
                       ) : (
-                        <button
-                          onClick={() => {
-                            setSelectedAsset(null);
-                            setSelectedVoiceCard(null);
-                            setSelectedSceneCard(null);
-                            setEditingSceneCard(null);
-                            setAiAssetPrompt(descriptionForAsset({ category: 'bgm', name: ref.filename }));
-                            setAiMusicFilename(ref.filename);
-                            setAiGenerateOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1 rounded bg-primary px-2 py-0.5 text-[10px] text-primary-foreground hover:opacity-90"
-                        >
-                          <Sparkles className="h-3 w-3" />
-                          AI 生成
-                        </button>
+                        <span className="text-[10px] text-amber-500">待导入</span>
                       )}
                     </div>
                   ))}
@@ -2159,9 +2146,9 @@ export function AssetManager() {
                         value={descriptionForAsset(selectedAsset)}
                         onChange={(e) => handleDescriptionChange(selectedAsset, e.target.value)}
                         rows={6}
-                        placeholder={activeTab === 'scene'
+                        placeholder={selectedAsset.category === 'background'
                           ? '描述要生成或重绘的背景：地点、时间、天气、氛围、镜头角度、画面主体。'
-                          : '描述要生成的音频：情绪、节奏、乐器、用途或台词内容。'}
+                          : '备注这段音频的用途，例如：战斗场景循环、角色出场主题。'}
                         className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/50"
                       />
                     </div>
@@ -2198,7 +2185,7 @@ export function AssetManager() {
                     <Edit3 className="w-4 h-4" />
                     重命名
                   </button>
-                  {selectedAsset.category !== 'vocal' && (
+                  {supportsAssetGeneration(selectedAsset) && (
                     <button
                       onClick={() => handleGenerateFromAsset(selectedAsset)}
                       className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all flex items-center justify-center gap-2"
@@ -2229,7 +2216,6 @@ export function AssetManager() {
         initialSceneCard={editingSceneCard}
         initialVoiceCard={selectedVoiceCard}
         initialAssetPrompt={aiAssetPrompt}
-        initialMusicFilename={aiMusicFilename}
         onGenerated={async (asset, prompt) => {
           setAssets((current) => current.some((item) => item.path === asset.path)
             ? current.map((item) => item.path === asset.path ? asset : item)
@@ -2271,20 +2257,7 @@ export function AssetManager() {
           if (activeTab === 'music' && selectedVoiceCard) {
             handleSaveVoiceCard({ ...selectedVoiceCard, voiceAsset: asset.name });
           }
-          // BGM: persist the music prompt onto the generated file and refresh the
-          // pending list. The file lands at the script-referenced name, so the
-          // bgm: reference is bound automatically — no script write-back needed.
-          if (activeTab === 'music' && musicCategory === 'bgm' && !selectedVoiceCard) {
-            if (prompt?.trim()) {
-              persistMetadata(setAssetDescription(metadataRef.current, 'bgm', asset.name, prompt.trim()));
-            }
-            setBgmReferences((current) =>
-              current.map((ref) =>
-                (ref.filename === asset.name || (aiMusicFilename && ref.filename === aiMusicFilename))
-                  ? { ...ref, filename: asset.name, exists: true }
-                  : ref));
-            setAiMusicFilename(null);
-          }
+
         }}
         onClose={() => setAiGenerateOpen(false)}
       />
@@ -2325,7 +2298,6 @@ function AssetAiGenerateDialog({
   initialSceneCard,
   initialVoiceCard,
   initialAssetPrompt,
-  initialMusicFilename,
   onGenerated,
   onClose,
 }: {
@@ -2336,7 +2308,6 @@ function AssetAiGenerateDialog({
   initialSceneCard?: SceneAssetCard | null;
   initialVoiceCard?: VoiceAssetCard | null;
   initialAssetPrompt?: string;
-  initialMusicFilename?: string | null;
   onGenerated: (asset: AssetInfo, prompt?: string) => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -2346,43 +2317,34 @@ function AssetAiGenerateDialog({
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<AiMediaGenerationProgress | null>(null);
-  const [musicPrompt, setMusicPrompt] = useState('');
 
   const isImageGeneration = activeTab === 'scene' || activeTab === 'cg';
   const isVoiceGeneration = activeTab === 'music' && Boolean(initialVoiceCard);
-  const isMusicGeneration = activeTab === 'music' && !isVoiceGeneration;
   const title = isImageGeneration
     ? activeTab === 'cg' ? 'AI 生成 CG 剧情画' : 'AI 生成背景素材'
-    : isVoiceGeneration ? 'AI 生成配音' : `AI 生成${musicCategoryLabels[musicCategory]}`;
+    : 'AI 生成配音';
   const configuredModels = config ? parseConfiguredModels(config.model) : [];
   const effectiveModel = selectedModel || configuredModels[0] || config?.model.trim() || '';
   const promptSource = isImageGeneration
     ? initialSceneCard?.prompt.trim() || (initialAssetPrompt ?? '').trim()
-    : isVoiceGeneration
-      ? [
-          initialVoiceCard?.text.trim(),
-          initialVoiceCard?.character ? `角色：${initialVoiceCard.character}` : '',
-          initialVoiceCard?.emotion ? `情绪：${initialVoiceCard.emotion}` : '',
-        ].filter(Boolean).join('\n')
-      : musicPrompt.trim();
-  const targetCategory = isImageGeneration ? 'background' : isVoiceGeneration ? 'vocal' : musicCategory;
+    : [
+        initialVoiceCard?.text.trim(),
+        initialVoiceCard?.character ? `角色：${initialVoiceCard.character}` : '',
+        initialVoiceCard?.emotion ? `情绪：${initialVoiceCard.emotion}` : '',
+      ].filter(Boolean).join('\n');
+  const targetCategory = isImageGeneration ? 'background' : 'vocal';
   const targetFilename = isImageGeneration
     ? `${initialSceneCard?.targetStem || initialSceneCard?.imageAsset?.replace(/\.[^.]+$/, '') || 'generated_background'}.png`
     : isVoiceGeneration
       ? initialVoiceCard?.voiceAsset || `${initialVoiceCard?.targetStem || initialVoiceCard?.id || 'generated_voice'}.wav`
-      : initialMusicFilename?.trim() || `generated_${musicCategory}.wav`;
-
-  useEffect(() => {
-    if (!open) return;
-    if (isMusicGeneration) setMusicPrompt((initialAssetPrompt ?? '').trim());
-  }, [open, isMusicGeneration, initialAssetPrompt]);
+      : 'generated_voice.wav';
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setGenerationProgress(null);
     setLoadingConfig(true);
-    (isImageGeneration ? getAiImageConfig() : isMusicGeneration ? getAiMusicConfig() : getAiTtsConfig())
+    (isImageGeneration ? getAiImageConfig() : getAiTtsConfig())
       .then((nextConfig) => {
         setConfig(nextConfig);
         const models = parseConfiguredModels(nextConfig.model);
@@ -2434,11 +2396,7 @@ function AssetAiGenerateDialog({
       setError(
         isImageGeneration
           ? '请先在右侧详情里填写描述。'
-          : isVoiceGeneration
-            ? '请先在右侧详情里填写台词。'
-            : isMusicGeneration
-              ? '请先填写音乐描述（提示词）。'
-              : '请先在右侧详情里填写台词或描述。',
+          : '请先在右侧详情里填写台词。',
       );
       return;
     }
@@ -2448,23 +2406,19 @@ function AssetAiGenerateDialog({
     try {
       const media = isImageGeneration
         ? await aiGenerateImage(promptSource, effectiveModel)
-        : isMusicGeneration
-          ? await generateMusic(promptSource, effectiveModel, targetFilename.split('.').pop() || 'mp3')
-          : await aiGenerateTts(
-              isVoiceGeneration ? (initialVoiceCard?.text ?? promptSource) : promptSource,
-              isVoiceGeneration
-                ? `${initialVoiceCard?.character || '旁白'} ${initialVoiceCard?.emotion || '默认'}`
-                : promptSource,
-              effectiveModel,
-              targetFilename.split('.').pop() || 'mp3',
-            );
+        : await aiGenerateTts(
+            isVoiceGeneration ? (initialVoiceCard?.text ?? promptSource) : promptSource,
+            isVoiceGeneration
+              ? `${initialVoiceCard?.character || '旁白'} ${initialVoiceCard?.emotion || '默认'}`
+              : promptSource,
+            effectiveModel,
+            targetFilename.split('.').pop() || 'mp3',
+          );
       const requestedStem = targetFilename.replace(/\.[^.]+$/, '');
       const actualExtension = media.extension?.replace(/^\./, '') || targetFilename.split('.').pop() || 'bin';
-      const resolvedFilename = isMusicGeneration && initialMusicFilename?.trim()
-        ? initialMusicFilename.trim()
-        : `${requestedStem}.${actualExtension}`;
+      const resolvedFilename = `${requestedStem}.${actualExtension}`;
       const asset = await saveGeneratedAsset(projectPath, targetCategory, resolvedFilename, media.base64Data);
-      await onGenerated(asset, isMusicGeneration ? promptSource : undefined);
+      await onGenerated(asset);
       onClose();
     } catch (e) {
       setError(String(e));
@@ -2519,17 +2473,7 @@ function AssetAiGenerateDialog({
             )}
           </FieldBlock>
 
-          {isMusicGeneration ? (
-            <FieldBlock label="音乐描述（提示词）">
-              <textarea
-                value={musicPrompt}
-                onChange={(e) => setMusicPrompt(e.target.value)}
-                rows={3}
-                placeholder="例：紧张的战斗背景音乐，快节奏鼓点与弦乐，循环"
-                className="w-full resize-none rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              />
-            </FieldBlock>
-          ) : promptSource.trim() ? (
+          {promptSource.trim() ? (
             <div className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
               {isVoiceGeneration
                 ? '将使用右侧详情中的台词、角色和情绪作为生成提示词。'

@@ -142,6 +142,8 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
     updateDependencies,
     previewAssetArtifact,
     updateAssetArtifact,
+    bindImportedAudio,
+    importedAudioByDir,
   } = useFlowRunController(projectPath);
   const [nodes, setNodes, onNodesChange] = useNodesState<StepNodeData>([]);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -530,6 +532,8 @@ export function FlowBoard({ projectPath, onOpenArtifact }: FlowBoardProps) {
               onPreviewAssetArtifact={previewAssetArtifact}
               onDeleteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueueDeleteArtifact, taskId, attempt)}
               onPromoteAssetArtifact={(taskId, attempt) => updateAssetArtifact(assetQueuePromoteArtifact, taskId, attempt)}
+              onBindImportedAudio={bindImportedAudio}
+              importedAudioByDir={importedAudioByDir}
             />
           </div>
         )}

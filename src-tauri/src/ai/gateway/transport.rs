@@ -50,7 +50,7 @@ pub fn resolved_base_url(provider: &str, modality: Modality, base_url: &str) -> 
 }
 
 /// Join the resolved base URL with an API path. The only URL builder for
-/// image/TTS/music requests, so a provider's endpoint cannot differ between
+/// image/TTS requests, so a provider's endpoint cannot differ between
 /// the request and the log line.
 pub fn media_endpoint(cfg: &AiProviderConfig, modality: Modality, path: &str) -> String {
     let base = resolved_base_url(&cfg.provider, modality, &cfg.base_url);
@@ -232,8 +232,6 @@ mod tests {
     fn builtin_media_contract_endpoints_are_stable() {
         assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Image, "images/generations"), "https://api.openai.com/v1/images/generations");
         assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Tts, "audio/speech"), "https://api.openai.com/v1/audio/speech");
-        assert_eq!(media_endpoint(&cfg("openai", "https://gateway.test/v1"), Modality::Music, "audio/music"), "https://gateway.test/v1/audio/music");
-        assert_eq!(media_endpoint(&cfg("custom", "https://gateway.test/v1"), Modality::Music, "audio/music"), "https://gateway.test/v1/audio/music");
         assert_eq!(media_endpoint(&cfg("aliyun", ""), Modality::Image, "tasks/abc"), "https://dashscope.aliyuncs.com/api/v1/tasks/abc");
         assert_eq!(media_endpoint(&cfg("elevenlabs", ""), Modality::Tts, "v1/text-to-speech/voice"), "https://api.elevenlabs.io/v1/text-to-speech/voice");
     }
@@ -289,8 +287,8 @@ mod tests {
     #[test]
     fn provider_without_a_default_yields_the_bare_path() {
         assert_eq!(
-            media_endpoint(&cfg("custom", ""), Modality::Music, "audio/music"),
-            "audio/music"
+            media_endpoint(&cfg("custom", ""), Modality::Tts, "audio/speech"),
+            "audio/speech"
         );
     }
 }

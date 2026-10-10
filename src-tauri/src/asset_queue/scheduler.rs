@@ -8,10 +8,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
-use super::binder::rebind_asset;
+use super::binder::{find_imported_audio_file, rebind_asset};
 use super::store::{load_queue, save_queue};
-use super::transaction::{commit_generated_binding, recover_pending};
-use super::types::{AssetAttempt, AssetKind, AssetQueue, AssetTask, AssetTaskStatus};
+use super::transaction::{bind_imported_audio, commit_generated_binding, recover_pending};
+use super::types::{
+    AssetAttempt, AssetKind, AssetQueue, AssetTask, AssetTaskStatus, PENDING_CONFIGURATION_PREFIX,
+    PENDING_MANUAL_IMPORT_PREFIX,
+};
 use crate::story_plan::types::StoryPlan;
 
 pub const ASSET_QUEUE_CANCELLED: &str = "asset queue cancelled";
@@ -93,19 +96,44 @@ pub async fn run_queue_cancellable(
     }
     let attempt_budget = queue.limits.max_retries + 1;
     let mut runnable = Vec::new();
+    // Manual BGM/SFX tasks have no generation route, so a re-run accepts an
+    // already-imported audio file as their completion instead of leaving them
+    // pending forever. The transaction records the binding exactly once, so a
+    // repeated run over the same file stays idempotent.
+    let mut imported = Vec::new();
     for (index, task) in queue.tasks.iter_mut().enumerate() {
         if task.status == AssetTaskStatus::Succeeded {
             continue;
         }
+        if task.kind.requires_manual_import() {
+            match find_imported_audio_file(project_path, task) {
+                Ok(Some(filename)) => {
+                    imported.push((index, filename));
+                    continue;
+                }
+                Err(error) => {
+                    task.status = AssetTaskStatus::Pending;
+                    task.error = Some(format!("{PENDING_MANUAL_IMPORT_PREFIX}{error}"));
+                    continue;
+                }
+                Ok(None) => {}
+            }
+        }
         if let Err(error) = generator.preflight(task) {
             task.status = AssetTaskStatus::Pending;
-            task.error = Some(format!("pending configuration: {error}"));
+            // BGM/SFX have no AI path at all, so their pending reason must not
+            // blame provider configuration — the user has to import audio.
+            task.error = Some(if task.kind.requires_manual_import() {
+                format!("{PENDING_MANUAL_IMPORT_PREFIX}{error}")
+            } else {
+                format!("{PENDING_CONFIGURATION_PREFIX}{error}")
+            });
             continue;
         }
-        let was_blocked = task
-            .error
-            .as_deref()
-            .is_some_and(|error| error.starts_with("pending configuration:"));
+        let was_blocked = task.error.as_deref().is_some_and(|error| {
+            error.starts_with(PENDING_CONFIGURATION_PREFIX)
+                || error.starts_with(PENDING_MANUAL_IMPORT_PREFIX)
+        });
         let limit = if same_run && (task.status == AssetTaskStatus::Failed || was_blocked) {
             task.attempts.len() as u32 + attempt_budget
         } else {
@@ -120,7 +148,10 @@ pub async fn run_queue_cancellable(
     let queue = Arc::new(Mutex::new(queue));
     let image = Arc::new(Semaphore::new(queue.lock().await.limits.image));
     let tts = Arc::new(Semaphore::new(queue.lock().await.limits.tts));
-    let music = Arc::new(Semaphore::new(queue.lock().await.limits.music));
+    // BGM/SFX are manual-import placeholders only. Keep the persisted
+    // `music` limit for backwards compatibility while treating it as the
+    // audio-task concurrency limit.
+    let audio = Arc::new(Semaphore::new(queue.lock().await.limits.music));
     let project_path = project_path.to_path_buf();
     let mut futures = FuturesUnordered::new();
 
@@ -133,7 +164,7 @@ pub async fn run_queue_cancellable(
             match task.kind {
                 AssetKind::Background | AssetKind::Figure => image.clone(),
                 AssetKind::Tts => tts.clone(),
-                AssetKind::Bgm | AssetKind::Sfx => music.clone(),
+                AssetKind::Bgm | AssetKind::Sfx => audio.clone(),
             }
         };
         futures.push(async move {
@@ -159,6 +190,33 @@ pub async fn run_queue_cancellable(
         }
     }
     generated.sort_unstable();
+
+    // Manual audio bindings share the serialised binding gate with generated
+    // artifacts: scene and metadata rewrites must not interleave.
+    for (index, filename) in imported {
+        let _binding_guard = binding_gate.lock().await;
+        if cancelled.load(Ordering::SeqCst) {
+            return Err(ASSET_QUEUE_CANCELLED.to_string());
+        }
+        let task_id = queue.lock().await.tasks[index].id.clone();
+        // A file can disappear between the scan and the binding, so a failed
+        // manual binding must fail only its own task instead of aborting the
+        // whole queue run.
+        let bound = match bind_imported_audio(&project_path, &task_id, &filename) {
+            Ok(bound) => bound,
+            Err(error) => {
+                let mut state = queue.lock().await;
+                if let Some(task) = state.tasks.get_mut(index) {
+                    task.status = AssetTaskStatus::Pending;
+                    task.error = Some(format!("{PENDING_MANUAL_IMPORT_PREFIX}{error}"));
+                }
+                state.updated_at = now_ms();
+                save_queue(&project_path, &state)?;
+                continue;
+            }
+        };
+        *queue.lock().await = bound;
+    }
 
     for (position, &index) in generated.iter().enumerate() {
         let _binding_guard = binding_gate.lock().await;
@@ -224,6 +282,7 @@ async fn generate_task(
                     started_at,
                     finished_at: now_ms(),
                     artifact: Some(artifact.to_string_lossy().into_owned()),
+                    imported_file: None,
                     error: None,
                     used_local_fallback,
                 });
@@ -242,6 +301,7 @@ async fn generate_task(
                     started_at,
                     finished_at: now_ms(),
                     artifact: None,
+                    imported_file: None,
                     error: Some(error.clone()),
                     used_local_fallback: false,
                 });

@@ -45,11 +45,6 @@ impl AssetGeneratorFactory for ConfiguredAssetGeneratorFactory {
             &crate::ai::config::load_tts_config(),
             "音频",
             crate::ai::provider_capability::MediaCapability::TtsGeneration,
-        )?;
-        preflight_media_config(
-            &crate::ai::config::load_music_config(),
-            "音乐",
-            crate::ai::provider_capability::MediaCapability::MusicGeneration,
         )
     }
 
@@ -90,6 +85,12 @@ struct ConfiguredAssetGenerator {
 
 impl AssetGenerator for ConfiguredAssetGenerator {
     fn preflight(&self, task: &AssetTask) -> Result<(), String> {
+        // BGM/SFX are deliberately manual-only. This check must run before
+        // the local-fallback shortcut so fallback mode cannot bind a silent
+        // placeholder as if it were a real user-selected audio asset.
+        if task.kind == AssetKind::Bgm || task.kind == AssetKind::Sfx {
+            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
+        }
         if self.local_fallback {
             return Ok(());
         }
@@ -107,11 +108,7 @@ impl AssetGenerator for ConfiguredAssetGenerator {
                 "音频",
                 crate::ai::provider_capability::MediaCapability::TtsGeneration,
             ),
-            AssetKind::Bgm | AssetKind::Sfx => (
-                crate::ai::config::load_music_config(),
-                "音乐",
-                crate::ai::provider_capability::MediaCapability::MusicGeneration,
-            ),
+            AssetKind::Bgm | AssetKind::Sfx => unreachable!(),
         };
         preflight_media_config(&config, label, required)
     }
@@ -165,13 +162,7 @@ async fn generate_configured_asset(
             .await?
         }
         AssetKind::Bgm | AssetKind::Sfx => {
-            let config = crate::ai::config::load_music_config();
-            crate::ai::commands::generate_music_media(
-                task.prompt.clone(),
-                configured_model(&config.model)?,
-                "mp3".to_string(),
-            )
-            .await?
+            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
         }
     };
     let encoded = media
@@ -291,8 +282,11 @@ impl AssetGenerator for PlaceholderAssetGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model};
+    use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model, AssetGeneratorFactory, ConfiguredAssetGeneratorFactory};
     use crate::ai::config::AiProviderConfig;
+    use crate::asset_queue::{AssetKind, AssetTask};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
     use crate::ai::provider_capability::MediaCapability;
     use std::path::PathBuf;
 
@@ -323,7 +317,6 @@ mod tests {
         for (label, required) in [
             ("图片", MediaCapability::ImageGeneration),
             ("音频", MediaCapability::TtsGeneration),
-            ("音乐", MediaCapability::MusicGeneration),
         ] {
             let error = preflight_media_config(&config, label, required).unwrap_err();
             assert!(error.contains("Base URL"), "{required:?}: {error}");
@@ -337,5 +330,28 @@ mod tests {
         assert!(error.contains("立绘抠图能力不可用"));
         assert!(error.contains("model file not found"));
         assert!(require_figure_matting_model(&Ok(PathBuf::from("model.onnx"))).is_ok());
+    }
+
+    #[test]
+    fn manual_audio_stays_pending_even_when_local_fallback_is_allowed() {
+        let factory = ConfiguredAssetGeneratorFactory::new(Ok(PathBuf::from("model.onnx")));
+        let generator = factory.create(true, Arc::new(AtomicBool::new(false)));
+        let task = AssetTask {
+            id: "bgm_theme".into(),
+            kind: AssetKind::Bgm,
+            target_stem: "theme".into(),
+            prompt: "epic theme".into(),
+            scene_ref: None,
+            character_ref: None,
+            emotion: None,
+            dialogue_index: None,
+            text: None,
+            status: Default::default(),
+            attempts: Vec::new(),
+            asset_file: None,
+            error: None,
+            used_local_fallback: false,
+        };
+        assert!(generator.preflight(&task).unwrap_err().contains("手动导入"));
     }
 }

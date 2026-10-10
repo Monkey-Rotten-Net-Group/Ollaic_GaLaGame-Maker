@@ -6,7 +6,6 @@ const CONFIG_DIR: &str = "ollaic";
 const CONFIG_FILE: &str = "ai.json";
 const IMAGE_CONFIG_FILE: &str = "ai-image.json";
 const TTS_CONFIG_FILE: &str = "ai-tts.json";
-const MUSIC_CONFIG_FILE: &str = "ai-music.json";
 const VIDEO_CONFIG_FILE: &str = "ai-video.json";
 const LOG_FILE: &str = "ai-log.jsonl";
 const AGENT_TRACE_FILE: &str = "ai-agent-trace.jsonl";
@@ -71,15 +70,6 @@ impl AiProviderConfig {
         Self {
             provider: "openai".into(),
             model: "tts-1".into(),
-            api_key: String::new(),
-            base_url: String::new(),
-        }
-    }
-
-    fn music_default() -> Self {
-        Self {
-            provider: "custom".into(),
-            model: "music-1".into(),
             api_key: String::new(),
             base_url: String::new(),
         }
@@ -188,14 +178,6 @@ pub fn load_tts_config() -> AiProviderConfig {
 
 pub fn save_tts_config(config: &AiProviderConfig) -> Result<(), String> {
     save_provider_config(TTS_CONFIG_FILE, config)
-}
-
-pub fn load_music_config() -> AiProviderConfig {
-    load_provider_config(MUSIC_CONFIG_FILE, AiProviderConfig::music_default)
-}
-
-pub fn save_music_config(config: &AiProviderConfig) -> Result<(), String> {
-    save_provider_config(MUSIC_CONFIG_FILE, config)
 }
 
 pub fn load_video_config() -> AiProviderConfig {

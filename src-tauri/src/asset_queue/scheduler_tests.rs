@@ -8,6 +8,9 @@ struct TransparentFigure;
 struct AlwaysFail(AtomicUsize);
 struct CountingGenerate(AtomicUsize);
 struct MissingConfiguration(AtomicUsize);
+/// Mirrors production preflight: BGM/SFX have no AI route, and every other
+/// task would fail if it were ever run.
+struct ManualAudioOnly(AtomicUsize);
 struct FailFourThenSucceed(AtomicUsize);
 struct BlockingGenerator {
     started: Arc<tokio::sync::Semaphore>,
@@ -119,6 +122,25 @@ impl AssetGenerator for MissingConfiguration {
         Box::pin(async move {
             self.0.fetch_add(1, Ordering::SeqCst);
             Err("must not run".to_string())
+        })
+    }
+}
+
+impl AssetGenerator for ManualAudioOnly {
+    fn preflight(&self, task: &AssetTask) -> Result<(), String> {
+        if task.kind.requires_manual_import() {
+            return Err("BGM/SFX does not support AI generation".to_string());
+        }
+        Ok(())
+    }
+
+    fn generate<'a>(
+        &'a self,
+        task: &'a AssetTask,
+    ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+        Box::pin(async move {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(format!("{} must not be generated", task.id))
         })
     }
 }
@@ -329,6 +351,7 @@ async fn resumes_unfinished_queue_tasks_without_rerunning_succeeded_tasks() {
         started_at: 1,
         finished_at: 2,
         artifact: Some(artifact.to_string_lossy().into_owned()),
+        imported_file: None,
         error: None,
         used_local_fallback: false,
     });
@@ -499,6 +522,163 @@ async fn manual_rerun_gets_a_fresh_retry_budget() {
 }
 
 #[tokio::test]
+async fn manual_audio_tasks_stay_pending_until_an_audio_file_is_imported() {
+    let project = std::env::temp_dir().join(format!("ollaic_queue_manual_{}", now_ms()));
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let queue = AssetQueue::new(
+        "run-manual",
+        vec![
+            task("bgm_theme".into(), AssetKind::Bgm, None),
+            task("sfx_door".into(), AssetKind::Sfx, None),
+        ],
+        now_ms(),
+    );
+    let plan = plan_for(&queue, vec!["start.txt".into()]);
+    save_queue(&project, &queue).unwrap();
+
+    let blocked = run_queue(
+        &project,
+        "run-manual",
+        &plan,
+        Arc::new(ManualAudioOnly(AtomicUsize::new(0))),
+    )
+    .await
+    .unwrap();
+
+    for task in &blocked.tasks {
+        assert_eq!(task.status, AssetTaskStatus::Pending);
+        assert!(task.attempts.is_empty());
+        assert!(
+            task.error
+                .as_deref()
+                .unwrap()
+                .starts_with(PENDING_MANUAL_IMPORT_PREFIX),
+            "{} should wait for a manual import, not a provider: {:?}",
+            task.id,
+            task.error
+        );
+    }
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
+async fn rerun_binds_imported_bgm_and_sfx_and_stays_idempotent() {
+    let project = std::env::temp_dir().join(format!("ollaic_queue_import_{}", now_ms()));
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::create_dir_all(project.join("game/bgm")).unwrap();
+    std::fs::create_dir_all(project.join("game/vocal")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let queue = AssetQueue::new(
+        "run-import",
+        vec![
+            task("bgm_theme".into(), AssetKind::Bgm, None),
+            task("sfx_door".into(), AssetKind::Sfx, None),
+        ],
+        now_ms(),
+    );
+    let plan = plan_for(&queue, vec!["start.txt".into()]);
+    save_queue(&project, &queue).unwrap();
+    let generator = Arc::new(ManualAudioOnly(AtomicUsize::new(0)));
+
+    let blocked = run_queue(&project, "run-import", &plan, generator.clone())
+        .await
+        .unwrap();
+    assert_eq!(generator.0.load(Ordering::SeqCst), 0);
+    assert!(blocked
+        .tasks
+        .iter()
+        .all(|task| task.status == AssetTaskStatus::Pending));
+
+    // The user imports audio through the asset library, which only copies the
+    // file into game/bgm or game/vocal.
+    std::fs::write(project.join("game/bgm/bgm_theme.mp3"), b"theme").unwrap();
+    std::fs::write(project.join("game/vocal/sfx_door.wav"), b"door").unwrap();
+
+    let bound = run_queue(&project, "run-import", &plan, generator.clone())
+        .await
+        .unwrap();
+    assert_eq!(generator.0.load(Ordering::SeqCst), 0);
+    assert!(bound
+        .tasks
+        .iter()
+        .all(|task| task.status == AssetTaskStatus::Succeeded));
+    assert_eq!(bound.tasks[0].asset_file.as_deref(), Some("bgm_theme.mp3"));
+    assert_eq!(bound.tasks[1].asset_file.as_deref(), Some("sfx_door.wav"));
+    assert!(bound.tasks.iter().all(|task| task
+        .attempts
+        .last()
+        .and_then(|attempt| attempt.imported_file.as_deref())
+        .is_some()));
+    assert!(bound.tasks.iter().all(|task| !task.used_local_fallback));
+    let scene = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    assert!(scene.contains("bgm:bgm_theme.mp3;"), "{scene}");
+    assert!(scene.contains("playEffect:sfx_door.wav;"), "{scene}");
+
+    let persisted = load_queue(&project).unwrap();
+    assert_eq!(persisted, bound);
+    let scene_before_rerun = scene;
+
+    let rerun = run_queue(&project, "run-import", &plan, generator.clone())
+        .await
+        .unwrap();
+    assert_eq!(generator.0.load(Ordering::SeqCst), 0);
+    assert!(rerun
+        .tasks
+        .iter()
+        .all(|task| task.status == AssetTaskStatus::Succeeded));
+    assert_eq!(
+        rerun.tasks[0].attempts.len(),
+        1,
+        "rerun must not add attempts"
+    );
+    assert_eq!(
+        rerun.tasks[1].attempts.len(),
+        1,
+        "rerun must not add attempts"
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+        scene_before_rerun,
+        "rebinding the same file must not duplicate scene commands"
+    );
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
+async fn manual_import_ignores_unrelated_audio_files() {
+    let project = std::env::temp_dir().join(format!("ollaic_queue_unrelated_{}", now_ms()));
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::create_dir_all(project.join("game/bgm")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    std::fs::write(project.join("game/bgm/someone_elses_song.mp3"), b"other").unwrap();
+    let queue = AssetQueue::new(
+        "run-unrelated",
+        vec![task("bgm_theme".into(), AssetKind::Bgm, None)],
+        now_ms(),
+    );
+    let plan = plan_for(&queue, vec!["start.txt".into()]);
+    save_queue(&project, &queue).unwrap();
+
+    let result = run_queue(
+        &project,
+        "run-unrelated",
+        &plan,
+        Arc::new(ManualAudioOnly(AtomicUsize::new(0))),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.tasks[0].status, AssetTaskStatus::Pending);
+    assert!(result.tasks[0].asset_file.is_none());
+    assert_eq!(
+        std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+        "; empty\n"
+    );
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
 async fn cancellation_after_generation_stops_serial_binding() {
     let project = std::env::temp_dir().join(format!("ollaic_queue_cancel_bind_{}", now_ms()));
     std::fs::create_dir_all(project.join("game/scene")).unwrap();
@@ -561,6 +741,7 @@ async fn scheduler_does_not_overwrite_artifact_command_edits() {
         started_at: 0,
         finished_at: 1,
         artifact: Some(artifact.to_string_lossy().into_owned()),
+        imported_file: None,
         error: None,
         used_local_fallback: false,
     });
@@ -621,6 +802,7 @@ async fn recovery_preserves_completed_fallback_provenance() {
         started_at: 0,
         finished_at: 1,
         artifact: None,
+        imported_file: None,
         error: None,
         used_local_fallback: true,
     });

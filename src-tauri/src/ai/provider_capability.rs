@@ -51,7 +51,6 @@ pub enum RequiredCapability {
 pub enum MediaCapability {
     ImageGeneration,
     TtsGeneration,
-    MusicGeneration,
 }
 
 impl MediaCapability {
@@ -59,7 +58,6 @@ impl MediaCapability {
         match self {
             MediaCapability::ImageGeneration => Modality::Image,
             MediaCapability::TtsGeneration => Modality::Tts,
-            MediaCapability::MusicGeneration => Modality::Music,
         }
     }
 
@@ -67,7 +65,6 @@ impl MediaCapability {
         match self {
             MediaCapability::ImageGeneration => "图片生成",
             MediaCapability::TtsGeneration => "语音生成",
-            MediaCapability::MusicGeneration => "音乐生成",
         }
     }
 }
@@ -217,7 +214,6 @@ mod tests {
             Modality::Chat,
             Modality::Image,
             Modality::Tts,
-            Modality::Music,
         ] {
             for option in registry::options_for(modality) {
                 let resolved = capability_for_config(&config(&option.value, &option.default_model));
@@ -239,7 +235,6 @@ mod tests {
         for (modality, required) in [
             (Modality::Image, MediaCapability::ImageGeneration),
             (Modality::Tts, MediaCapability::TtsGeneration),
-            (Modality::Music, MediaCapability::MusicGeneration),
         ] {
             for option in registry::options_for(modality) {
                 let cfg = AiProviderConfig {
@@ -374,7 +369,7 @@ mod tests {
             base_url: String::new(),
         };
         assert!(require_media_capability(&tts, MediaCapability::TtsGeneration).is_ok());
-        assert!(require_media_capability(&tts, MediaCapability::MusicGeneration).is_err());
+        assert!(require_media_capability(&tts, MediaCapability::ImageGeneration).is_err());
     }
 
     #[test]
@@ -389,7 +384,6 @@ mod tests {
         for required in [
             MediaCapability::ImageGeneration,
             MediaCapability::TtsGeneration,
-            MediaCapability::MusicGeneration,
         ] {
             let error = require_media_capability(&custom, required).unwrap_err();
             assert!(error.contains("Base URL"), "{required:?}: {error}");
@@ -399,7 +393,6 @@ mod tests {
         for required in [
             MediaCapability::ImageGeneration,
             MediaCapability::TtsGeneration,
-            MediaCapability::MusicGeneration,
         ] {
             assert!(require_media_capability(&custom, required).is_ok());
         }

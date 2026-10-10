@@ -174,6 +174,8 @@ export type AssetTaskStatus = 'pending' | 'running' | 'retrying' | 'succeeded' |
 export interface AssetTaskAttempt {
   attempt: number;
   artifact?: string | null;
+  /** Set when a manual BGM/SFX task was satisfied by an imported file. */
+  importedFile?: string | null;
   error?: string | null;
   usedLocalFallback?: boolean;
 }

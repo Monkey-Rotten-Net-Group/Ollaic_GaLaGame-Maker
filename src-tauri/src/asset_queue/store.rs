@@ -71,6 +71,7 @@ fn validate_queue(queue: &AssetQueue) -> Result<(), String> {
     for (field, value) in [
         ("image", queue.limits.image),
         ("tts", queue.limits.tts),
+        // `music` is a legacy persisted key; it limits manual BGM/SFX tasks.
         ("music", queue.limits.music),
     ] {
         if value == 0 {
@@ -482,6 +483,7 @@ mod tests {
                 started_at: 1,
                 finished_at: 2,
                 artifact: Some(format!("artifact/{}.png", task.id)),
+                imported_file: None,
                 error: None,
                 used_local_fallback: false,
             });

@@ -97,11 +97,9 @@ fn run_config_show(render: &Renderer) -> Result<(), String> {
     let chat_endpoint = commands::effective_endpoint(&chat);
     let image = config::load_image_config();
     let tts = config::load_tts_config();
-    let music = config::load_music_config();
 
     let image_endpoint = media_endpoint(&image, Modality::Image, "images/generations");
     let tts_endpoint = media_endpoint(&tts, Modality::Tts, "audio/speech");
-    let music_endpoint = media_endpoint(&music, Modality::Music, "audio/music");
 
     let config_dir = config::config_root()
         .map(|p| p.display().to_string())
@@ -112,7 +110,6 @@ fn run_config_show(render: &Renderer) -> Result<(), String> {
         &chat_endpoint,
         (&image, image_endpoint),
         (&tts, tts_endpoint),
-        (&music, music_endpoint),
         &config_dir,
         &config::log_path().map(|p| p.display().to_string())?,
         &config::agent_trace_path().map(|p| p.display().to_string())?,
@@ -464,7 +461,6 @@ async fn run_media(
     let config = match &action {
         MediaAction::Image { .. } => config::load_image_config(),
         MediaAction::Tts { .. } => config::load_tts_config(),
-        MediaAction::Music { .. } => config::load_music_config(),
     };
     let mut exchange = Exchange::new(
         global,
@@ -516,25 +512,6 @@ async fn run_media(
                         "harness:media:tts:v1",
                         &request,
                         commands::generate_tts_media(text, voice, model, format),
-                    )
-                    .await,
-                out,
-            )
-        }
-        MediaAction::Music {
-            prompt,
-            model,
-            format,
-            out,
-        } => {
-            let model = model.unwrap_or_else(|| config.model.clone());
-            let request = json!({ "prompt": prompt, "model": model, "format": format });
-            (
-                exchange
-                    .media(
-                        "harness:media:music:v1",
-                        &request,
-                        commands::generate_music_media(prompt, model, format),
                     )
                     .await,
                 out,

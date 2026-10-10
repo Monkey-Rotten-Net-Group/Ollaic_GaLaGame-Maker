@@ -122,6 +122,18 @@ export async function assetQueuePromoteArtifact(
   return invoke<AssetQueueState>('asset_queue_promote_artifact', { projectPath, taskId, attempt });
 }
 
+/**
+ * Bind an already-imported audio file to a manual BGM/SFX task. Those tasks
+ * have no AI generation route, so this is their only completion path.
+ */
+export async function assetQueueBindImportedAudio(
+  projectPath: string,
+  taskId: string,
+  filename: string,
+): Promise<AssetQueueState> {
+  return invoke<AssetQueueState>('asset_queue_bind_imported_audio', { projectPath, taskId, filename });
+}
+
 /** Persisted runs for a project, newest first. */
 export async function pipelineListRuns(projectPath: string): Promise<RunState[]> {
   return invoke<RunState[]>('pipeline_list_runs', { projectPath });

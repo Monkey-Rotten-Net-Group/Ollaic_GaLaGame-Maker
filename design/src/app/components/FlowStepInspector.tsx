@@ -58,6 +58,26 @@ export interface FlowStepInspectorProps {
   onPreviewAssetArtifact?: (taskId: string, attempt: number) => Promise<string>;
   onDeleteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
   onPromoteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
+  onBindImportedAudio?: (taskId: string, filename: string) => Promise<void>;
+  /** Imported audio filenames keyed by asset directory, for manual tasks. */
+  importedAudioByDir?: Record<string, string[]>;
+}
+
+const PENDING_MANUAL_IMPORT_PREFIX = 'pending manual import:';
+const PENDING_CONFIGURATION_PREFIX = 'pending configuration:';
+
+/** The asset directory a manual audio task binds into. */
+function audioDirForKind(kind: string) {
+  if (kind === 'bgm') return 'bgm';
+  if (kind === 'sfx') return 'vocal';
+  return null;
+}
+
+/** Why a task is still pending, so the UI can offer the matching next action. */
+function pendingReason(error: string | null | undefined): 'manual' | 'configuration' | null {
+  if (error?.startsWith(PENDING_MANUAL_IMPORT_PREFIX)) return 'manual';
+  if (error?.startsWith(PENDING_CONFIGURATION_PREFIX)) return 'configuration';
+  return null;
 }
 
 function formatted(value: string | null | undefined) {
@@ -110,6 +130,8 @@ export function FlowStepInspector({
   onPreviewAssetArtifact,
   onDeleteAssetArtifact,
   onPromoteAssetArtifact,
+  onBindImportedAudio,
+  importedAudioByDir,
 }: FlowStepInspectorProps) {
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? '');
   const [artifactBusy, setArtifactBusy] = useState<string | null>(null);
@@ -257,6 +279,11 @@ export function FlowStepInspector({
                       {assetQueue.tasks.map((task) => {
                         const status = ASSET_STATUS[task.status];
                         const error = task.error ?? task.attempts[task.attempts.length - 1]?.error;
+                        const pending = pendingReason(task.error);
+                        const audioDir = audioDirForKind(task.kind);
+                        const importCandidates = task.status === 'pending' && pending === 'manual' && audioDir
+                          ? (importedAudioByDir?.[audioDir] ?? [])
+                          : [];
                         return (
                           <li key={task.id} className="space-y-2 bg-surface-container-lowest p-3 text-xs">
                             <div className="flex min-w-0 items-center gap-2">
@@ -340,6 +367,38 @@ export function FlowStepInspector({
                                 </div>
                               );
                             })}
+                            {pending === 'manual' && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                                BGM/音效不支持 AI 生成，请在素材库导入音频后绑定到该任务。
+                              </p>
+                            )}
+                            {pending === 'configuration' && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                                该媒体任务等待供应商配置，可在 AI 设置中补齐后重跑。
+                              </p>
+                            )}
+                            {importCandidates.length > 0 && onBindImportedAudio && (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[11px] text-muted-foreground">绑定已导入音频</span>
+                                {importCandidates.map((filename) => {
+                                  const key = `bind:${task.id}:${filename}`;
+                                  return (
+                                    <Button
+                                      key={key}
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={artifactBusy !== null}
+                                      aria-label={`绑定 ${task.targetStem} 已导入音频 ${filename}`}
+                                      onClick={() => void runArtifactAction(key, () => onBindImportedAudio(task.id, filename))}
+                                    >
+                                      {artifactBusy === key ? <Loader2 className="animate-spin" /> : <Upload />}
+                                      {filename}
+                                    </Button>
+                                  );
+                                })}
+                              </div>
+                            )}
                             {error && <p className="break-words text-[11px] text-destructive">{error}</p>}
                           </li>
                         );

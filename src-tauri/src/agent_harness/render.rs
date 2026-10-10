@@ -43,7 +43,6 @@ impl Renderer {
         chat_endpoint: &str,
         image: (&AiProviderConfig, String),
         tts: (&AiProviderConfig, String),
-        music: (&AiProviderConfig, String),
         config_dir: &str,
         log_path: &str,
         trace_path: &str,
@@ -55,7 +54,6 @@ impl Renderer {
             "chat": provider_json(&chat.provider, &chat.model, &chat.base_url, &chat.api_key, chat_endpoint),
             "image": media_json(image.0, &image.1),
             "tts": media_json(tts.0, &tts.1),
-            "music": media_json(music.0, &music.1),
         });
         if self.emit(&payload) {
             return;
@@ -85,13 +83,6 @@ impl Renderer {
             &tts.0.model,
             &tts.0.api_key,
             &tts.1,
-        );
-        print_provider_row(
-            "music",
-            &music.0.provider,
-            &music.0.model,
-            &music.0.api_key,
-            &music.1,
         );
     }
 
