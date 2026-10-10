@@ -32,7 +32,7 @@ export LAB=/tmp/agent-harness-profile
 agent-harness --profile $LAB config show
 ```
 
-`config show` 打印 chat / image / tts / music 四套配置、各自的生效 endpoint、
+`config show` 打印 chat / image / tts 三套配置、各自的生效 endpoint、
 以及日志路径。API Key 只显示 `set(42)` / `unset`，不会打印内容。
 
 ## 排查供应商

@@ -45,7 +45,7 @@ pub struct GlobalArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Show the effective chat/image/TTS/music configuration.
+    /// Show the effective chat/image/TTS configuration.
     Config {
         #[command(subcommand)]
         action: ConfigAction,
@@ -64,7 +64,7 @@ pub enum Command {
     /// each output and feeding it to the next. The full-chain smoke test.
     Chain(ChainArgs),
 
-    /// Generate an image, a TTS clip, or background music.
+    /// Generate an image or a TTS clip.
     Media {
         #[command(subcommand)]
         action: MediaAction,
@@ -82,7 +82,7 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigAction {
-    /// Print all four provider configs with credentials redacted.
+    /// Print all three provider configs with credentials redacted.
     Show,
 }
 
@@ -203,15 +203,6 @@ pub enum MediaAction {
         model: Option<String>,
         #[arg(long, default_value = "")]
         voice: String,
-        #[arg(long, default_value = "mp3")]
-        format: String,
-        #[arg(long, short = 'o', value_name = "FILE")]
-        out: String,
-    },
-    Music {
-        prompt: String,
-        #[arg(long)]
-        model: Option<String>,
         #[arg(long, default_value = "mp3")]
         format: String,
         #[arg(long, short = 'o', value_name = "FILE")]
