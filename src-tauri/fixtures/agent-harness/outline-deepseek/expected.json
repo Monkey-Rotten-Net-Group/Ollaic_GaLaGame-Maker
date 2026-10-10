@@ -1,0 +1,126 @@
+{
+  "completionTokens": 2508,
+  "data": {
+    "branches": {
+      "edges": [
+        {
+          "choice": null,
+          "from": "opening",
+          "to": "corridor_echo"
+        },
+        {
+          "choice": "向少女追问回声的来历",
+          "from": "corridor_echo",
+          "to": "rooftop_girl"
+        },
+        {
+          "choice": "独自去档案室查旧校舍记录",
+          "from": "corridor_echo",
+          "to": "archive_room"
+        },
+        {
+          "choice": null,
+          "from": "rooftop_girl",
+          "to": "demolition_eve"
+        },
+        {
+          "choice": null,
+          "from": "archive_room",
+          "to": "demolition_eve"
+        },
+        {
+          "choice": null,
+          "from": "demolition_eve",
+          "to": "echo_answer"
+        }
+      ],
+      "entryScene": "opening"
+    },
+    "chapters": [
+      {
+        "id": "ch1",
+        "summary": "转学生江遇在夏末转入沿海高中，听见旧校舍传来只有自己能捕捉的回声，并被学生会长警告远离那里。",
+        "title": "蝉鸣与封条"
+      },
+      {
+        "id": "ch2",
+        "summary": "江遇结识在旧校舍天台独处的少女林默，发现她似乎知道十年前事故的隐情，而校方正在用静默协议掩盖真相。",
+        "title": "静默协议"
+      },
+      {
+        "id": "ch3",
+        "summary": "旧校舍拆除前夜，两人必须决定是否公开回声的来历，让被掩埋的夏天得到答案。",
+        "title": "拆毁之前"
+      }
+    ],
+    "scene_plans": [
+      {
+        "chapterId": "ch1",
+        "characterIds": [
+          "protagonist"
+        ],
+        "file": "start.txt",
+        "id": "opening",
+        "summary": "江遇第一天转学，在午休时听见旧校舍方向传来不该存在的呼唤，循声走向被封十年的入口。",
+        "title": "旧校舍的回声"
+      },
+      {
+        "chapterId": "ch1",
+        "characterIds": [
+          "protagonist"
+        ],
+        "file": "corridor.txt",
+        "id": "corridor_echo",
+        "summary": "江遇穿过警戒线，在旧校舍走廊听见回声重复一个名字，并在墙缝里发现半张旧照片。",
+        "title": "走廊尽头"
+      },
+      {
+        "chapterId": "ch2",
+        "characterIds": [
+          "protagonist",
+          "girl"
+        ],
+        "file": "rooftop.txt",
+        "id": "rooftop_girl",
+        "summary": "江遇遇到独来独往的林默，她承认自己也能听见回声，并警告他静默协议仍在生效。",
+        "title": "天台上的少女"
+      },
+      {
+        "chapterId": "ch2",
+        "characterIds": [
+          "protagonist",
+          "friend"
+        ],
+        "file": "archive.txt",
+        "id": "archive_room",
+        "summary": "江遇潜入档案室，查到十年前事故记录被抽走，只留下“静默协议”印章和一张社团合照。",
+        "title": "档案室的静默"
+      },
+      {
+        "chapterId": "ch3",
+        "characterIds": [
+          "protagonist",
+          "girl"
+        ],
+        "file": "eve.txt",
+        "id": "demolition_eve",
+        "summary": "拆除前夜，江遇与林默在旧校舍碰面，整理出回声来自一名被遗忘学生的线索，必须决定公开或继续沉默。",
+        "title": "拆毁前夜"
+      },
+      {
+        "chapterId": "ch3",
+        "characterIds": [
+          "protagonist",
+          "girl"
+        ],
+        "file": "reveal.txt",
+        "id": "echo_answer",
+        "summary": "两人在拆除前进入广播室，用回声留下的录音还原事故真相，让静默协议在夏天结束前失效。",
+        "title": "回声的答案"
+      }
+    ]
+  },
+  "model": "deepseek-flash",
+  "promptTokens": 424,
+  "type": "outline"
+}

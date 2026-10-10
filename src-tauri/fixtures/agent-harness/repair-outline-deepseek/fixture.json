@@ -1,0 +1,5 @@
+{
+  "agent": "outline",
+  "instruction": "请把除入口 start.txt 以外的每个 scenePlans[].file 写成对应的中文场景名（例如“旧校舍.txt”），这些文件名将直接展示给中文编辑者；不要使用拼音或英文别名。其他字段保持正常 JSON。",
+  "allowLocalFallback": false
+}

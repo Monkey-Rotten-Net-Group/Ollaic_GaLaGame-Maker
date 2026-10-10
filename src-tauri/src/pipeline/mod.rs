@@ -5,7 +5,9 @@ mod asset_executor;
 pub mod commands;
 pub mod dsl;
 pub mod events;
-mod output_commit;
+// Crate-visible so `agent_harness::chain` can apply the same commit contract the
+// orchestrator applies, instead of reimplementing it.
+pub(crate) mod output_commit;
 mod project_state;
 mod recovery;
 pub mod registry;
