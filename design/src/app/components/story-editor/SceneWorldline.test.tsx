@@ -7,7 +7,15 @@ import { MemoryRouter } from 'react-router';
 import type { WebGalNode } from '../../lib/webgal-types';
 
 const sampleNodes: WebGalNode[] = [
-  { id: 'n1', type: 'dialogue', character: '希尔', content: '你好，欢迎来到这里。' },
+  {
+    id: 'n1',
+    type: 'dialogue',
+    character: '希尔',
+    content: '你好，欢迎来到这里。',
+    flags: [],
+    position: { x: 0, y: 0 },
+    connections: [],
+  },
 ];
 
 describe('SceneWorldlinePanel', () => {
@@ -108,7 +116,7 @@ describe('FullScreenWorldline', () => {
       />,
     );
 
-    expect(screen.getByText(/场景关系图 · 放大预览/)).toBeInTheDocument();
+    expect(screen.getByText('场景关系图')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '返回脚本流' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '退出放大预览' })).toBeInTheDocument();
 

@@ -104,7 +104,7 @@ export function FullScreenWorldline({
           </button>
           <div className="h-5 w-px bg-border/60" />
           <span className="flex items-center gap-2 font-mono-family text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
-            <GitBranch className="h-4 w-4 text-secondary" /> 场景关系图 · 放大预览
+            <GitBranch className="h-4 w-4 text-secondary" /> 场景关系图
           </span>
           <span className="rounded bg-secondary/10 px-2 py-0.5 font-mono text-[10px] text-secondary">
             {scenes.length} 场景
