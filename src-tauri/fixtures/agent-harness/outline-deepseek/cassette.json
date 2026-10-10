@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "recordedAtMs": 1789635584129,
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "interactions": [
+    {
+      "seq": 0,
+      "kind": "chat",
+      "requestHash": "sha256:a615cdf52537d14abfb41e9c5cdcb2bc8bbef449fe9ad3f94d1508f64f75704e",
+      "request": {
+        "system": "你是 Ollaic 的 Plotter / 剧情结构 Agent。输出可执行的章节、场景卡和分支拓扑。严格使用 JSON：{\"chapters\":[{\"id\":\"ch1\",\"title\":\"...\",\"summary\":\"...\"}],\"scenePlans\":[{\"id\":\"opening\",\"file\":\"start.txt\",\"chapterId\":\"ch1\",\"title\":\"...\",\"summary\":\"...\",\"characterIds\":[\"protagonist\"]}],\"branches\":{\"entryScene\":\"opening\",\"edges\":[{\"from\":\"opening\",\"to\":\"next_scene\",\"choice\":null}]}}。每个 chapter 和 scenePlan 都必须包含非空 summary。\n只输出一个符合要求的 JSON 对象，不要 Markdown，不要解释。",
+        "user": "{\n  \"glossary\": {\n    \"回声\": \"只有少数人能听见的声音残留\",\n    \"静默协议\": \"校方对旧校舍事故的封口约定\"\n  },\n  \"productionBrief\": \"写一个关于夏天与秘密的校园故事，三章，带一次分支选择\",\n  \"requirements\": \"生成 3 章、至少 5 个 scene。入口 scene 的 file 必须是 start.txt；其他 file 只能是无路径的 .txt 文件名。scene id 唯一，chapterId 必须引用章节 id。branches.entryScene 和每条 edge 的 from/to 使用 scene id，至少包含一次有 choice 文本的分支。\",\n  \"stepInstruction\": \"\",\n  \"synopsis\": \"转学生在即将拆除的旧校舍里听见不存在的回声，遇见似乎知道真相的少女，两人在夏天结束前必须决定是否揭开回声的来历。\",\n  \"worldbook\": \"故事发生在一所即将拆除的沿海高中。旧校舍被封了十年，据说十年前那里发生过一起没有结论的事故。\"\n}"
+      },
+      "response": {
+        "text": "{\"chapters\":[{\"id\":\"ch1\",\"title\":\"蝉鸣与封条\",\"summary\":\"转学生江遇在夏末转入沿海高中，听见旧校舍传来只有自己能捕捉的回声，并被学生会长警告远离那里。\"},{\"id\":\"ch2\",\"title\":\"静默协议\",\"summary\":\"江遇结识在旧校舍天台独处的少女林默，发现她似乎知道十年前事故的隐情，而校方正在用静默协议掩盖真相。\"},{\"id\":\"ch3\",\"title\":\"拆毁之前\",\"summary\":\"旧校舍拆除前夜，两人必须决定是否公开回声的来历，让被掩埋的夏天得到答案。\"}],\"scenePlans\":[{\"id\":\"opening\",\"file\":\"start.txt\",\"chapterId\":\"ch1\",\"title\":\"旧校舍的回声\",\"summary\":\"江遇第一天转学，在午休时听见旧校舍方向传来不该存在的呼唤，循声走向被封十年的入口。\",\"characterIds\":[\"protagonist\"]},{\"id\":\"corridor_echo\",\"file\":\"corridor.txt\",\"chapterId\":\"ch1\",\"title\":\"走廊尽头\",\"summary\":\"江遇穿过警戒线，在旧校舍走廊听见回声重复一个名字，并在墙缝里发现半张旧照片。\",\"characterIds\":[\"protagonist\"]},{\"id\":\"rooftop_girl\",\"file\":\"rooftop.txt\",\"chapterId\":\"ch2\",\"title\":\"天台上的少女\",\"summary\":\"江遇遇到独来独往的林默，她承认自己也能听见回声，并警告他静默协议仍在生效。\",\"characterIds\":[\"protagonist\",\"girl\"]},{\"id\":\"archive_room\",\"file\":\"archive.txt\",\"chapterId\":\"ch2\",\"title\":\"档案室的静默\",\"summary\":\"江遇潜入档案室，查到十年前事故记录被抽走，只留下“静默协议”印章和一张社团合照。\",\"characterIds\":[\"protagonist\",\"friend\"]},{\"id\":\"demolition_eve\",\"file\":\"eve.txt\",\"chapterId\":\"ch3\",\"title\":\"拆毁前夜\",\"summary\":\"拆除前夜，江遇与林默在旧校舍碰面，整理出回声来自一名被遗忘学生的线索，必须决定公开或继续沉默。\",\"characterIds\":[\"protagonist\",\"girl\"]},{\"id\":\"echo_answer\",\"file\":\"reveal.txt\",\"chapterId\":\"ch3\",\"title\":\"回声的答案\",\"summary\":\"两人在拆除前进入广播室，用回声留下的录音还原事故真相，让静默协议在夏天结束前失效。\",\"characterIds\":[\"protagonist\",\"girl\"]}],\"branches\":{\"entryScene\":\"opening\",\"edges\":[{\"from\":\"opening\",\"to\":\"corridor_echo\",\"choice\":null},{\"from\":\"corridor_echo\",\"to\":\"rooftop_girl\",\"choice\":\"向少女追问回声的来历\"},{\"from\":\"corridor_echo\",\"to\":\"archive_room\",\"choice\":\"独自去档案室查旧校舍记录\"},{\"from\":\"rooftop_girl\",\"to\":\"demolition_eve\",\"choice\":null},{\"from\":\"archive_room\",\"to\":\"demolition_eve\",\"choice\":null},{\"from\":\"demolition_eve\",\"to\":\"echo_answer\",\"choice\":null}]}}",
+        "model": "deepseek-flash",
+        "promptTokens": 424,
+        "completionTokens": 2508
+      },
+      "elapsedMs": 12504
+    }
+  ]
+}

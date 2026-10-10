@@ -1,0 +1,1694 @@
+{
+  "version": 1,
+  "prompt": "写一部三章的夏日校园悬疑短篇视觉小说，用于端到端验证生成链路，要求如下：\n\n【结构】分三章，至少六个场景。入口场景固定为 start.txt。剧情必须在第二章出现一次真正的分歧：\n主角要么当面向少女追问真相，要么独自去档案室查证；两条路线在第三章汇合，并给出两个不同的结局场景。\n\n【人物】恰好三个具名角色，各自说话方式要能区分：\n1. 江遇——转学生，第一人称视角，话少、习惯用短句和反问；\n2. 林默——知情的少女，说话绕圈子、爱用比喻、极少给直接答案；\n3. 周宿——学生会长，公事公办，句子长而正式，常引用校规。\n\n【场景与素材】明确点名这些地点：盛夏正午的旧校舍走廊、黄昏的天台、夜里的档案室、拆迁前的操场。\n每个场景标注气氛（闷热、压抑、释然），并为三个角色各准备至少两种表情状态（平静、动摇）。\n\n【世界观】围绕两个术语展开并解释它们：「回声」（只有少数人能听见的声音残留）与\n「静默协议」（校方对十年前旧校舍事故的封口约定）。\n\n【语气】克制、少量留白，不要说教，不要在旁白里直接点破谜底。",
+  "synopsis": "盛夏，转学生江遇在旧校舍走廊听见只有他能听到的「回声」。循声接近少女林默，她说话总绕圈子，却像知道回声指向十年前那场事故。学生会长周宿以校规挡路，只提起「静默协议」四个字。第二章，江遇必须选：当面追问林默，还是夜里独自潜入档案室查证。两条路在黄昏天台汇合，真相各自只露出一角。拆迁前的操场将迎来两个结局——他或许听见最后一声回声，或许从此什么也听不见。",
+  "memory": {
+    "worldbook": "【世界规则：回声】\n· 回声是声音的残留，不是幽灵，也不是记忆的具象。它像潮气一样附着在旧校舍的墙体和木地板里，被盛夏正午的高温逼出来。\n· 只有极少数人能听见。他们的共同点是有一个没能说出口的告别。听不听得见，与血缘、年龄、是否在场无关。\n· 回声不回应提问，不因被听见而改变，只是重复，而且是残缺的重复。同一句话可能分散在不同日子、不同地点出现，需要多次聆听才能拼出全句——这一过程称为「接续」。\n· 回声无法被记录。手机、录音笔、监控里只有环境噪声和电流声。因此它永远不能成为证据，只能成为私人负担。\n· 听见的人会短暂耳鸣、失温，并对时间流速判断错误（正午听上去像傍晚）。这种影响随聆听次数累积。\n· 回声随声源消失而消失。旧校舍一旦拆除，它不会迁移到新楼。\n\n【世界规则：静默协议】\n· 十年前旧校舍事故之后，校方、家长会与部分当事教师之间形成的一份非正式约定。没有正式名称、没有编号、没有归档，只有一份手写备忘录和一群人之间的默契。\n· 约定大致三条：对外统一口径为「意外」；涉事学生档案标注「心理辅导已结案」；每年事故日不举行任何纪念，也不提旧校舍。\n· 它靠人情与利益维持：签字者的子女得到升学推荐，教师得到调任便利，家长得到赔偿与沉默的理由。\n· 它不是密不透风。有人违约。违约者不一定被惩罚，但会付出代价：有人转学，有人失声，有人留在原地年复一年。\n· 协议管得住人，管不住声音。这是它唯一的裂缝。\n\n【主要舞台】\n· 旧校舍走廊（盛夏正午，闷热）：木地板晒出胶味，窗玻璃反光成一片白，回声最强的位置在二楼东侧尽头。\n· 天台（黄昏，压抑）：铁栏杆烫手，晾着几张报废课桌，风从被拆到一半的看台方向来。\n· 档案室（夜里，压抑）：行政楼地下一层，铁皮柜、除湿机、一盏灯。进门要登记，钥匙只有少数人有。\n· 操场（拆迁前，释然）：跑道开裂，白线褪色，看台拆了一半。终局在此发生。\n\n【社会日常】\n· 学校正在推行「校舍更新计划」，暑假后旧校舍拆除，全部学生迁入新楼。\n· 备考季、社团、晚自习、值日、午休广播照常进行。没人愿意在正午谈十年前的事。\n· 旧校舍被学生当作怪谈素材：谁在二楼听过哭声，谁在走廊摔过跤。只有极少数人当真。\n· 成年人的沉默是习惯性的。老师、保安、家长都用「以前的事」带过，语气里没有恶意，只有疲惫。\n· 转学生不参与这套默契，因此常被当成麻烦，也常被当成工具。\n\n【核心秘密】\n· 十年前，旧校舍在放学后发生过一起事故，有学生死伤。官方定性为意外。\n· 事故并非无人看见、无人听见。有人在场，有人先走，有人签了字。\n· 回声里反复出现的，是当时一句没说完的话。谁说的、对谁说的、为什么没说完，答案分散在三个人与四个地点里，任何单一视角都只能拿到一角。\n· 谁是受害者、谁有罪、谁只是恰好在场，本作不下定论。\n\n【冲突边界】\n· 江遇不能把回声当证据：录不下来，说不出口，没人会信。他只能靠追问与人情换取信息碎片。\n· 林默受静默协议与她本人对某人的承诺约束，不能直说，只能用比喻和绕圈子把对方推向自己领悟。\n· 周宿必须执行校规：夜间禁入、外来人员不得查阅档案、器材借用需审批。但他的立场有裂缝——他知道的比制度允许他说的多。\n· 江遇是十年前的局外人，是唯一「干净」的听者。林默与周宿都需要他，因此都可能对他说半真话。\n· 悬疑规模限定在一所学校、一届人。不涉及暴力升级、灵异惩罚或体制级阴谋。\n· 语言约束：第一人称限定视角，旁白克制、留白，不解释回声原理，不点破谜底。\n\n【角色语言与表情锚点】\n· 江遇（转学生，第一人称）：短句、反问、少形容词。表情——平静：默认，视线偏低；动摇：听到回声时瞳孔收缩，手指僵住。\n· 林默（知情少女）：爱用比喻、绕圈子、极少直接回答。表情——平静：微笑，看远处；动摇：沉默变长，语速加快又忽然停住。\n· 周宿（学生会长）：长句、正式、引用校规条款。表情——平静：公式化的礼貌，双手交叠；动摇：视线移向窗外，把校规说到一半停住。",
+    "glossary": {
+      "听者": "能听见回声的人的通称。判断标准不是血缘或年龄，而是是否留有未完成的告别。转学生江遇是十年前的局外人，因此被视为唯一「干净」的听者。",
+      "回声": "附着在旧校舍建材中的声音残留，只在盛夏正午高温下被逼出，只有「有一个没说出口的告别」的人能听见。它只重复，不回应，无法被任何设备记录，随旧校舍拆除而永久消失。",
+      "接续": "拼合回声的方式。同一句残缺的话可能分散在不同日子与地点出现，听者需多次聆听才能拼出全句。接续得越完整，耳鸣与时间感错乱越严重。",
+      "旧校舍事故": "十年前的放学后，旧校舍内发生的学生死伤事件。官方定性为意外，实际存在在场者、先行离开者与签字者。真相的碎片分布在三个角色与四个地点中。",
+      "校舍更新计划": "学校推行的改建方案。暑假后旧校舍拆除，全员迁入新楼，成为悬疑的倒计时，也是回声消失的期限。",
+      "档案室登记簿": "行政楼地下一层档案室门口的进出记录。唯一能证明谁在夜里进过档案室的纸质凭据，也是周宿据以阻拦江遇的校规依据。",
+      "静默协议": "十年前的旧校舍事故后，校方、家长会与部分教师之间形成的非正式封口约定：统一口径为意外、档案标注结案、事故日不纪念。没有编号与归档，靠人情与利益维持，管得住人却管不住声音。"
+    }
+  },
+  "chapters": [
+    {
+      "id": "ch1",
+      "title": "第一章 正午的杂音",
+      "summary": "盛夏转学首日。江遇在旧校舍走廊听见只有自己能听见的「回声」——附着在建材中、只在高温下泄出的声音残留；林默用比喻靠近，周宿以校规遮挡，并第一次提到「静默协议」：十年前旧校舍事故后，校方与家长会之间无编号、无归档的封口默契。气氛闷热。江遇从平静到动摇，林默平静中带试探，周宿保持公式化礼貌。"
+    },
+    {
+      "id": "ch2",
+      "title": "第二章 分岔的夜与昼",
+      "summary": "黄昏天台成为分岔点。江遇必须选择：当面向林默追问真相，或夜里独自进入档案室查证。两条路都只给出一角。回声仍只重复、不回应，接续越完整，耳鸣与时间错乱越重。气氛压抑。林默与周宿分别在两条路上露出动摇。"
+    },
+    {
+      "id": "ch3",
+      "title": "第三章 拆迁前的操场",
+      "summary": "两条路线在旧校舍拆除前的操场汇合。静默协议管得住人，却管不住声音；回声随声源消失而消失。江遇面对最后选择：留下听最后一声，或转身让沉默成为答案。气氛释然。三人各有平静与动摇的收束。"
+    }
+  ],
+  "characters": [
+    {
+      "id": "jiang_yu",
+      "name": "江遇",
+      "aliases": [],
+      "description": "盛夏转学来的二年级学生，被派去旧校舍取旧资料，在二楼东侧走廊听见只有自己能听见的残缺回声。他不是十年前那场事故的当事人，对旧校舍没有任何记忆，是全校唯一「干净」的听者——正因为不欠任何人，林默和周宿才都愿意对他说半真话。耳朵里会短暂耳鸣、失温，并把正午错当成傍晚。",
+      "personality": "话少，不擅长解释感受，也不擅长说谎。观察细，对人情钝。被追问时会用反问把问题推回去，而不是回答。聆听次数累积后脾气变急，但仍坚持不把回声称作「证据」——录不下来、说不出口的东西，他宁可当成私人的负担。",
+      "referenceImages": [],
+      "stance": "想弄清那句没说完的话是谁说的、对谁说的。在「当面追问」与「自己去查」之间反复摇摆，又在「留下听完」与「转身离开」之间被逼着选一次。最终接受回声不会回应，也不需要被证明。",
+      "keywords": [
+        "转学生",
+        "第一人称视角",
+        "局外人",
+        "听者",
+        "短句反问",
+        "耳鸣与时间错乱",
+        "私人负担"
+      ],
+      "dialogueStyle": "短句、反问、少形容词。常用「……是吗。」「你刚才说什么。」「为什么是我。」被打断时话只说到一半就不再续。不用比喻，也不替对方总结。",
+      "gender": "男",
+      "age": "约17岁，高中二年级",
+      "sprites": [
+        {
+          "emotion": "default",
+          "file": "",
+          "prompt": "单人全身立绘：江遇，约17岁男高中生，转学生，黑色短发，夏季校服短袖衬衫，手插口袋，视线偏低，表情平静（默认状态）。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。"
+        },
+        {
+          "emotion": "shaken",
+          "file": "",
+          "prompt": "单人全身立绘：江遇，约17岁男高中生，黑色短发，夏季校服短袖衬衫，听到回声时瞳孔收缩，手指僵住，无意识看向走廊尽头，表情动摇。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。"
+        }
+      ],
+      "defaultVoice": null,
+      "voiceTimbre": null,
+      "relations": [
+        {
+          "targetId": "lin_mo",
+          "relationType": "互相试探",
+          "description": "他需要一个愿意绕圈子的人带路，她需要一个什么都不知道的人替她听见。两人都不肯先给完整的句子。"
+        },
+        {
+          "targetId": "zhou_su",
+          "relationType": "制度上的对立",
+          "description": "他被校规挡在档案室和旧校舍之外，却又一次次从周宿停住的话头里拿走碎片。"
+        }
+      ],
+      "colorTheme": null,
+      "notes": "表情锚点：平静＝默认状态，视线偏低，手插进口袋；动摇＝听见回声时瞳孔收缩，手指僵住，无意识看向走廊尽头。可用的两种状态：平静、动摇。sprites 留空，资产由 P2 生成。"
+    },
+    {
+      "id": "lin_mo",
+      "name": "林默",
+      "aliases": [],
+      "description": "在旧校舍走廊上等他的少女，比任何人清楚回声是什么。受静默协议和对某个人的私人承诺双重约束，不能直说十年前发生了什么，只能用比喻和绕圈子把江遇推向自己的领悟。她承认自己受一个承诺约束，却始终不肯说出承诺给了谁。",
+      "personality": "温和、疏离，爱用比喻，极少给直接答案。面对直接提问时沉默会变长，语速忽然加快又忽然停住。宁可被当成故弄玄虚，也不肯替十年前的人开口。违约这件事她想过很多次，每次都停在同一个地方。",
+      "referenceImages": [],
+      "stance": "想让江遇自己把那一句拼完，又不愿意做那个先违约的人。她相信声音比人诚实，也相信把话说全了会伤到还留在原地的人，所以只交碎片，不交全句。",
+      "keywords": [
+        "知情者",
+        "绕圈子",
+        "比喻",
+        "承诺约束",
+        "半真话",
+        "沉默变长",
+        "推人自悟"
+      ],
+      "dialogueStyle": "用比喻代替陈述，把「是/不是」全部换成别的东西。「有些声音只在最热的时候出来。」「你可以把它当成潮气。」「这句话我没说完，不是不想说。」从不正面回答，只在被逼到角落时丢出一块碎片。",
+      "gender": "女",
+      "age": "约17岁，高中二年级",
+      "sprites": [
+        {
+          "emotion": "default",
+          "file": "",
+          "prompt": "单人全身立绘：林默，约17岁女高中生，长发，夏季校服，微笑，视线落在远处或窗外，表情平静。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。"
+        },
+        {
+          "emotion": "shaken",
+          "file": "",
+          "prompt": "单人全身立绘：林默，约17岁女高中生，长发，夏季校服，沉默变长，语速加快后忽然停住，指节压住栏杆，表情动摇。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。"
+        }
+      ],
+      "defaultVoice": null,
+      "voiceTimbre": null,
+      "relations": [
+        {
+          "targetId": "jiang_yu",
+          "relationType": "引导与隐瞒",
+          "description": "她把线索拆成比喻递给他，同时把最关键的一句留在自己嘴里。"
+        },
+        {
+          "targetId": "zhou_su",
+          "relationType": "共同守约者",
+          "description": "两人共享同一份默契，也共享同一种疲惫：一个用比喻挡，一个用校规挡，目的相同。"
+        }
+      ],
+      "colorTheme": null,
+      "notes": "表情锚点：平静＝微笑，视线落在远处或窗外；动摇＝沉默变长，语速加快后忽然停住，指节压住栏杆。可用的两种状态：平静、动摇。sprites 留空，资产由 P2 生成。"
+    },
+    {
+      "id": "zhou_su",
+      "name": "周宿",
+      "aliases": [],
+      "description": "学生会长，校舍更新计划的学生侧对接人。必须执行校规：夜间禁入、外来人员不得查阅档案、器材借用需审批。他念过那份手写备忘录，也在事故日这个日期上停住过。他知道的比制度允许他说的多，而这些多出来的部分只能靠沉默保存。",
+      "personality": "公事公办，句子长而正式，习惯引用条款，双手交叠站着。礼貌到没有缝隙，也不轻易发火。动摇时不争辩、不解释，只是把视线移向窗外，把已经背熟的校规念到一半就停住。",
+      "referenceImages": [],
+      "stance": "用制度把江遇挡在外面，同时也用制度挡住自己。他不认为静默协议正当，但认为现在的撕裂会伤到当年留下来的人，所以选择维持到旧校舍拆完为止。",
+      "keywords": [
+        "学生会长",
+        "校规条款",
+        "程序与审批",
+        "裂缝",
+        "手写备忘录",
+        "停住的话头",
+        "维持现状"
+      ],
+      "dialogueStyle": "长句、正式、条款化。常用「根据校规第〇条」「按流程，你需要先提交申请」开头；动摇时句子断在「……那年夏天」或「这件事我不能——」，然后换回公事语气。",
+      "gender": "未明确",
+      "age": "约18岁，高中三年级",
+      "sprites": [
+        {
+          "emotion": "default",
+          "file": "",
+          "prompt": "单人全身立绘：周宿，约18岁高中生，学生会长，衬衫扣到最上面一颗，公式化礼貌，双手交叠在身前，表情平静。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。"
+        },
+        {
+          "emotion": "shaken",
+          "file": "",
+          "prompt": "单人全身立绘：周宿，约18岁学生会长，衬衫正式，视线移向窗外，把校规说到一半停住，指尖敲一次桌面又收住，表情动摇。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。"
+        }
+      ],
+      "defaultVoice": null,
+      "voiceTimbre": null,
+      "relations": [
+        {
+          "targetId": "jiang_yu",
+          "relationType": "阻拦与默许",
+          "description": "他按规定把江遇拦下，又故意留下登记簿和一间没锁好的档案室。"
+        },
+        {
+          "targetId": "lin_mo",
+          "relationType": "共同守约者",
+          "description": "两人各自守约的方式不同：她绕圈子，他念条款；他们都知道对方在守什么。"
+        }
+      ],
+      "colorTheme": null,
+      "notes": "表情锚点：平静＝公式化的礼貌，双手交叠在身前；动摇＝视线移向窗外，校规说到一半停住，指尖敲一次桌面又收住。可用的两种状态：平静、动摇。sprites 留空，资产由 P2 生成。"
+    }
+  ],
+  "scenePlans": [
+    {
+      "id": "opening",
+      "file": "start.txt",
+      "chapterId": "ch1",
+      "title": "盛夏正午的旧校舍走廊",
+      "summary": "闷热。江遇被派去旧校舍取旧资料，在二楼走廊听见一句残缺回声，像有人把话说到一半。林默出现，绕着比喻说「有些声音只在最热的时候出来」；周宿随后以校规要求他离开，并低声提及「静默协议」。江遇平静→动摇；林默平静；周宿平静。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo",
+        "zhou_su"
+      ]
+    },
+    {
+      "id": "corridor_end",
+      "file": "corridor_end.txt",
+      "chapterId": "ch1",
+      "title": "走廊尽头的接续",
+      "summary": "闷热。江遇独自返回二楼东侧尽头，回声第二次出现，补上几个字；耳鸣让他把正午错当成傍晚。林默在窗边等他，用比喻暗示十年前事故并非无人看见，但拒绝直说。江遇动摇；林默平静→动摇。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo"
+      ]
+    },
+    {
+      "id": "rooftop_dusk",
+      "file": "rooftop_dusk.txt",
+      "chapterId": "ch2",
+      "title": "黄昏天台的第一道裂缝",
+      "summary": "压抑。黄昏天台，铁栏杆烫手，风从拆到一半的看台方向来。林默承认自己受一个承诺约束，只能把江遇推向自己领悟；周宿带来校舍更新计划通知，引用校规提醒夜间禁入，却在提到事故日时停住。江遇平静；林默平静；周宿平静→动摇。此处出现分歧。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo",
+        "zhou_su"
+      ]
+    },
+    {
+      "id": "confront_lin",
+      "file": "confront_lin.txt",
+      "chapterId": "ch2",
+      "title": "当面追问林默",
+      "summary": "压抑。江遇选择在天台当面追问。林默的比喻变少，沉默变长，语速加快又忽然停住；她只交出一块碎片：十年前有人先离开，有人留下来签字。回声仍不回应，接续让江遇失去时间感。江遇动摇；林默动摇。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo",
+        "zhou_su"
+      ]
+    },
+    {
+      "id": "archive_night",
+      "file": "archive_night.txt",
+      "chapterId": "ch2",
+      "title": "夜里的档案室",
+      "summary": "压抑。江遇趁夜潜入行政楼地下一层档案室，翻到登记簿与一份手写备忘录：静默协议无编号、无归档，只靠人情与利益维持。周宿出现，先以校规追责，后把一句校规说到一半停住。江遇平静→动摇；周宿平静→动摇。",
+      "characterIds": [
+        "jiang_yu",
+        "zhou_su"
+      ]
+    },
+    {
+      "id": "merge_playground",
+      "file": "merge_playground.txt",
+      "chapterId": "ch3",
+      "title": "拆迁前的操场：汇合",
+      "summary": "压抑转释然。跑道开裂、白线褪色，看台拆了一半。两条路线的碎片在此汇合：林默的承诺与周宿的登记簿各指向同一句没说完的话。江遇不再把回声当证据，只把它当私人负担。江遇平静；林默动摇；周宿平静→动摇。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo",
+        "zhou_su"
+      ]
+    },
+    {
+      "id": "ending_echo",
+      "file": "ending_echo.txt",
+      "chapterId": "ch3",
+      "title": "结局一：最后一声回声",
+      "summary": "释然。旧校舍即将拆除，江遇留在操场，在正午高温里听完最后一声残缺回声。它仍不回应，只是重复；他第一次没有追问。林默远远站着，周宿没有走近。江遇平静；林默平静；周宿平静。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo",
+        "zhou_su"
+      ]
+    },
+    {
+      "id": "ending_silence",
+      "file": "ending_silence.txt",
+      "chapterId": "ch3",
+      "title": "结局二：此后无声",
+      "summary": "释然。江遇选择在拆除前转身离开，不再接续。此后旧校舍倒下，回声随声源消失，他再也听不见任何残留。林默沉默，周宿把校规合上。江遇平静；林默动摇；周宿动摇。",
+      "characterIds": [
+        "jiang_yu",
+        "lin_mo",
+        "zhou_su"
+      ]
+    }
+  ],
+  "branches": {
+    "entryScene": "opening",
+    "edges": [
+      {
+        "from": "opening",
+        "to": "corridor_end",
+        "choice": null
+      },
+      {
+        "from": "corridor_end",
+        "to": "rooftop_dusk",
+        "choice": null
+      },
+      {
+        "from": "rooftop_dusk",
+        "to": "confront_lin",
+        "choice": "当面追问林默"
+      },
+      {
+        "from": "rooftop_dusk",
+        "to": "archive_night",
+        "choice": "独自潜入档案室"
+      },
+      {
+        "from": "confront_lin",
+        "to": "merge_playground",
+        "choice": null
+      },
+      {
+        "from": "archive_night",
+        "to": "merge_playground",
+        "choice": null
+      },
+      {
+        "from": "merge_playground",
+        "to": "ending_echo",
+        "choice": "留下听最后一声"
+      },
+      {
+        "from": "merge_playground",
+        "to": "ending_silence",
+        "choice": "转身离开"
+      }
+    ]
+  },
+  "sceneDrafts": [
+    {
+      "sceneId": "opening",
+      "title": "盛夏正午的旧校舍走廊",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "正午。木地板被晒出胶味，窗玻璃反光成一片白。旧校舍二楼东侧，只有我一个人的脚步声。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "取资料。三楼，教务处旧柜。来回十分钟。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "走到东侧尽头的时候，耳鸣来了。很短，像有人把话说到一半就被捂住了嘴。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "……你先。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你刚才说什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "走廊空着。窗子开着。没有人。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "有些声音只在最热的时候出来。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "……是吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "你可以把它当成潮气。墙里有水，水里有话。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "为什么是我听见。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "因为你不欠这里任何东西。不欠的人，耳朵干净。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "楼梯口有人上来。衬衫扣到最上面一颗。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "根据校规第十七条，假期非本校人员不得进入旧校舍。江同学，你手上那张批条只覆盖三楼。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "我只走到二楼。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "按流程，你需要先提交申请。班主任签字，行政处盖章。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "申请什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……申请离开。另外，这边的事有一份约定。你可以叫它静默协议。没有编号，也不归档。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "谁定的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "这个问题不该由我回答。请在三分钟内下楼。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "他问的是声音，不是规定。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "林默。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "我什么都没说。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "三个人站在同一段走廊上，谁也没有动。蝉声把整栋楼填满了。",
+          "figureCues": [
+            {
+              "action": "hide",
+              "characterId": "zhou_su",
+              "position": null,
+              "emotion": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sceneId": "corridor_end",
+      "title": "走廊尽头的接续",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "我又回到东侧尽头。手表说十二点四十，可我以为已经过了整个下午。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": null,
+          "text": "耳鸣先来。左边耳朵失温，像进了空调房。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "……你先走，别回头。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "上次只有前半句。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "窗边站着一个人。她大概一直都在。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "你把它拼出来了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "拼。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "像拼一张撕开的纸。接续得越完整，耳朵越不好使。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你怎么知道我听不见别的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "因为你刚才把正午当成了傍晚。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "……是吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "十年前这里出过事。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "操场边那排梧桐，开过两年就不开了。这种事没人写进校史。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "当时有人在吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "有人在。有人在，和有人看见，是两回事。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "谁在。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "……这句话我没说完，不是不想说。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "是谁让你不说完的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "一个我答应过的人。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "名字。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "……太热了。你该回去了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "她先走的。走廊上还是那股胶味。回声没有再出现。",
+          "figureCues": [
+            {
+              "action": "hide",
+              "characterId": "lin_mo",
+              "position": null,
+              "emotion": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sceneId": "rooftop_dusk",
+      "title": "黄昏天台的第一道裂缝",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "黄昏。铁栏杆还是烫的，晾着几张报废课桌。风从被拆到一半的看台方向来。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "你说你受一个承诺约束。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "林默靠在栏杆上，视线落在操场那边。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "嗯。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "约束你什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "约束我别替你把它说完。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "为什么是我。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "因为你不欠任何人。不欠，就听得干净。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "天台门被推开。周宿手里夹着一张通知。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "打扰。校舍更新计划暑期施工通知，明天贴公告栏。按校规第二十三条，夜间禁入旧校舍与行政楼地下一层。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "地下一层有什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "档案室。按流程，你需要先提交申请，附班主任签字。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "申请能批吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "不能。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "他刚才那一句，念到一半。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……那年夏天，这件事我不能——",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "通知就这些。请签收。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "事故日是哪一天。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……请签收。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "有些东西拆了，就没法再接了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "风把通知吹得贴在栏杆上。两个方向都在那里：问她，或者自己去查。",
+          "figureCues": []
+        }
+      ]
+    },
+    {
+      "sceneId": "confront_lin",
+      "title": "当面追问林默",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "天台上只剩两个人。铁栏杆还烫着，风停了一会儿。",
+          "figureCues": [
+            {
+              "action": "hide",
+              "characterId": "zhou_su",
+              "position": null,
+              "emotion": ""
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "我要直接问一次。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "你问。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "十年前，这里出过人命吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "……操场旁边那排梧桐，去年砍掉了。有人反对，没人拦。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "我问的不是树。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "我知道。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "谁先走的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "那天很热，比今天还热，教室的风扇坏了两台，值日表还没擦——",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "……对不起。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "谁留下来签的字。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "签字的人，现在还在这所学校里。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "不是。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "那你在守什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "守一句没说完的话。说完了，就不算没完成了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "耳朵里又开始失温。这一次比哪次都长。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "……你先走，别回头。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "你听见第二次了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "它不回答我。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "它不会。它只会重复。重复到你听全为止。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你答应的人，是先走的那个，还是留下来的那个。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "……这两个我现在都不能说。别再问了，江遇。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "她把手从栏杆上收回去。指节压过的地方，留了一小片白。",
+          "figureCues": []
+        }
+      ]
+    },
+    {
+      "sceneId": "archive_night",
+      "title": "夜里的档案室",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "夜里。行政楼地下一层，铁皮柜，除湿机在响。门没锁。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "登记簿放在门口桌上。翻到最后一页。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "事故日那天，四个名字。两个被划掉了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "最下面的柜子没锁到底。里面夹着一张手写备忘录。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "统一口径为意外。涉事学生档案标注已结案。事故日不举行纪念。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "没有编号，没有落款。下面还撕掉了一行。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "身后有人把灯打开了。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "按校规第四十条，未经许可查阅档案，记入学生诚信记录。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你来得很快。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "我值班。钥匙在我这里，门是我昨天忘了锁的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你早就知道这一页。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "我知道有这份东西。我不知道被撕掉的那一行写了什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "撕的人是谁。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "按流程，这个问题不该由我回答。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你念校规的时候，会在事故日那里停一下。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……根据校规第四十条，第——",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "……那年夏天。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "那年夏天怎么了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "把登记簿合上。今晚的事我不登记。三分钟后我巡查回来。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "为什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "因为协议管得住人，管不住声音。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "他上楼的脚步声很稳。除湿机继续响，像有人在我耳朵里叹气。",
+          "figureCues": [
+            {
+              "action": "hide",
+              "characterId": "zhou_su",
+              "position": null,
+              "emotion": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "sceneId": "merge_playground",
+      "title": "拆迁前的操场：汇合",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "操场。跑道开裂，白线褪色，看台拆了一半。围挡的钢管还没立起来。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "登记簿上有四个名字。两个被划掉了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "林默从跑道那头走过来，鞋底踩过开裂的地方。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "划掉的是走了的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "留下来的那个，还在这里。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "嗯。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "看台下面有人站着，手里拿着文件夹。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "施工期间操场封闭。按校规，任何人不得进入围挡以内。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "你也进过那栋楼。事故日那天。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……我签过字。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "签什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "同意结案。那年我八岁，是我爸把笔塞给我的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "按流程，这份记录会随旧校舍一起封存。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "所以你不能说。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "说不了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "有人先走，有人留下。那句话是留下来的人说的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "对谁说的。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "对走的人。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "他没说完。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "他没说完。人还在原地。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "……是吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "三个人都没有再说话。太阳移到头顶，跑道上的裂缝开始发白。",
+          "figureCues": []
+        }
+      ]
+    },
+    {
+      "sceneId": "ending_echo",
+      "title": "结局一：最后一声回声",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "第二天，正午。今年最热的一天。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "我留下。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "林默站在跑道另一头，没有走近。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "今天最热。过了今天，就不一定听得见了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "周宿在围挡外面，手里是那张施工单。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "九点立围挡，十点动第一铲。你们还有十分钟。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "够了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "耳鸣。左边耳朵先失温，然后是整张脸。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "你先走，别回头。我留下。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "后面还有。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "……后面没有了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "为什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "因为说的人当时也停在这里。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "它不回答我。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "它不会。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "我知道。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "他没有再问。回声重复了第三遍，然后像退潮一样散了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……施工开始。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "你还要再听吗。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "不了。这一次就够了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "挖掘机开进来的时候，操场上的白线还看得见。他站在原地，什么也没有再说。",
+          "figureCues": []
+        }
+      ]
+    },
+    {
+      "sceneId": "ending_silence",
+      "title": "结局二：此后无声",
+      "stageManaged": true,
+      "beats": [
+        {
+          "speaker": null,
+          "text": "拆除前一天。操场上的围挡立了一半，风从缺口里穿过去。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "我走。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "林默站在看台下面，手插在口袋里。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "林默",
+          "text": "不听完。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "不了。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "周宿从围挡那边过来，把文件抱在身前。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "周宿",
+          "text": "按校规，围挡以内禁止停留。谢谢配合。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "登记簿那一页，你打算怎么办。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……按流程，它会和这栋楼一起处理掉。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "zhou_su",
+              "position": "left",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "协议到期了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "协议没有期限。只是没有地方可以维持了。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "那你以后去哪。",
+          "figureCues": []
+        },
+        {
+          "speaker": "江遇",
+          "text": "新楼。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "……好。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "lin_mo",
+              "position": "right",
+              "emotion": "shaken"
+            }
+          ]
+        },
+        {
+          "speaker": null,
+          "text": "旧校舍在第二天中午倒下。那天也是正午，也很热。",
+          "figureCues": [
+            {
+              "action": "hide",
+              "characterId": "jiang_yu",
+              "position": null,
+              "emotion": ""
+            }
+          ]
+        },
+        {
+          "speaker": null,
+          "text": "站在新楼走廊上的时候，他侧耳听了一会儿。",
+          "figureCues": [
+            {
+              "action": "show",
+              "characterId": "jiang_yu",
+              "position": "center",
+              "emotion": "default"
+            }
+          ]
+        },
+        {
+          "speaker": "江遇",
+          "text": "……什么也没有。",
+          "figureCues": []
+        },
+        {
+          "speaker": "林默",
+          "text": "嗯。",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "根据校规第——",
+          "figureCues": []
+        },
+        {
+          "speaker": "周宿",
+          "text": "……没什么。",
+          "figureCues": []
+        },
+        {
+          "speaker": null,
+          "text": "他把文件合上。这次没有人接续，也没有人再欠谁一句话。",
+          "figureCues": []
+        }
+      ]
+    }
+  ],
+  "assetPlan": [
+    {
+      "id": "bg_opening_corridor_noon",
+      "kind": "background",
+      "targetStem": "bg_opening_corridor_noon",
+      "prompt": "盛夏正午，旧校舍二楼东侧走廊，木地板被晒出胶味，窗玻璃反光成一片白，蝉声闷热，空气凝滞，无人。视觉小说背景，横向构图，无水印无文字。",
+      "sceneRef": "opening",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_corridor_end_noon",
+      "kind": "background",
+      "targetStem": "bg_corridor_end_noon",
+      "prompt": "盛夏正午，旧校舍二楼东侧走廊尽头，窗边反光，木地板与旧墙，空气闷热，光线过曝，空无一人但似有残留声音。视觉小说背景，横向构图，无文字无人物。",
+      "sceneRef": "corridor_end",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_rooftop_dusk",
+      "kind": "background",
+      "targetStem": "bg_rooftop_dusk",
+      "prompt": "黄昏天台，铁栏杆被晒得发烫，晾着几张报废课桌，风从被拆到一半的看台方向吹来，天空橘灰，压抑而空旷。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "rooftop_dusk",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_rooftop_confront_dusk",
+      "kind": "background",
+      "targetStem": "bg_rooftop_confront_dusk",
+      "prompt": "黄昏天台，铁栏杆与旧课桌，风停了一会儿，天空橘灰偏暗，氛围压抑紧张，适合当面追问场景。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "confront_lin",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_archive_night",
+      "kind": "background",
+      "targetStem": "bg_archive_night",
+      "prompt": "夜里，行政楼地下一层档案室，铁皮柜、除湿机、一盏冷白灯，门口登记桌，狭窄压抑，潮湿感。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "archive_night",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_playground_merge",
+      "kind": "background",
+      "targetStem": "bg_playground_merge",
+      "prompt": "拆迁前的操场，跑道开裂，白线褪色，看台拆了一半，围挡立了一半，夏日午后压抑转释然。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "merge_playground",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_playground_ending_echo",
+      "kind": "background",
+      "targetStem": "bg_playground_ending_echo",
+      "prompt": "拆迁当日的操场，正午最热，围挡与挖掘机即将进入，跑道白线仍隐约可见，旧校舍在远处，释然而空旷。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "ending_echo",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_playground_ending_silence",
+      "kind": "background",
+      "targetStem": "bg_playground_ending_silence",
+      "prompt": "拆除前一天的操场，围挡立了一半，风从缺口穿过，跑道开裂，看台残缺，夏日光线偏白，释然而空落。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "ending_silence",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "bg_new_corridor_noon",
+      "kind": "background",
+      "targetStem": "bg_new_corridor_noon",
+      "prompt": "新楼走廊，正午，干净明亮，窗外盛夏光线，空无一人，平静而无声。视觉小说背景，横向构图，无人物，无文字。",
+      "sceneRef": "ending_silence",
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    },
+    {
+      "id": "figure_jiang_yu_default",
+      "kind": "figure",
+      "targetStem": "figure_jiang_yu_default",
+      "prompt": "单人全身立绘：江遇，约17岁男高中生，转学生，黑色短发，夏季校服短袖衬衫，手插口袋，视线偏低，表情平静（默认状态）。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。",
+      "sceneRef": null,
+      "characterRef": "jiang_yu",
+      "emotion": "default",
+      "status": "pending"
+    },
+    {
+      "id": "figure_jiang_yu_shaken",
+      "kind": "figure",
+      "targetStem": "figure_jiang_yu_shaken",
+      "prompt": "单人全身立绘：江遇，约17岁男高中生，黑色短发，夏季校服短袖衬衫，听到回声时瞳孔收缩，手指僵住，无意识看向走廊尽头，表情动摇。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。",
+      "sceneRef": null,
+      "characterRef": "jiang_yu",
+      "emotion": "shaken",
+      "status": "pending"
+    },
+    {
+      "id": "figure_lin_mo_default",
+      "kind": "figure",
+      "targetStem": "figure_lin_mo_default",
+      "prompt": "单人全身立绘：林默，约17岁女高中生，长发，夏季校服，微笑，视线落在远处或窗外，表情平静。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。",
+      "sceneRef": null,
+      "characterRef": "lin_mo",
+      "emotion": "default",
+      "status": "pending"
+    },
+    {
+      "id": "figure_lin_mo_shaken",
+      "kind": "figure",
+      "targetStem": "figure_lin_mo_shaken",
+      "prompt": "单人全身立绘：林默，约17岁女高中生，长发，夏季校服，沉默变长，语速加快后忽然停住，指节压住栏杆，表情动摇。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。",
+      "sceneRef": null,
+      "characterRef": "lin_mo",
+      "emotion": "shaken",
+      "status": "pending"
+    },
+    {
+      "id": "figure_zhou_su_default",
+      "kind": "figure",
+      "targetStem": "figure_zhou_su_default",
+      "prompt": "单人全身立绘：周宿，约18岁高中生，学生会长，衬衫扣到最上面一颗，公式化礼貌，双手交叠在身前，表情平静。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。",
+      "sceneRef": null,
+      "characterRef": "zhou_su",
+      "emotion": "default",
+      "status": "pending"
+    },
+    {
+      "id": "figure_zhou_su_shaken",
+      "kind": "figure",
+      "targetStem": "figure_zhou_su_shaken",
+      "prompt": "单人全身立绘：周宿，约18岁学生会长，衬衫正式，视线移向窗外，把校规说到一半停住，指尖敲一次桌面又收住，表情动摇。纯色背景，完整身体，单人，无其他人，无全幅CG，无文字水印。",
+      "sceneRef": null,
+      "characterRef": "zhou_su",
+      "emotion": "shaken",
+      "status": "pending"
+    },
+    {
+      "id": "bgm_main_theme",
+      "kind": "bgm",
+      "targetStem": "bgm_main_theme",
+      "prompt": "全局背景音乐：夏日校园悬疑，克制、闷热、留白，钢琴与弦乐低鸣，带轻微蝉声氛围，不煽情，不说教，可循环。",
+      "sceneRef": null,
+      "characterRef": null,
+      "emotion": null,
+      "status": "pending"
+    }
+  ],
+  "scenes": [
+    "start.txt",
+    "corridor_end.txt",
+    "rooftop_dusk.txt",
+    "confront_lin.txt",
+    "archive_night.txt",
+    "merge_playground.txt",
+    "ending_echo.txt",
+    "ending_silence.txt"
+  ],
+  "pipelineRuns": []
+}
