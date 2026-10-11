@@ -22,6 +22,32 @@ test('one editing entry keeps both Agent drafts and workflow selection', async (
   await expect(page.getByRole('button', { name: /TEXT_CMD 林夏/ })).toBeVisible();
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`scene graph zoom and Escape preserve the editing workspace at ${viewport.width}px`, async ({ page }) => {
+    await openFlowBoard(page, viewport, 'draft');
+    await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
+    await page.getByLabel('AI 创作输入').fill('保留这段编辑输入');
+    if (viewport.width < 640) await page.getByRole('button', { name: '关闭 Agent 面板' }).click();
+    await page.getByRole('button', { name: '场景图', exact: true }).click();
+    const graph = page.getByRole('region', { name: '场景图画布' });
+    const branch = graph.getByRole('button', { name: /chapter2/ });
+    const initialWidth = (await branch.boundingBox())!.width;
+    for (let i = 0; i < 7; i++) await page.getByRole('button', { name: '放大视图' }).click();
+    await expect(page.getByRole('button', { name: '重置缩放' })).toHaveText('200%');
+    await expect.poll(async () => (await branch.boundingBox())!.width).toBeGreaterThan(initialWidth * 1.8);
+    await branch.click();
+    await expect(page.getByLabel('当前场景')).toHaveValue('chapter2.txt');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    await page.getByRole('button', { name: '重置缩放' }).click();
+    await expect(page.getByRole('button', { name: '重置缩放' })).toHaveText('100%');
+    await page.keyboard.press('Escape');
+    await expect(graph).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /TEXT_CMD 林夏/ })).toBeVisible();
+    if (viewport.width < 640) await page.getByRole('button', { name: '打开 Agent 面板' }).click();
+    await expect(page.getByLabel('AI 创作输入')).toHaveValue('保留这段编辑输入');
+  });
+}
+
 test('live draft preview expands without reloading its iframe or losing the Agent', async ({ page }, testInfo) => {
   const messages: { data: { command: number; message: string } }[] = [];
   await page.route('**/__runtime-test*', (route) => route.fulfill({ contentType: 'text/html', body: '<body style="margin:0;background:#202739;color:#fff;font:24px sans-serif;display:grid;place-items:center;height:100vh">WebGAL 运行画面</body>' }));

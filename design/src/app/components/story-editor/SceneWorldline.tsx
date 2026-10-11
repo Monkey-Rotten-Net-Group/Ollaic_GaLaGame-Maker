@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  ArrowRight, BookOpen, FileText, FolderOpen, GitBranch, Play, Plus, Trash2,
+  ArrowRight, BookOpen, FileText, FolderOpen, GitBranch, Play, Plus, Trash2, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import type { SceneLink, WebGalNode } from '../../lib/webgal-types';
@@ -62,6 +62,7 @@ export function FullScreenWorldline({
 }: FullScreenWorldlineProps) {
   const visibleNodes = nodes.filter((node) => !isMetadataComment(node) && (node.type !== 'comment' || node.content?.trim()));
   const [ctxMenu, setCtxMenu] = useState<{ sceneName: string; x: number; y: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -70,6 +71,18 @@ export function FullScreenWorldline({
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, [ctxMenu]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.target instanceof Element && event.target.closest('[role="dialog"], [role="alertdialog"]')) return;
+      event.preventDefault();
+      if (ctxMenu) setCtxMenu(null);
+      else onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, ctxMenu]);
 
   return (
     <div className="flex h-full flex-col bg-surface-container-lowest">
@@ -115,22 +128,55 @@ export function FullScreenWorldline({
             </button>
           )}
         </div>
+        <div role="group" aria-label="场景图缩放" className="flex shrink-0 items-center gap-1 py-2">
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.max(0.5, +(value - 0.15).toFixed(2)))}
+            disabled={zoom <= 0.5}
+            className="ollaic-icon-button h-7 w-7 disabled:opacity-40"
+            aria-label="缩小视图"
+            title="缩小场景图"
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(1)}
+            className="rounded px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:bg-surface-container-high hover:text-foreground"
+            aria-label="重置缩放"
+            title="重置缩放（100%）"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom((value) => Math.min(2, +(value + 0.15).toFixed(2)))}
+            disabled={zoom >= 2}
+            className="ollaic-icon-button h-7 w-7 disabled:opacity-40"
+            aria-label="放大视图"
+            title="放大场景图"
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1">
         {/* Static relationship graph (non-draggable) */}
-        <div className="relative flex-1 overflow-auto bg-surface-container-low">
+        <div role="region" aria-label="场景图画布" className="relative min-w-0 flex-1 overflow-auto bg-surface-container-low">
           <div className="absolute inset-0 opacity-60 flow-grid pointer-events-none" />
-          <SceneGraph
-            scenes={scenes}
-            currentSceneName={currentSceneName}
-            sceneLinkMap={sceneLinkMap}
-            sceneHeaders={sceneHeaders}
-            onSwitchScene={onOpenScene}
-            onNodeContextMenu={(name, e) => setCtxMenu({ sceneName: name, x: e.clientX, y: e.clientY })}
-            graphWidth={480}
-            className="relative z-10 w-full px-8 py-8"
-          />
+          <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', transition: 'transform 100ms ease-out' }} className="w-full">
+            <SceneGraph
+              scenes={scenes}
+              currentSceneName={currentSceneName}
+              sceneLinkMap={sceneLinkMap}
+              sceneHeaders={sceneHeaders}
+              onSwitchScene={onOpenScene}
+              onNodeContextMenu={(name, e) => setCtxMenu({ sceneName: name, x: e.clientX, y: e.clientY })}
+              graphWidth={480}
+              className="relative z-10 w-full px-8 py-8"
+            />
+          </div>
 
           {/* Right-click context menu on nodes */}
           {ctxMenu && (
