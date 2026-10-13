@@ -21,6 +21,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { commandIconFor, getCommandSummary } from './command-presentation';
 
 interface ScriptCommandStreamProps {
@@ -51,22 +52,6 @@ const CMD_ITEM = 'script-command';
 
 function InsertZone({ atIndex, onInsert }: { atIndex: number; onInsert: (type: WebGalCommandType, atIndex: number) => void }) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [open]);
-
-  const toggleMenu = useCallback(() => {
-    setOpen((value) => !value);
-  }, []);
 
   const insertCommand = useCallback((type: WebGalCommandType) => {
     onInsert(type, atIndex);
@@ -74,24 +59,25 @@ function InsertZone({ atIndex, onInsert }: { atIndex: number; onInsert: (type: W
   }, [atIndex, onInsert]);
 
   return (
-    <div
-      ref={containerRef}
-      className="group relative mx-auto flex h-6 max-w-3xl items-center justify-center"
-    >
+    <div className="group relative mx-auto flex h-6 max-w-3xl items-center justify-center">
       <div className="absolute inset-x-0 top-1/2 h-px bg-outline-variant/20 group-hover:bg-secondary/40 transition-colors" />
-      <button
-        type="button"
-        onClick={toggleMenu}
-        className="relative z-10 flex h-5 w-5 items-center justify-center rounded-full border border-outline-variant/30 bg-surface-bright text-[10px] text-muted-foreground opacity-0 shadow-sm transition-colors transition-opacity duration-150 group-hover:opacity-100 hover:border-secondary hover:text-secondary data-[open=true]:opacity-100"
-        data-open={open}
-        title="插入指令"
-        aria-label="插入指令"
-      >
-        <Plus className="h-3 w-3" />
-      </button>
-      {open && (
-        <div
-          className="absolute left-1/2 top-5 z-50 w-72 -translate-x-1/2 rounded border border-border bg-surface-container-high p-3 shadow-lg"
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="relative z-10 flex h-5 w-5 items-center justify-center rounded-full border border-outline-variant/30 bg-surface-bright text-[10px] text-muted-foreground opacity-0 shadow-sm transition-colors transition-opacity duration-150 group-hover:opacity-100 hover:border-secondary hover:text-secondary data-[state=open]:opacity-100"
+            title="插入指令"
+            aria-label="插入指令"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="bottom"
+          align="center"
+          sideOffset={8}
+          collisionPadding={12}
+          className="z-50 rounded border border-border bg-surface-container-high p-3 shadow-lg"
         >
           <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">插入指令</div>
           {Object.entries(commandCategories).map(([category, types]) => (
@@ -113,8 +99,8 @@ function InsertZone({ atIndex, onInsert }: { atIndex: number; onInsert: (type: W
               </div>
             </div>
           ))}
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -673,7 +659,7 @@ export function ScriptCommandStream({
           setAreaMenu({ x: e.clientX, y: e.clientY, atIndex });
         }}
       >
-        <div className="mx-auto max-w-4xl space-y-6 pb-20">
+        <div className="mx-auto max-w-4xl space-y-6 pb-48">
         {nodes.length === 0 ? (
           <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 border border-dashed border-outline-variant/50 bg-surface-bright p-8 text-center text-muted-foreground">
             <FileText className="h-10 w-10 opacity-50" />
