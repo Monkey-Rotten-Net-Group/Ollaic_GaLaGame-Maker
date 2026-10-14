@@ -41,4 +41,4 @@ Ollaic 有两条 AI 工作流：FlowBoard 中的 **Production Agent Flow** 负�
 - `src-tauri/src/ai/registry.rs` — 供应商元数据单一真源（能力、默认端点、模型池）
 - `design/src/app/lib/story-agent.ts` — 提示词、上下文构建与截断
 - `design/src/app/lib/change-set.ts` — 变更暂存与校验
-- AI 组件:`AiAssistantPanel`/`AiInputBox`(在 `StoryEditor.tsx`)、`AiMessageBubble`、`AiPendingCard`、`AiStatusCard`、`AiMemoryPanel`、`AiUploadsButton`、`MiniNodeCard`、`PreviewNodeCard`、`AiSettingsDialog`
+- AI 组件:`AiAssistantPanel`/`AiInputBox`(在 `StoryEditor.tsx`)、`AiMessageBubble`、`AiPendingCard`、`AiStatusCard`、`ProjectMemoryPage`、`AiUploadsButton`、`MiniNodeCard`、`PreviewNodeCard`、`AiSettingsDialog`

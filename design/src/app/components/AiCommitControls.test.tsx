@@ -98,6 +98,7 @@ describe('AI change commit controls', () => {
         projectPath="/tmp/project"
         sceneHeaders={{}}
         onOpenSettings={noop}
+        onOpenMemory={noop}
         onSend={noop}
       />,
     );

@@ -24,7 +24,7 @@ import {
 
 import { Switch } from './ui/switch';
 
-type OllaicSection = 'home' | 'edit' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build';
+type OllaicSection = 'home' | 'edit' | 'flow' | 'script' | 'world' | 'characters' | 'assets' | 'preview' | 'build' | 'memory';
 
 export type OllaicSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 

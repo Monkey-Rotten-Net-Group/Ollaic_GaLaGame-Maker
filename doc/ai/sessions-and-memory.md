@@ -35,16 +35,17 @@ Agent 循环只纳入最近 8 轮用户/助手对话以适配上下文窗口;超
 
 ## 项目记忆
 
-`AiMemoryPanel` 提供三个可编辑字段,保存后按项目持久化,并注入到 Agent 与 legacy 提示词:
-- **世界观 / 设定(worldSetting)**
-- **文风(writingStyle)**
-- **用户偏好(userPreferences)**
+项目记忆通过对话标题栏的记忆按钮进入独立管理页,路由为 `/editor/:projectId/memory`。管理页支持新增、编辑、删除、启用/停用,并可按内容、分类、最近修改来源和状态筛选。
 
-面板有「未保存」红点提示。
-- 模型:`lib/project-memory.ts`;UI:`AiMemoryPanel.tsx`。
+记忆按条目保存在项目的 `game/ai-memory.json` 中。条目包含 `id/category/content/enabled/source/createdAt/updatedAt`,分类为世界观、人物约束、剧情事实、写作风格、创作偏好和创作约束。`source` 表示最近一次修改来自用户还是 Agent。启用的条目会注入提示词,停用条目保留在项目中但不参与创作上下文。
+
+支持工具调用的 Agent 可自主调用 `add_memory`、`update_memory` 和 `delete_memory`,调用成功即落盘,无需随剧情变更审批。提示词要求仅保存用户确认的长期事实和偏好,避免保存待审批剧情、临时任务和重复信息;修改和删除前通过 `read_memory` 获取条目及版本。记忆操作会显示在对话工具记录中。legacy 供应商仍只读取记忆上下文,不支持自主维护。
+
+后端在项目锁内完成逐条读改写,使用现有的原子文件保存机制。编辑和删除支持 `expectedUpdatedAt` 冲突检查,失败时管理页保留输入并允许刷新重试。旧版 `worldSetting/writingStyle/userPreferences` 会显示为三个对应分类的条目,首次条目操作时迁移;保留旧字段以兼容旧读取流程。空条目列表不会重新导入已删除记忆。
 
 ## 相关源码
 - `design/src/app/hooks/useChatSession.ts`
 - `design/src/app/lib/project-memory.ts`
-- `design/src/app/components/AiMemoryPanel.tsx`
+- `design/src/app/components/ProjectMemoryPage.tsx`
+- `src-tauri/src/webgal/memory.rs`
 - `design/src/app/lib/story-agent.ts`(历史截断)

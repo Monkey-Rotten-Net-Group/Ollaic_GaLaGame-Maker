@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import { getTool } from './ai-tools';
 
 describe('plan_assets tool', () => {
@@ -37,5 +38,28 @@ describe('plan_assets tool', () => {
     await expect(tool!.run({ assets: [] }, { projectPath: '/tmp/project', currentSceneName: 'start.txt' }))
       .rejects
       .toThrow('plan_assets 需要非空 assets');
+  });
+});
+
+describe('autonomous memory tools', () => {
+  it('persists adds, updates and deletes directly instead of staging them', async () => {
+    const ctx = { projectPath: '/tmp/project', currentSceneName: 'start.txt' };
+    const stored = { worldSetting: '', writingStyle: '', userPreferences: '', updatedAt: '42', entries: [] };
+    vi.mocked(invoke).mockResolvedValue(stored);
+    expect(getTool('add_memory')?.kind).toBe('memory');
+    expect(await getTool('add_memory')!.run({ category: 'plot', content: '主角转学' }, ctx)).toBe(stored);
+    expect(invoke).toHaveBeenLastCalledWith('add_project_memory_entry', { projectPath: '/tmp/project', category: 'plot', content: '主角转学', source: 'agent' });
+    await getTool('update_memory')!.run({ id: 'm1', expectedUpdatedAt: '41', content: '主角已经毕业' }, ctx);
+    expect(invoke).toHaveBeenLastCalledWith('update_project_memory_entry', { projectPath: '/tmp/project', id: 'm1', patch: { content: '主角已经毕业' }, source: 'agent', expectedUpdatedAt: '41' });
+    await getTool('delete_memory')!.run({ id: 'm1', expectedUpdatedAt: '42' }, ctx);
+    expect(invoke).toHaveBeenLastCalledWith('delete_project_memory_entry', { projectPath: '/tmp/project', id: 'm1', expectedUpdatedAt: '42' });
+    expect(getTool('edit_memory')).toBeUndefined();
+  });
+
+  it('validates categories and requires a revision before update or deletion', async () => {
+    const ctx = { projectPath: '/tmp/project', currentSceneName: 'start.txt' };
+    await expect(getTool('add_memory')!.run({ category: '__proto__', content: '内容' }, ctx)).rejects.toThrow('记忆分类无效');
+    await expect(getTool('update_memory')!.run({ id: 'm1', content: '内容' }, ctx)).rejects.toThrow('expectedUpdatedAt');
+    await expect(getTool('delete_memory')!.run({ id: 'm1' }, ctx)).rejects.toThrow('expectedUpdatedAt');
   });
 });

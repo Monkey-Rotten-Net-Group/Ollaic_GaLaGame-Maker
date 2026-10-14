@@ -31,7 +31,8 @@ vi.mock('../lib/assets-ipc', () => ({
   listAllAssets: vi.fn(async () => []),
 }));
 
-vi.mock('../lib/project-memory', () => ({
+vi.mock('../lib/project-memory', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/project-memory')>(),
   emptyProjectMemory: () => ({ worldSetting: '', writingStyle: '', userPreferences: '', updatedAt: '' }),
   readProjectMemory: vi.fn(async () => null),
   saveProjectMemory: vi.fn(async () => {}),

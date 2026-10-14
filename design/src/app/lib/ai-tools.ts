@@ -1,6 +1,7 @@
 /**
  * AI agent tool registry.
  *
+ * Tools execute reads and memory maintenance directly; story writes are staged.
  * Each tool is either:
  *  - 'read'  — executed automatically inside the agent loop; its result is fed
  *              back to the model. Read tools wrap existing IPC and self-truncate
@@ -8,6 +9,7 @@
  *  - 'write' — NOT executed here. The loop "stages" the call into a change set
  *              and the user approves the whole set at the end. The run() of a
  *              write tool just normalizes/echoes its arguments.
+ *  - 'memory' — persists individual memory entries immediately.
  *
  * The model sees tool schemas via ToolDef; the loop dispatches by name.
  */
@@ -16,13 +18,13 @@ import type { ToolDef } from './ai-ipc';
 import { listAiUploads, readAiUpload } from './ai-uploads-ipc';
 import { listAllAssets, listAssets, type AssetInfo } from './assets-ipc';
 import { getCharacter, listCharacterNames, listCharacters } from './character-ipc';
-import { readProjectMemory } from './project-memory';
+import { addMemoryEntry, deleteMemoryEntry, MEMORY_CATEGORIES, memoryEntries, readProjectMemory, updateMemoryEntry, type MemoryCategory } from './project-memory';
 import { getScenePath, listScenes, readFileText, parseSceneHeader } from './webgal-ipc';
 import { isEditorPatch, type EditorPatch } from './editor-patch';
 import { figureFileTail, findCharacter, resolveSpriteFile } from './figure-resolve';
 import type { Character } from './character-types';
 
-export type ToolKind = 'read' | 'write';
+export type ToolKind = 'read' | 'write' | 'memory';
 
 export interface AgentTool {
   name: string;
@@ -30,7 +32,7 @@ export interface AgentTool {
   kind: ToolKind;
   /** JSON Schema for the tool parameters. */
   schema: unknown;
-  /** Execute (read) or normalize args (write). Returns a JSON-serializable value. */
+  /** Execute reads/memory operations or normalize story writes. */
   run: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
 }
 
@@ -306,13 +308,13 @@ const readTools: AgentTool[] = [
   },
   {
     name: 'read_memory',
-    description: '读取项目记忆（世界观、写作风格、用户偏好）。',
+    description: '读取项目记忆条目，含 id、分类、内容、是否启用和 updatedAt。更新或删除前先读取，使用条目 id 和 updatedAt。停用条目不作为创作依据。',
     kind: 'read',
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
       const memory = await readProjectMemory(projectPath);
-      return memory ?? { worldSetting: '', writingStyle: '', userPreferences: '' };
+      return { entries: memoryEntries(memory) };
     },
   },
   {
@@ -764,23 +766,6 @@ const writeTools: AgentTool[] = [
     },
   },
   {
-    name: 'edit_memory',
-    description:
-      '更新项目记忆字段（worldSetting/writingStyle/userPreferences）。partial 只包含要改的字段。修改先进入预览。',
-    kind: 'write',
-    schema: {
-      type: 'object',
-      properties: {
-        partial: { type: 'object', description: '要更新的记忆字段' },
-      },
-      required: ['partial'],
-    },
-    run: async (args) => {
-      const partial = (args.partial && typeof args.partial === 'object' ? args.partial : {}) as Record<string, unknown>;
-      return { tool: 'edit_memory', partial } satisfies StagedWrite;
-    },
-  },
-  {
     name: 'create_scene',
     description:
       '新建一个空场景文件，可选设置章节名(chapter)和大纲(outline)。建好后用 edit_scene 往里写内容（afterLine 用 "end" 追加）。新建先进入预览，用户确认后才落盘。',
@@ -807,7 +792,62 @@ const writeTools: AgentTool[] = [
   },
 ];
 
-export const AGENT_TOOLS: AgentTool[] = [...readTools, ...writeTools];
+function memoryCategory(value: unknown): MemoryCategory {
+  if (typeof value !== 'string' || !Object.prototype.hasOwnProperty.call(MEMORY_CATEGORIES, value)) throw new Error('记忆分类无效。');
+  return value as MemoryCategory;
+}
+
+const memoryTools: AgentTool[] = [
+  {
+    name: 'add_memory',
+    description: '直接保存一条长期项目记忆，无需剧情审批。仅记录用户明确确认的设定、事实或偏好，不记录尚待审批的剧情、推测、临时任务或重复内容。',
+    kind: 'memory',
+    schema: { type: 'object', properties: {
+      category: { type: 'string', enum: Object.keys(MEMORY_CATEGORIES) },
+      content: { type: 'string', description: '一条明确、独立的事实或偏好，最多 4000 字' },
+    }, required: ['category', 'content'] },
+    run: async (args, ctx) => {
+      const content = asString(args.content);
+      if (!content) throw new Error('add_memory 需要非空 content。');
+      return addMemoryEntry(requireProject(ctx), memoryCategory(args.category), content, 'agent');
+    },
+  },
+  {
+    name: 'update_memory',
+    description: '直接更新已有项目记忆。用户纠正设定或偏好时更新原条目，避免重复。先 read_memory 获取 id 和 updatedAt；保留用户的停用状态。',
+    kind: 'memory',
+    schema: { type: 'object', properties: {
+      id: { type: 'string' }, expectedUpdatedAt: { type: 'string', description: 'read_memory 返回的条目 updatedAt' },
+      content: { type: 'string', description: '更新后的完整内容，最多 4000 字' },
+      category: { type: 'string', enum: Object.keys(MEMORY_CATEGORIES) },
+    }, required: ['id', 'expectedUpdatedAt', 'content'] },
+    run: async (args, ctx) => {
+      const id = asString(args.id);
+      const revision = typeof args.expectedUpdatedAt === 'string' ? args.expectedUpdatedAt : undefined;
+      const content = asString(args.content);
+      if (!id || revision === undefined || !content) throw new Error('update_memory 需要 id、expectedUpdatedAt 和非空 content。');
+      return updateMemoryEntry(requireProject(ctx), id, {
+        content, ...(args.category !== undefined ? { category: memoryCategory(args.category) } : {}),
+      }, 'agent', revision);
+    },
+  },
+  {
+    name: 'delete_memory',
+    description: '直接删除过时、错误、重复或用户要求忘记的项目记忆。先 read_memory 获取 id 和 updatedAt。',
+    kind: 'memory',
+    schema: { type: 'object', properties: {
+      id: { type: 'string' }, expectedUpdatedAt: { type: 'string', description: 'read_memory 返回的条目 updatedAt' },
+    }, required: ['id', 'expectedUpdatedAt'] },
+    run: async (args, ctx) => {
+      const id = asString(args.id);
+      const revision = typeof args.expectedUpdatedAt === 'string' ? args.expectedUpdatedAt : undefined;
+      if (!id || revision === undefined) throw new Error('delete_memory 需要 id 和 expectedUpdatedAt。');
+      return deleteMemoryEntry(requireProject(ctx), id, revision);
+    },
+  },
+];
+
+export const AGENT_TOOLS: AgentTool[] = [...readTools, ...writeTools, ...memoryTools];
 
 const TOOL_BY_NAME = new Map(AGENT_TOOLS.map((t) => [t.name, t]));
 

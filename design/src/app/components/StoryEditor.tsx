@@ -1147,7 +1147,7 @@ export function StoryEditor() {
               </div>
               <div id="editing-agent-panel" role="tabpanel" aria-labelledby="editing-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'edit' ? 'flex' : 'hidden'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
                 {workflowOwnsProject && <p className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">生产期间可查看对话。停止生产后可发送编辑请求。</p>}
-                <AiAssistantPanel embedded disabled={workflowOwnsProject} aiAgent={aiAgent} projectPath={projectPath} sceneHeaders={sceneHeaders} onOpenSettings={() => setAiSettingsOpen(true)} onSend={handleAiSend} />
+                <AiAssistantPanel embedded disabled={workflowOwnsProject} aiAgent={aiAgent} projectPath={projectPath} sceneHeaders={sceneHeaders} onOpenSettings={() => setAiSettingsOpen(true)} onOpenMemory={() => guardedNavigate(() => navigate(`/editor/${projectId}/memory`))} onSend={handleAiSend} />
               </div>
             </aside>
           </div>

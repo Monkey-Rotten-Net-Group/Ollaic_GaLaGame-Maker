@@ -274,6 +274,8 @@ fn detect_conflicts(request: &ApplyChangeSetRequest) -> Result<Vec<String>, (Str
                     && before.world_setting.is_empty()
                     && before.writing_style.is_empty()
                     && before.user_preferences.is_empty();
+                let missing_matches_empty = missing_matches_empty
+                    && before.entries.as_ref().is_none_or(|entries| entries.is_empty());
                 if !missing_matches_empty
                     && memory
                         .as_ref()
@@ -580,6 +582,7 @@ mod tests {
             writing_style: String::new(),
             user_preferences: String::new(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
+            entries: None,
         }
     }
 

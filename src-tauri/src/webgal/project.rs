@@ -38,6 +38,8 @@ pub struct ProjectMemory {
     pub writing_style: String,
     pub user_preferences: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entries: Option<Vec<super::memory::MemoryEntry>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

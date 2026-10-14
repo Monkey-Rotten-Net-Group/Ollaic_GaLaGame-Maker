@@ -5,6 +5,53 @@ export interface ProjectMemory {
   writingStyle: string;
   userPreferences: string;
   updatedAt: string;
+  entries?: MemoryEntry[];
+}
+
+export const MEMORY_CATEGORIES = {
+  world: '世界观',
+  character: '人物约束',
+  plot: '剧情事实',
+  style: '写作风格',
+  preference: '创作偏好',
+  constraint: '创作约束',
+} as const;
+
+export type MemoryCategory = keyof typeof MEMORY_CATEGORIES;
+export type MemorySource = 'user' | 'agent';
+
+export interface MemoryEntry {
+  id: string;
+  category: MemoryCategory;
+  content: string;
+  enabled: boolean;
+  source: MemorySource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function memoryEntries(memory: ProjectMemory | null): MemoryEntry[] {
+  if (!memory) return [];
+  if (memory.entries) return memory.entries;
+  const fields = [
+    ['worldSetting', 'world'], ['writingStyle', 'style'], ['userPreferences', 'preference'],
+  ] as const;
+  return fields.flatMap(([field, category]) => memory[field].trim() ? [{
+    id: `legacy-${field}`, category, content: memory[field], enabled: true,
+    source: 'user' as const, createdAt: memory.updatedAt, updatedAt: memory.updatedAt,
+  }] : []);
+}
+
+export function addMemoryEntry(projectPath: string, category: MemoryCategory, content: string, source: MemorySource = 'user'): Promise<ProjectMemory> {
+  return invoke('add_project_memory_entry', { projectPath, category, content, source });
+}
+
+export function updateMemoryEntry(projectPath: string, id: string, patch: Partial<Pick<MemoryEntry, 'category' | 'content' | 'enabled'>>, source: MemorySource = 'user', expectedUpdatedAt?: string): Promise<ProjectMemory> {
+  return invoke('update_project_memory_entry', { projectPath, id, patch, source, expectedUpdatedAt });
+}
+
+export function deleteMemoryEntry(projectPath: string, id: string, expectedUpdatedAt?: string): Promise<ProjectMemory> {
+  return invoke('delete_project_memory_entry', { projectPath, id, expectedUpdatedAt });
 }
 
 export function emptyProjectMemory(): ProjectMemory {
@@ -26,10 +73,7 @@ export async function saveProjectMemory(projectPath: string, memory: ProjectMemo
 
 export function buildMemoryContext(memory: ProjectMemory | null): string {
   if (!memory) return '';
-  const parts = [
-    memory.worldSetting ? `世界观：${memory.worldSetting}` : '',
-    memory.writingStyle ? `写作风格：${memory.writingStyle}` : '',
-    memory.userPreferences ? `用户偏好：${memory.userPreferences}` : '',
-  ].filter(Boolean);
+  const parts = memoryEntries(memory).filter((entry) => entry.enabled)
+    .map((entry) => `[${entry.id}] ${MEMORY_CATEGORIES[entry.category]}：${entry.content}`);
   return parts.length > 0 ? `【项目记忆】\n${parts.join('\n')}` : '';
 }

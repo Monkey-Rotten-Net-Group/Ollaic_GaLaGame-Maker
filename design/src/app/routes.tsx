@@ -23,6 +23,13 @@ export const router = createHashRouter([
     },
   },
   {
+    path: "/editor/:projectId/memory",
+    lazy: async () => {
+      const { ProjectMemoryPage } = await import("./components/ProjectMemoryPage");
+      return { Component: ProjectMemoryPage };
+    },
+  },
+  {
     path: "/editor/:projectId/assets",
     lazy: async () => {
       const { AssetManager } = await import("./components/AssetManager");

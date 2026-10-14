@@ -34,7 +34,8 @@ vi.mock('../lib/assets-ipc', () => ({
   listAllAssets: vi.fn(async () => []),
 }));
 
-vi.mock('../lib/project-memory', () => ({
+vi.mock('../lib/project-memory', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/project-memory')>(),
   emptyProjectMemory: () => ({ worldSetting: '', writingStyle: '', userPreferences: '', updatedAt: '' }),
   readProjectMemory: vi.fn(async () => null),
   saveProjectMemory: vi.fn(async () => {}),
@@ -111,6 +112,8 @@ vi.mock('../lib/editor-patch', () => ({
 }));
 
 import { useAiAgent } from './useAiAgent';
+import { getTool } from '../lib/ai-tools';
+import { readProjectMemory } from '../lib/project-memory';
 import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiProviderCapability } from '../lib/ai-ipc';
 import type { AiTurnResult } from '../lib/ai-ipc';
 
@@ -182,6 +185,25 @@ async function awaitCalls(mockFn: { mock: { calls: unknown[] } }, n: number) {
 }
 
 describe('AI run ownership (T03)', () => {
+  it('executes memory tools immediately and supplies fresh memory to the next prompt', async () => {
+    const memory = { worldSetting: '海边校园', writingStyle: '', userPreferences: '', updatedAt: '1' };
+    vi.mocked(readProjectMemory).mockResolvedValue(memory);
+    const run = vi.fn(async () => ({ ...memory, worldSetting: '山间校园', updatedAt: '2' }));
+    vi.mocked(getTool).mockReturnValue({ name: 'update_memory', kind: 'memory', description: '', schema: {}, run });
+    vi.mocked(aiChatTurn)
+      .mockResolvedValueOnce({ text: null, toolCalls: [{ id: 't1', name: 'update_memory', arguments: { id: 'm1', content: '山间校园' } }] })
+      .mockResolvedValueOnce({ text: '已记住', toolCalls: [] });
+    const { result } = renderHook(() => useAiAgent(makeParams()), { wrapper: MemoryRouter });
+    await act(async () => { await result.current.sendPrompt('改成山间校园'); });
+    expect(run).toHaveBeenCalledOnce();
+    expect(result.current.memory?.worldSetting).toBe('山间校园');
+    expect(result.current.pendingChangeSet).toBeNull();
+    expect(result.current.status).toBe('idle');
+    const context = vi.mocked(aiChatTurn).mock.calls[0][1][0].content;
+    expect(context).toContain('海边校园');
+    expect(result.current.messages[result.current.messages.length - 1]?.steps?.[0].toolCalls?.[0]).toMatchObject({ name: 'update_memory', ok: true });
+  });
+
   it('stop-before-response: Stop fires before Provider resolve; late success drops at ownership boundary', async () => {
     const deferred = deferredResult();
     vi.mocked(aiChatTurn).mockReturnValueOnce(deferred.promise);

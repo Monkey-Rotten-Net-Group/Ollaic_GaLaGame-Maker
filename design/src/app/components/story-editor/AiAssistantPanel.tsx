@@ -1,10 +1,9 @@
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowUp, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
+  ArrowUp, Brain, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useAiAgent } from '../../hooks/useAiAgent';
-import { AiMemoryPanel } from '../AiMemoryPanel';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
 import { ConflictCard, ErrorCard, MissingAssetCard } from '../AiStatusCard';
@@ -22,6 +21,7 @@ interface AiAssistantPanelProps {
   projectPath: string | null;
   sceneHeaders: Record<string, SceneHeader>;
   onOpenSettings: () => void;
+  onOpenMemory: () => void;
   onSend: (text: string) => void;
   embedded?: boolean;
   disabled?: boolean;
@@ -96,6 +96,7 @@ export function AiAssistantPanel({
   projectPath,
   sceneHeaders,
   onOpenSettings,
+  onOpenMemory,
   onSend,
   embedded = false,
   disabled = false,
@@ -133,6 +134,7 @@ export function AiAssistantPanel({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <button type="button" onClick={onOpenMemory} disabled={!projectPath || aiAgent.busy || aiAgent.committing || aiAgent.pendingChangeSet?.status === 'pending'} className="ollaic-icon-button h-7 w-7 disabled:opacity-40" aria-label="管理项目记忆" title="项目记忆"><Brain className="h-4 w-4" /></button>
           <button
             type="button"
             onClick={aiAgent.startNewSession}
@@ -272,11 +274,6 @@ export function AiAssistantPanel({
       </div>
 
       <div className="border-t border-border bg-surface-container-low p-4">
-        <AiMemoryPanel
-          memory={aiAgent.memory}
-          disabled={!projectPath || disabled}
-          onSave={aiAgent.saveMemory}
-        />
         <AiInputBox
           value={aiAgent.input}
           busy={aiAgent.busy}
