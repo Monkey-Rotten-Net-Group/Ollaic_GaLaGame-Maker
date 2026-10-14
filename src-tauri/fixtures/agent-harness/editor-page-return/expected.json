@@ -1,0 +1,40 @@
+{
+  "bufferWrites": 0,
+  "chatRuns": [
+    0,
+    0
+  ],
+  "commitCalls": 0,
+  "error": null,
+  "lastMessage": "已生成修改预览：场景「start.txt」：在 start.txt 末尾插入内容",
+  "missingAssets": [],
+  "navigation": [
+    {
+      "busy": true,
+      "phase": "returnedWhileRunning"
+    }
+  ],
+  "pendingEdits": [
+    {
+      "afterContent": "林夏:从这里开始我们的故事。;\n:雨夜里，老旧的灯在风中摇晃。;\n",
+      "beforeContent": "林夏:从这里开始我们的故事。;",
+      "file": "start.txt",
+      "kind": "scene"
+    }
+  ],
+  "status": "pending",
+  "traces": [
+    {
+      "failedTools": [],
+      "mode": "legacy",
+      "outcome": "pending_preview",
+      "turns": 2,
+      "validationErrors": [
+        "WebGAL txt 格式无效：\n第 1 行不是有效 WebGAL 行：雨夜里，老旧的灯在风中摇晃。;"
+      ]
+    }
+  ],
+  "userMessages": [
+    "随便写一个故事"
+  ]
+}

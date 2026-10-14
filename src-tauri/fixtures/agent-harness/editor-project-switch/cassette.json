@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "recordedAtMs": 1791970187331,
+  "provider": "scripted-editor",
+  "model": "scripted-editor",
+  "interactions": [
+    {
+      "seq": 0,
+      "kind": "chat",
+      "requestHash": "sha256:642c4b3ddcbecf7a36e682d00dc6f51f2032f6a02acdaaa9ef3864ccdf70bf58",
+      "request": {
+        "system": "harness:editor:turn:v1",
+        "user": "{\"messages\":[{\"content\":\"你是 WebGAL txt 脚本编辑器助手。\\n\\n输出规则：只输出一个 JSON 对象，不要 Markdown 包裹，不要解释。\\n\\n需要修改脚本时返回 {\\\"patches\\\":[...]}；只聊天讨论时返回 {\\\"type\\\":\\\"chat\\\",\\\"message\\\":\\\"...\\\"}。\\n\\npatch type 只能是 insert、delete、replace。file 必须是当前场景文件名。\\n\\ninsert: {\\\"type\\\":\\\"insert\\\",\\\"file\\\":\\\"...\\\",\\\"afterLine\\\":正整数或\\\"end\\\",\\\"anchorText\\\":\\\"对应行原文\\\",\\\"text\\\":\\\"WebGAL txt\\\"}。\\n\\ndelete: {\\\"type\\\":\\\"delete\\\",\\\"file\\\":\\\"...\\\",\\\"startLine\\\":正整数,\\\"endLine\\\":正整数,\\\"anchorText\\\":\\\"起始行原文\\\"}。\\n\\nreplace: {\\\"type\\\":\\\"replace\\\",\\\"file\\\":\\\"...\\\",\\\"startLine\\\":正整数,\\\"endLine\\\":正整数,\\\"anchorText\\\":\\\"起始行原文\\\",\\\"text\\\":\\\"WebGAL txt\\\"}。\\n\\n行号必须对应下方带行号脚本中的 txt 行号。anchorText 请原样复制目标行完整文本。\\n\\ntext 字段直接写 WebGAL txt 行，多行用 \\\\n 分隔。\\n\\nWebGAL 命令行必须直接以命令开头，例如 changeBg:room.webp -next;，不要写“背景 changeBg:...”或“立绘 changeFigure:...”。\\n\\n引用素材时只能使用当前素材库列表中的文件名，缺少素材时返回 chat 说明，不要编造。\\n\\n当前素材库未读取到可用素材。生成脚本时不要编造素材名；如果需要素材，请明确提示缺少素材。\\n\\n当前场景：start.txt（文件名 start.txt）\\n\\n当前脚本（左侧数字是 txt 行号）：\\n1: 林夏:从这里开始我们的故事。;\",\"role\":\"system\",\"tool_call_id\":null,\"tool_calls\":null},{\"content\":\"随便写一个故事\",\"role\":\"user\",\"tool_call_id\":null,\"tool_calls\":null}],\"tools\":[]}"
+      },
+      "response": {
+        "text": "{\"Ok\":{\"text\":\"{\\\"patches\\\":[{\\\"type\\\":\\\"insert\\\",\\\"file\\\":\\\"start.txt\\\",\\\"afterLine\\\":\\\"end\\\",\\\"text\\\":\\\"雨夜里，老旧的灯在风中摇晃。;\\\"}]}\",\"toolCalls\":[]}}"
+      },
+      "elapsedMs": 0
+    },
+    {
+      "seq": 1,
+      "kind": "chat",
+      "requestHash": "sha256:4836b47240936597bedbb13c182daaf890c1a513c3c47b3d439658e9acf97bc9",
+      "request": {
+        "system": "harness:editor:turn:v1",
+        "user": "{\"messages\":[{\"content\":\"你是 WebGAL txt 脚本编辑器助手。\\n\\n输出规则：只输出一个 JSON 对象，不要 Markdown 包裹，不要解释。\\n\\n需要修改脚本时返回 {\\\"patches\\\":[...]}；只聊天讨论时返回 {\\\"type\\\":\\\"chat\\\",\\\"message\\\":\\\"...\\\"}。\\n\\npatch type 只能是 insert、delete、replace。file 必须是当前场景文件名。\\n\\ninsert: {\\\"type\\\":\\\"insert\\\",\\\"file\\\":\\\"...\\\",\\\"afterLine\\\":正整数或\\\"end\\\",\\\"anchorText\\\":\\\"对应行原文\\\",\\\"text\\\":\\\"WebGAL txt\\\"}。\\n\\ndelete: {\\\"type\\\":\\\"delete\\\",\\\"file\\\":\\\"...\\\",\\\"startLine\\\":正整数,\\\"endLine\\\":正整数,\\\"anchorText\\\":\\\"起始行原文\\\"}。\\n\\nreplace: {\\\"type\\\":\\\"replace\\\",\\\"file\\\":\\\"...\\\",\\\"startLine\\\":正整数,\\\"endLine\\\":正整数,\\\"anchorText\\\":\\\"起始行原文\\\",\\\"text\\\":\\\"WebGAL txt\\\"}。\\n\\n行号必须对应下方带行号脚本中的 txt 行号。anchorText 请原样复制目标行完整文本。\\n\\ntext 字段直接写 WebGAL txt 行，多行用 \\\\n 分隔。\\n\\nWebGAL 命令行必须直接以命令开头，例如 changeBg:room.webp -next;，不要写“背景 changeBg:...”或“立绘 changeFigure:...”。\\n\\n引用素材时只能使用当前素材库列表中的文件名，缺少素材时返回 chat 说明，不要编造。\\n\\n当前素材库未读取到可用素材。生成脚本时不要编造素材名；如果需要素材，请明确提示缺少素材。\\n\\n当前场景：start.txt（文件名 start.txt）\\n\\n当前脚本（左侧数字是 txt 行号）：\\n1: 林夏:从这里开始我们的故事。;\",\"role\":\"system\",\"tool_call_id\":null,\"tool_calls\":null},{\"content\":\"随便写一个故事\",\"role\":\"user\",\"tool_call_id\":null,\"tool_calls\":null},{\"content\":\"{\\\"patches\\\":[{\\\"type\\\":\\\"insert\\\",\\\"file\\\":\\\"start.txt\\\",\\\"afterLine\\\":\\\"end\\\",\\\"text\\\":\\\"雨夜里，老旧的灯在风中摇晃。;\\\"}]}\",\"role\":\"assistant\",\"tool_call_id\":null,\"tool_calls\":null},{\"content\":\"上一次修改未通过校验，尚未应用任何内容。请修正后重新返回完整 JSON 方案，替换上一份方案，不要只解释错误。\\n\\n校验错误：\\nWebGAL txt 格式无效：\\n第 1 行不是有效 WebGAL 行：雨夜里，老旧的灯在风中摇晃。;\\n\\n旁白必须写成 :文本;，对白写成 角色名:文本;。不要返回没有冒号的普通句子。WebGAL 命令必须直接以 changeBg:...; 等命令开头。\\n\\npatch 的 file 必须是 start.txt。仍以最初提供的脚本和行号为基准，保留用户的创作意图和无关内容。只输出 JSON，不要 Markdown。\",\"role\":\"user\",\"tool_call_id\":null,\"tool_calls\":null}],\"tools\":[]}"
+      },
+      "response": {
+        "text": "{\"Ok\":{\"text\":\"{\\\"patches\\\":[{\\\"type\\\":\\\"insert\\\",\\\"file\\\":\\\"start.txt\\\",\\\"afterLine\\\":\\\"end\\\",\\\"text\\\":\\\":雨夜里，老旧的灯在风中摇晃。;\\\"}]}\",\"toolCalls\":[]}}"
+      },
+      "elapsedMs": 0
+    }
+  ]
+}

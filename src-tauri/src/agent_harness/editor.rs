@@ -36,6 +36,16 @@ pub struct EditorScenario {
     pub delayed_turns: Vec<usize>,
     #[serde(default)]
     pub fail_commands: HashMap<String, String>,
+    #[serde(default)]
+    pub unmount_after_call: Option<usize>,
+    #[serde(default)]
+    pub return_before_response: bool,
+    #[serde(default)]
+    pub switch_project: bool,
+    #[serde(default)]
+    pub loading_on_return: bool,
+    #[serde(default)]
+    pub stale_path_on_return: bool,
 }
 
 impl EditorScenario {

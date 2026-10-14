@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
+import { clearProjectAiRuntime } from '../app/lib/project-ai-runtime';
+
+beforeEach(() => { clearProjectAiRuntime(); });
 
 // Radix components rely on ResizeObserver, which jsdom does not provide.
 if (typeof globalThis.ResizeObserver === 'undefined') {

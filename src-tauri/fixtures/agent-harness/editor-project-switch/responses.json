@@ -1,0 +1,4 @@
+[
+  {"Ok":{"text":"{\"patches\":[{\"type\":\"insert\",\"file\":\"start.txt\",\"afterLine\":\"end\",\"text\":\"雨夜里，老旧的灯在风中摇晃。;\"}]}","toolCalls":[]}},
+  {"Ok":{"text":"{\"patches\":[{\"type\":\"insert\",\"file\":\"start.txt\",\"afterLine\":\"end\",\"text\":\":雨夜里，老旧的灯在风中摇晃。;\"}]}","toolCalls":[]}}
+]

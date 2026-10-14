@@ -81,12 +81,16 @@ agent-harness --record editor-narration-repair editor \
 `editor.json` 定义场景文件名、原始脚本和用户请求。离线用例的 `tools` 声明测试
 是否支持工具调用;真实录制仍读取 profile 的供应商能力。`stopAfterCall`、
 `delayedTurns` 和可选 `nextPrompt` 控制停止及迟到响应,`failCommands` 注入指定 IPC
-失败。驱动只生成预览,不批准提交;报告包含请求次数、校验错误、待确认内容、保存
+失败。`unmountAfterCall` 模拟离页,`returnBeforeResponse` 控制是否在响应前返回,
+`switchProject` 切换到独立项目,`loadingOnReturn` 和 `stalePathOnReturn` 覆盖返回时
+项目路径尚未加载或暂时仍为上一项目路径的情况。
+驱动只生成预览,不批准提交;报告包含请求次数、校验错误、待确认内容、保存
 缓冲区写入次数和提交调用次数。请求漂移或未实现的 IPC 会让 harness 直接失败。
 
-新增的八份 `editor-*` cassette 来自明确标为 `scripted-editor` 的公开响应,
+十一份 `editor-*` cassette 来自明确标为 `scripted-editor` 的公开响应,
 覆盖旁白格式修正、坏 JSON、工具反馈、修正上限、普通对话、本地 IPC 失败、停止
-以及停止修正后发送新请求。它们不是供应商实录。`expected.json` 锁定真实前端
+以及停止修正后发送新请求,另有离页完成、运行中返回及切换项目三个场景。它们不是
+供应商实录。`expected.json` 锁定真实前端
 与 Rust 解析器产出的报告,每次离线重放必须逐字段一致。
 
 ## 跑单个 Agent
@@ -235,7 +239,7 @@ cargo test --features agent-harness --manifest-path src-tauri/Cargo.toml
    使用中文场景文件名，触发安全文件名校验；第二轮由 JSON 修复器改成安全名称。
    回归会检查双轮录音、回放产物及 `expected.json`。`repair-responses.json` 另有
    脚本化坏 JSON / 修复响应，用于稳定测试录制 gateway 本身。
-4. **对话编辑** —— 遍历八份 `editor-*` cassette,运行生产 React hook 和 Rust
+4. **对话编辑** —— 遍历十一份 `editor-*` cassette,运行生产 React hook 和 Rust
    脚本解析器,比较待确认产物及 `expected.json`,验证重试上限和停止后的运行归属,
    并断言未经确认的保存缓冲区写入与提交次数都为零。
 

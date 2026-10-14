@@ -52,6 +52,7 @@ async function run({ scenario, projectPath }) {
     import('@testing-library/react'), import('react'), import('react-router'), import('../src/app/hooks/useAiAgent.ts'),
   ]);
   const scriptSource = scenario.script;
+  localStorage.setItem('project-path-editor-harness', projectPath);
   const nodes = await invoke('parse_scene', { source: scriptSource });
   let bufferWrites = 0;
   const noop = () => {};
@@ -64,7 +65,19 @@ async function run({ scenario, projectPath }) {
   };
   const wrapper = ({ children }) => React.createElement(MemoryRouter, null, children);
   let hook;
-  await act(async () => { hook = renderHook(() => useAiAgent(params), { wrapper }); });
+  const mount = async (initialProps) => {
+    await act(async () => { hook = renderHook((props) => useAiAgent(props), { wrapper, initialProps }); });
+  };
+  const returnToProject = async () => {
+    await mount(scenario.loadingOnReturn ? { ...params, projectPath: null } : params);
+    if (scenario.stalePathOnReturn) {
+      await act(async () => { hook.rerender({ ...params, projectPath: `${projectPath}-previous-project` }); });
+    }
+    if (scenario.loadingOnReturn || scenario.stalePathOnReturn) {
+      await act(async () => { hook.rerender(params); });
+    }
+  };
+  await mount(params);
   let first;
   act(() => { first = hook.result.current.sendPrompt(scenario.prompt); });
   if (scenario.stopAfterCall) {
@@ -76,7 +89,32 @@ async function run({ scenario, projectPath }) {
       await act(async () => { await hook.result.current.sendPrompt(scenario.nextPrompt); });
     }
   }
+  const navigation = [];
+  if (scenario.unmountAfterCall) {
+    await waitFor(() => {
+      if (chatCalls.length < scenario.unmountAfterCall) throw new Error('waiting to leave the editor');
+    }, { timeout: 5000 });
+    await act(async () => { hook.unmount(); });
+    if (scenario.switchProject) {
+      await mount({ ...params, projectId: 'another-project' });
+    }
+    if (scenario.returnBeforeResponse) {
+      await returnToProject();
+      navigation.push({ phase: 'returnedWhileRunning', busy: hook.result.current.busy });
+    }
+  }
   await act(async () => { await first; });
+  if (scenario.unmountAfterCall && !scenario.returnBeforeResponse) {
+    if (scenario.switchProject) {
+      navigation.push({
+        phase: 'anotherProject', busy: hook.result.current.busy,
+        userMessages: hook.result.current.messages.filter((message) => message.role === 'user').length,
+        pending: hook.result.current.pendingChangeSet !== null,
+      });
+      await act(async () => { hook.unmount(); });
+    }
+    await returnToProject();
+  }
 
   const agent = hook.result.current;
   const runIds = new Map();
@@ -100,6 +138,7 @@ async function run({ scenario, projectPath }) {
       validationErrors: trace.turns.map((turn) => turn.validationError).filter(Boolean),
       failedTools: trace.turns.flatMap((turn) => turn.toolCalls.filter((call) => !call.ok).map((call) => call.name)),
     })),
+    ...(navigation.length ? { navigation } : {}),
   };
   hook.unmount();
   dom.window.close();

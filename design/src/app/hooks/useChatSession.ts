@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { projectAiRef, useProjectAiState } from '../lib/project-ai-runtime';
 
 export interface ChatDiffLine {
   kind: 'context' | 'added' | 'removed';
@@ -174,8 +175,9 @@ function loadSessionMessages(
  * via the system prompt, not by switching sessions.
  */
 export function useChatSession(projectId: string | undefined, initialMessage: ChatMessage) {
+  const projectKey = `chat:${projectId ?? 'demo'}`;
   // Resolve / bootstrap the session index for this project.
-  const [index, setIndex] = useState<SessionIndex>(() => {
+  const [index, setIndex] = useProjectAiState<SessionIndex>(projectKey, 'index', () => {
     const existing = readIndex(projectId) ?? migrateLegacy(projectId);
     if (existing) return existing;
     const meta = makeMeta();
@@ -184,25 +186,11 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
     return fresh;
   });
 
-  const [messages, setMessagesState] = useState<ChatMessage[]>(() =>
+  const [messages, setMessagesState] = useProjectAiState<ChatMessage[]>(projectKey, 'messages', () =>
     loadSessionMessages(projectId, index.activeId, initialMessage),
   );
 
-  // Re-bootstrap when the project changes.
-  useEffect(() => {
-    const existing = readIndex(projectId) ?? migrateLegacy(projectId);
-    const next = existing ?? (() => {
-      const meta = makeMeta();
-      const fresh: SessionIndex = { activeId: meta.id, sessions: [meta] };
-      writeIndex(projectId, fresh);
-      return fresh;
-    })();
-    setIndex(next);
-    setMessagesState(loadSessionMessages(projectId, next.activeId, initialMessage));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
-  const activeIdRef = useRef(index.activeId);
+  const activeIdRef = projectAiRef(projectKey, 'activeId', index.activeId);
   activeIdRef.current = index.activeId;
 
   const persistMessages = useCallback((sessionId: string, next: ChatMessage[]) => {

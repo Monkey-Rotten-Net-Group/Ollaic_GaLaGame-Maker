@@ -67,7 +67,8 @@ prompt，如果你的项目上下文本身含有不该进仓库的内容，它�
   合约，第二轮修复为安全文件名；带 `plan.json` / `fixture.json` / `expected.json`。
 - `repair-responses.json` — 脚本化的坏 JSON / 修复响应，用于单元测试录制
   gateway；它不是 provider 实录。
-- `editor-*` — 八份 `scripted-editor` 录音,由公开的脚本化响应生成,不是供应商
+- `editor-*` — 十一份 `scripted-editor` 录音,由公开的脚本化响应生成,不是供应商
   实录。通过 `agent-harness editor --scenario <目录>/editor.json` 重放生产 React
   对话循环及 Rust 解析器,并与 `expected.json` 比较。覆盖格式修正、坏 JSON、工具
-  错误反馈、修正上限、普通对话、IPC 失败和两种停止场景。
+  错误反馈、修正上限、普通对话、IPC 失败、两种停止场景以及离页完成、运行中
+  返回和项目切换。

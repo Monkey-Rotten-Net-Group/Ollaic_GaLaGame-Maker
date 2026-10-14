@@ -314,7 +314,7 @@ describe('AI pending preview isolation', () => {
     expect(newProject.setScriptSource).not.toHaveBeenCalled();
   });
 
-  it('drops a pending preview when the user opens another project', async () => {
+  it('keeps the previous project preview out of the newly opened project', async () => {
     let params = makeParams({ projectId: 'old', projectPath: '/tmp/old-project' });
     const { result, rerender } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
     await act(async () => { await result.current.sendPrompt('请修改场景'); });
@@ -329,7 +329,7 @@ describe('AI pending preview isolation', () => {
     expect(applyAiChangeSet).not.toHaveBeenCalled();
   });
 
-  it('cancels and ignores generation that belongs to the previous project', async () => {
+  it('keeps background generation isolated from the newly opened project', async () => {
     let finishTurn!: (value: AiTurnResult) => void;
     vi.mocked(aiChatTurn).mockImplementationOnce(() => new Promise((resolve) => {
       finishTurn = resolve;
@@ -345,7 +345,7 @@ describe('AI pending preview isolation', () => {
     rerender();
     expect(result.current.busy).toBe(false);
     expect(result.current.pendingChangeSet).toBeNull();
-    expect(aiChatCancel).toHaveBeenCalledWith(expect.stringMatching(/^run-/));
+    expect(aiChatCancel).not.toHaveBeenCalled();
 
     await act(async () => {
       finishTurn({ text: 'old project response', toolCalls: [] } as unknown as AiTurnResult);

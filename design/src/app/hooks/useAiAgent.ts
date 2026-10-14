@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { projectAiRef, useProjectAiState } from '../lib/project-ai-runtime';
 import { useNavigate } from 'react-router';
 import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
 import {
@@ -238,9 +239,38 @@ async function writeAgentTrace(trace: AiAgentTrace): Promise<void> {
 
 export function useAiAgent(params: UseAiAgentParams) {
   const navigate = useNavigate();
+  const identity = params.projectId ?? params.projectPath ?? 'demo';
+  const projectKey = `agent:${identity}`;
+  const view = useRef({ projectKey, mounted: true });
+  view.current.projectKey = projectKey;
+  useLayoutEffect(() => {
+    view.current.mounted = true;
+    return () => { view.current.mounted = false; };
+  }, []);
+  const canPublish = () => view.current.mounted && view.current.projectKey === projectKey;
+  const viewParams: UseAiAgentParams = {
+    ...params,
+    setNodes: (value) => { if (canPublish()) params.setNodes(value); },
+    setScriptSource: (value) => { if (canPublish()) params.setScriptSource(value); },
+    setDirty: (value) => { if (canPublish()) params.setDirty(value); },
+    setSaveStatus: (value) => { if (canPublish()) params.setSaveStatus(value); },
+    setSelectedNode: (value) => { if (canPublish()) params.setSelectedNode(value); },
+    setShowScript: (value) => { if (canPublish()) params.setShowScript(value); },
+    pushHistory: (value) => { if (canPublish()) params.pushHistory(value); },
+    reconcileCurrentScene: params.reconcileCurrentScene
+      ? (value) => { if (canPublish()) params.reconcileCurrentScene?.(value); }
+      : undefined,
+    onScenesChanged: () => canPublish() ? params.onScenesChanged?.() : undefined,
+    onCharactersChanged: () => canPublish() ? params.onCharactersChanged?.() : undefined,
+    readSceneDraft: params.readSceneDraft ? async (scene) => {
+      if (!canPublish()) return undefined;
+      const draft = await params.readSceneDraft?.(scene);
+      return canPublish() ? draft : undefined;
+    } : undefined,
+  };
   const {
     projectId,
-    projectPath,
+    projectPath: providedProjectPath,
     uploadsRevision = 0,
     currentSceneName,
     sceneHeaders,
@@ -260,7 +290,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     reconcileCurrentScene,
     onScenesChanged,
     onCharactersChanged,
-  } = params;
+  } = viewParams;
+  let mappedProjectPath: string | null = null;
+  try { if (projectId) mappedProjectPath = localStorage.getItem(`project-path-${projectId}`); } catch {}
+  // A reused editor can briefly supply the previous project's path while loading.
+  const providedPathMatches = providedProjectPath && (!mappedProjectPath || providedProjectPath === mappedProjectPath);
+  const boundProjectPath = projectAiRef<string | null>(projectKey, 'boundProjectPath', mappedProjectPath ?? providedProjectPath);
+  if (providedPathMatches) boundProjectPath.current = providedProjectPath;
+  const projectPath = providedPathMatches ? providedProjectPath : mappedProjectPath ?? boundProjectPath.current;
 
   const {
     messages,
@@ -272,48 +309,50 @@ export function useAiAgent(params: UseAiAgentParams) {
     deleteSession,
     renameSession,
     ensureTitleFromFirstMessage,
-  } = useChatSession(projectId, INITIAL_AI_MESSAGE);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [committing, setCommitting] = useState(false);
-  const [status, setStatus] = useState<AiPanelStatus>('idle');
-  const [stepLabel, setStepLabel] = useState('');
-  const [pendingChangeSet, setPendingChangeSet] = useState<PendingChangeSet | null>(null);
-  const [error, setError] = useState<AiErrorState | null>(null);
-  const [missingIssues, setMissingIssues] = useState<MissingAssetIssue[]>([]);
-  const [assets, setAssets] = useState<AssetInfo[]>([]);
-  const [memory, setMemory] = useState<ProjectMemory | null>(null);
+  } = useChatSession(identity, INITIAL_AI_MESSAGE);
+  const [input, setInput] = useProjectAiState(projectKey, 'input', '');
+  const [busy, setBusy] = useProjectAiState(projectKey, 'busy', false);
+  const [committing, setCommitting] = useProjectAiState(projectKey, 'committing', false);
+  const [status, setStatus] = useProjectAiState<AiPanelStatus>(projectKey, 'status', 'idle');
+  const [stepLabel, setStepLabel] = useProjectAiState(projectKey, 'stepLabel', '');
+  const [pendingChangeSet, setPendingChangeSet] = useProjectAiState<PendingChangeSet | null>(projectKey, 'pendingChangeSet', null);
+  const [error, setError] = useProjectAiState<AiErrorState | null>(projectKey, 'error', null);
+  const [missingIssues, setMissingIssues] = useProjectAiState<MissingAssetIssue[]>(projectKey, 'missingIssues', []);
+  const [assets, setAssets] = useProjectAiState<AssetInfo[]>(projectKey, 'assets', []);
+  const [memory, setMemory] = useProjectAiState<ProjectMemory | null>(projectKey, 'memory', null);
   // Reference uploads: author-attached local files the agent may read.
   // `uploads` is the project's whole store; `attachedIds` is the subset the
   // user picked for the *next* message. Sending moves that subset onto the
   // user message and clears the tray, so attaching feels one-shot.
-  const [uploads, setUploads] = useState<AiUpload[]>([]);
-  const [attachedIds, setAttachedIds] = useState<string[]>([]);
-  const [uploadBusy, setUploadBusy] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [lastRequest, setLastRequest] = useState<{ prompt: string; attachmentIds: string[] } | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const [cooldown, setCooldown] = useState(0);
-  const cancelledRef = useRef(false);
-  const streamingIdRef = useRef<string | null>(null);
-  const inFlightRef = useRef(false);
-  const commitInFlightRef = useRef(false);
+  const [uploads, setUploads] = useProjectAiState<AiUpload[]>(projectKey, 'uploads', []);
+  const [attachedIds, setAttachedIds] = useProjectAiState<string[]>(projectKey, 'attachedIds', []);
+  const [uploadBusy, setUploadBusy] = useProjectAiState(projectKey, 'uploadBusy', false);
+  const [uploadError, setUploadError] = useProjectAiState<string | null>(projectKey, 'uploadError', null);
+  const [lastRequest, setLastRequest] = useProjectAiState<{ prompt: string; attachmentIds: string[] } | null>(projectKey, 'lastRequest', null);
+  const [retryCount, setRetryCount] = useProjectAiState(projectKey, 'retryCount', 0);
+  const [cooldown, setCooldown] = useProjectAiState(projectKey, 'cooldown', 0);
+  const cooldownUntilRef = projectAiRef(projectKey, 'cooldownUntil', 0);
+  const cancelledRef = projectAiRef(projectKey, 'cancelled', false);
+  const streamingIdRef = projectAiRef<string | null>(projectKey, 'streamingId', null);
+  const inFlightRef = projectAiRef(projectKey, 'inFlight', false);
+  const commitInFlightRef = projectAiRef(projectKey, 'commitInFlight', false);
   // Monotonic token identifying the in-flight request. A new prompt bumps this;
   // an old request's finally only touches shared UI state when its token still
   // matches, so a stale request can't clobber a newer one.
-  const requestTokenRef = useRef(0);
+  const requestTokenRef = projectAiRef(projectKey, 'requestToken', 0);
   /// Per-Run identity shared with the backend `ChatRunRegistry`. Every awaited
   /// continuation funnels through [`ownsRun`] before applying any side effect
   /// (write trace, set error/status, replace messages, execute tools, publish
   /// Preview) so a late success or late error from Run A cannot mutate the
   /// UI after Run B has started or after Stop has fired.
-  const currentRunIdRef = useRef<string | null>(null);
-  const ownsRun = useCallback((runId: string) => currentRunIdRef.current === runId, []);
-  const currentSceneNameRef = useRef(currentSceneName);
-  const currentSceneRevisionRef = useRef(0);
-  const projectPathRef = useRef(projectPath);
-  const previousProjectPathRef = useRef(projectPath);
-  const activeSessionIdRef = useRef(activeId);
+  const currentRunIdRef = projectAiRef<string | null>(projectKey, 'runId', null);
+  const ownsRun = useCallback((runId: string) => currentRunIdRef.current === runId, [currentRunIdRef]);
+  const currentSceneNameRef = projectAiRef(projectKey, 'sceneName', currentSceneName);
+  const currentSceneRevisionRef = projectAiRef(projectKey, 'sceneRevision', 0);
+  const projectPathRef = projectAiRef(projectKey, 'projectPath', projectPath);
+  const previousProjectPathRef = projectAiRef(projectKey, 'previousProjectPath', projectPath);
+  const resourcesProjectPathRef = projectAiRef<string | null>(projectKey, 'resourcesProjectPath', null);
+  const activeSessionIdRef = projectAiRef(projectKey, 'activeSessionId', activeId);
   projectPathRef.current = projectPath;
   activeSessionIdRef.current = activeId;
 
@@ -326,7 +365,7 @@ export function useAiAgent(params: UseAiAgentParams) {
   useLayoutEffect(() => {
     if (currentSceneNameRef.current !== currentSceneName) currentSceneRevisionRef.current += 1;
     currentSceneNameRef.current = currentSceneName;
-  }, [currentSceneName]);
+  }, [projectKey, currentSceneName]);
 
   useLayoutEffect(() => {
     if (previousProjectPathRef.current === projectPath) return;
@@ -345,14 +384,17 @@ export function useAiAgent(params: UseAiAgentParams) {
     setMissingIssues([]);
     setPendingChangeSet(null);
     setStatus('idle');
-  }, [projectPath]);
+  }, [projectKey, projectPath]);
 
   useLayoutEffect(() => {
-    setUploads([]);
-    setAttachedIds([]);
-    setUploadError(null);
-    setUploadBusy(false);
-    setLastRequest(null);
+    if (resourcesProjectPathRef.current !== projectPath) {
+      resourcesProjectPathRef.current = projectPath;
+      setUploads([]);
+      setAttachedIds([]);
+      setUploadError(null);
+      setUploadBusy(false);
+      setLastRequest(null);
+    }
     if (!projectPath) {
       setAssets([]);
       setMemory(null);
@@ -363,13 +405,15 @@ export function useAiAgent(params: UseAiAgentParams) {
     readProjectMemory(projectPath).then((value) => { if (!cancelled) setMemory(value); }).catch(() => { if (!cancelled) setMemory(null); });
     listAiUploads(projectPath).then((list) => { if (!cancelled) setUploads(list); }).catch(() => { if (!cancelled) setUploads([]); });
     return () => { cancelled = true; };
-  }, [projectPath, uploadsRevision]);
+  }, [projectKey, projectPath, uploadsRevision]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
-    const timer = setTimeout(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
+    const remaining = Math.max(0, Math.ceil((cooldownUntilRef.current - Date.now()) / 1000));
+    if (remaining !== cooldown) { setCooldown(remaining); return; }
+    const timer = setTimeout(() => setCooldown(Math.max(0, Math.ceil((cooldownUntilRef.current - Date.now()) / 1000))), 1000);
     return () => clearTimeout(timer);
-  }, [cooldown]);
+  }, [cooldown, cooldownUntilRef]);
 
   const replaceAssistantMessage = useCallback((messageId: string, content: string, extra?: Partial<ChatMessage>) => {
     setMessages(prev => prev.map(message => (message.id === messageId ? { ...message, content, ...extra } : message)));
@@ -998,7 +1042,10 @@ export function useAiAgent(params: UseAiAgentParams) {
         setStatus('error');
         const classified = classifyAiError(String(e));
         setError(classified);
-        if (classified.kind === 'rate_limit') setCooldown(30);
+        if (classified.kind === 'rate_limit') {
+          cooldownUntilRef.current = Date.now() + 30_000;
+          setCooldown(30);
+        }
         replaceAssistantMessage(assistantId, `（错误：${classified.message}）`);
       }
     } finally {

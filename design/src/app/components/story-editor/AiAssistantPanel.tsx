@@ -134,7 +134,7 @@ export function AiAssistantPanel({
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" onClick={onOpenMemory} disabled={!projectPath || aiAgent.busy || aiAgent.committing || aiAgent.pendingChangeSet?.status === 'pending'} className="ollaic-icon-button h-7 w-7 disabled:opacity-40" aria-label="管理项目记忆" title="项目记忆"><Brain className="h-4 w-4" /></button>
+          <button type="button" onClick={onOpenMemory} disabled={!projectPath || aiAgent.committing} className="ollaic-icon-button h-7 w-7 disabled:opacity-40" aria-label="管理项目记忆" title="项目记忆"><Brain className="h-4 w-4" /></button>
           <button
             type="button"
             onClick={aiAgent.startNewSession}

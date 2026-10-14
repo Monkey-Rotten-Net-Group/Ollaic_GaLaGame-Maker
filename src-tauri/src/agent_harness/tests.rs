@@ -186,6 +186,9 @@ async fn editor_cassettes_replay_the_production_hook_and_backend_parser() {
         ("editor-ipc-failure", "error", 1),
         ("editor-stop", "idle", 1),
         ("editor-stop-repair", "idle", 3),
+        ("editor-page-leave", "pending", 2),
+        ("editor-page-return", "pending", 2),
+        ("editor-project-switch", "pending", 2),
     ];
     for (name, status, turns) in cases {
         let dir = root.join(name);
