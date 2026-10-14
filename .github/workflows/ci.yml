@@ -89,5 +89,20 @@ jobs:
 
       # Replays recorded provider output through the real agents, offline.
       # Also the only build that compiles the agent-harness binary.
+      - name: Enable pnpm for editor harness
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js for editor harness
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install editor harness dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Test agent-harness (cassette replay)
         run: cargo test --locked --features agent-harness --manifest-path src-tauri/Cargo.toml

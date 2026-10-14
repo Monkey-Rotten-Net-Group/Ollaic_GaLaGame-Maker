@@ -174,6 +174,54 @@ fn every_cassette_is_structurally_sound() {
     }
 }
 
+#[tokio::test]
+async fn editor_cassettes_replay_the_production_hook_and_backend_parser() {
+    let root = cassette::default_root();
+    let cases = [
+        ("editor-narration-repair", "pending", 2),
+        ("editor-json-repair", "pending", 2),
+        ("editor-tool-repair", "pending", 3),
+        ("editor-repair-limit", "error", 3),
+        ("editor-chat", "idle", 1),
+        ("editor-ipc-failure", "error", 1),
+        ("editor-stop", "idle", 1),
+        ("editor-stop-repair", "idle", 3),
+    ];
+    for (name, status, turns) in cases {
+        let dir = root.join(name);
+        let global = super::cli::GlobalArgs {
+            profile: None, record: None, replay: Some(name.into()),
+            cassette_dir: Some(root.display().to_string()), json: true,
+        };
+        let report = super::editor::from_files(&global, &dir.join("editor.json"), None)
+            .await.unwrap_or_else(|error| panic!("{name}: {error}"));
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("expected.json")).unwrap()
+        ).unwrap();
+        assert_eq!(report, expected, "{name} output changed");
+        assert_eq!(report["status"], status, "{name}");
+        assert_eq!(report["chatRuns"].as_array().unwrap().len(), turns, "{name}");
+        assert_eq!(report["bufferWrites"], 0, "{name} changed the saveable buffer");
+        assert_eq!(report["commitCalls"], 0, "{name} committed without approval");
+        let recorded = cassette::load(&root, name).unwrap();
+        assert_eq!(recorded.provider, "scripted-editor");
+        assert_eq!(recorded.interactions.len(), turns);
+    }
+}
+
+#[tokio::test]
+async fn editor_replay_rejects_a_changed_prompt_without_using_the_live_provider() {
+    let root = cassette::default_root();
+    let global = super::cli::GlobalArgs {
+        profile: None, record: None, replay: Some("editor-narration-repair".into()),
+        cassette_dir: Some(root.display().to_string()), json: true,
+    };
+    let mut scenario = super::editor::EditorScenario::load(&root.join("editor-narration-repair/editor.json")).unwrap();
+    scenario.prompt.push_str(" changed");
+    let error = super::editor::run(&global, scenario, None).await.unwrap_err();
+    assert!(error.contains("cassette has no Chat interaction"), "{error}");
+}
+
 #[test]
 fn real_repair_fixture_contains_a_failed_turn_and_a_repair_turn() {
     let root = cassette::default_root();

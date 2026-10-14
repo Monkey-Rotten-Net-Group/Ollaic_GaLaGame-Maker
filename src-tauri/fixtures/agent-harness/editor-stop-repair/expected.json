@@ -1,0 +1,27 @@
+{
+  "bufferWrites": 0,
+  "chatRuns": [
+    0,
+    0,
+    1
+  ],
+  "commitCalls": 0,
+  "error": null,
+  "lastMessage": "新请求已完成",
+  "missingAssets": [],
+  "pendingEdits": [],
+  "status": "idle",
+  "traces": [
+    {
+      "failedTools": [],
+      "mode": "legacy",
+      "outcome": "final_text_without_changes",
+      "turns": 1,
+      "validationErrors": []
+    }
+  ],
+  "userMessages": [
+    "旧请求",
+    "新请求"
+  ]
+}

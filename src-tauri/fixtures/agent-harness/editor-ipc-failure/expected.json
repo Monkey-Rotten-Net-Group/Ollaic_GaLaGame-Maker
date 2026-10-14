@@ -1,0 +1,24 @@
+{
+  "bufferWrites": 0,
+  "chatRuns": [
+    0
+  ],
+  "commitCalls": 0,
+  "error": "IPC unavailable",
+  "lastMessage": "",
+  "missingAssets": [],
+  "pendingEdits": [],
+  "status": "error",
+  "traces": [
+    {
+      "failedTools": [],
+      "mode": "legacy",
+      "outcome": "stage_error",
+      "turns": 1,
+      "validationErrors": []
+    }
+  ],
+  "userMessages": [
+    "写一个故事"
+  ]
+}

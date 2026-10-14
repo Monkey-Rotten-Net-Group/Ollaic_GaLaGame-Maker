@@ -1,0 +1,5 @@
+[
+  {"Ok":{"text":"","toolCalls":[{"id":"bad","name":"edit_scene","arguments":{"file":"start.txt","patches":[{"type":"insert","file":"start.txt","afterLine":"end","text":"雨夜里，老旧的灯在风中摇晃。;"}]}}]}},
+  {"Ok":{"text":"","toolCalls":[{"id":"fixed","name":"edit_scene","arguments":{"file":"start.txt","patches":[{"type":"insert","file":"start.txt","afterLine":"end","text":":雨夜里，老旧的灯在风中摇晃。;"}]}}]}},
+  {"Ok":{"text":"已生成预览","toolCalls":[]}}
+]

@@ -1,0 +1,24 @@
+{
+  "bufferWrites": 0,
+  "chatRuns": [
+    0
+  ],
+  "commitCalls": 0,
+  "error": null,
+  "lastMessage": "这是讨论回复",
+  "missingAssets": [],
+  "pendingEdits": [],
+  "status": "idle",
+  "traces": [
+    {
+      "failedTools": [],
+      "mode": "legacy",
+      "outcome": "final_text_without_changes",
+      "turns": 1,
+      "validationErrors": []
+    }
+  ],
+  "userMessages": [
+    "讨论一下这个开场"
+  ]
+}

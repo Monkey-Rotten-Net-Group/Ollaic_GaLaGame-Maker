@@ -13,6 +13,8 @@
 | `fixture.json` | 回归用 | `{ agent, brief?, instruction?, allowLocalFallback? }` |
 | `expected.json` | 可选 | 序列化后的 `AgentOutput`，重放结果必须逐字段相等 |
 | `blobs/` | 媒体 | 二进制产物，按 sha256 命名 |
+| `editor.json` | 编辑回归 | 原始脚本、请求、能力和停止/失败控制 |
+| `responses.json` | 脚本化编辑录制 | `Result<AiTurnResult,String>` 响应数组,不在重放时读取 |
 
 只有 `cassette.json` 的目录会被当成「留档」跳过，不参与回归。
 
@@ -65,3 +67,7 @@ prompt，如果你的项目上下文本身含有不该进仓库的内容，它�
   合约，第二轮修复为安全文件名；带 `plan.json` / `fixture.json` / `expected.json`。
 - `repair-responses.json` — 脚本化的坏 JSON / 修复响应，用于单元测试录制
   gateway；它不是 provider 实录。
+- `editor-*` — 八份 `scripted-editor` 录音,由公开的脚本化响应生成,不是供应商
+  实录。通过 `agent-harness editor --scenario <目录>/editor.json` 重放生产 React
+  对话循环及 Rust 解析器,并与 `expected.json` 比较。覆盖格式修正、坏 JSON、工具
+  错误反馈、修正上限、普通对话、IPC 失败和两种停止场景。

@@ -57,6 +57,9 @@ pub enum Command {
     /// Run one non-streaming chat turn, optionally with tool definitions.
     Chat(ChatArgs),
 
+    /// Run the production conversational editor hook, with per-turn cassette replay.
+    Editor(EditorArgs),
+
     /// Run a single Production Flow Agent against a StoryPlan.
     Agent(AgentArgs),
 
@@ -115,6 +118,15 @@ pub struct ChatArgs {
     /// JSON file holding a `[{name, description, parameters}, ...]` tool array.
     #[arg(long, value_name = "FILE")]
     pub tools: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct EditorArgs {
+    #[arg(long, value_name = "FILE")]
+    pub scenario: String,
+    /// Scripted Result<AiTurnResult,String> responses for recording deterministic fixtures.
+    #[arg(long, value_name = "FILE")]
+    pub responses: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]

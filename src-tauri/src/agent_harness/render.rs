@@ -20,6 +20,15 @@ impl Renderer {
         Self { json }
     }
 
+    pub fn editor(&self, report: &Value) {
+        if self.emit(report) { return; }
+        println!("editor status: {}", report["status"].as_str().unwrap_or("unknown"));
+        println!("model turns: {}", report["chatRuns"].as_array().map_or(0, Vec::len));
+        println!("buffer writes: {}", report["bufferWrites"]);
+        println!("commit calls: {}", report["commitCalls"]);
+        if let Some(error) = report["error"].as_str() { println!("validation: {error}"); }
+    }
+
     pub fn is_json(&self) -> bool {
         self.json
     }

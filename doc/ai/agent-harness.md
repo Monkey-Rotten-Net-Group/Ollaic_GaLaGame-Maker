@@ -9,7 +9,7 @@
 
 ## 构建与运行
 
-工具在 `harness` feature 之下，正常的 `cargo build` / `tauri build` 不会编译它，
+工具在 `agent-harness` feature 之下，正常的 `cargo build` / `tauri build` 不会编译它，
 也不会把 clap 打进发布产物。
 
 ```bash
@@ -51,9 +51,43 @@ agent-harness --profile $LAB probe --provider custom \
 能力、以及**带工具定义的一次真实往返能不能成功**。最后一项才是多步 Agent
 循环真正依赖的东西。
 
-> Base URL 的结尾斜杠是有意义的。底层 genai 客户端按 URL 拼接规则处理
-> `base_url`，`https://host/v1`（无斜杠）会丢掉 `/v1` 段，`https://host/v1/`
-> 才是对的。`probe` 报 404/连接错误时先检查这里。
+聊天客户端会补齐 Base URL 末尾的斜杠,`https://host/v1` 和 `https://host/v1/`
+都会保留 `/v1` 路径。`probe` 使用同一套地址解析。
+
+## 对话编辑 Agent 重放
+
+`editor` 子命令直接在 Node/JSDOM 中运行生产代码 `useAiAgent`、`AGENT_TOOLS`
+和 `change-set`。前端通过 JSON-line IPC 调用 harness 的 Rust 后端,脚本解析、
+序列化和项目读取都走现有后端函数;每轮 `ai_chat_turn_owned` 的模型响应由
+`Exchange` 录制或按完整请求重放。它会运行格式校验、错误反馈、再次生成及预览流程。
+
+该子命令需要 Node.js 20.19+ 和工作区依赖,先运行 `pnpm install`。其他纯 Rust
+子命令不依赖 Node。`cargo test --features agent-harness` 中的编辑用例也使用这条路径,
+Rust CI 已安装对应依赖。
+
+```bash
+pnpm agent-harness --replay editor-narration-repair editor \
+  --scenario src-tauri/fixtures/agent-harness/editor-narration-repair/editor.json
+
+# 真实供应商录制,使用隔离 profile
+agent-harness --profile $LAB --record editor-live editor --scenario editor.json
+
+# 用公开的脚本化响应录制确定性场景,全程离线
+agent-harness --record editor-narration-repair editor \
+  --scenario src-tauri/fixtures/agent-harness/editor-narration-repair/editor.json \
+  --responses src-tauri/fixtures/agent-harness/editor-narration-repair/responses.json
+```
+
+`editor.json` 定义场景文件名、原始脚本和用户请求。离线用例的 `tools` 声明测试
+是否支持工具调用;真实录制仍读取 profile 的供应商能力。`stopAfterCall`、
+`delayedTurns` 和可选 `nextPrompt` 控制停止及迟到响应,`failCommands` 注入指定 IPC
+失败。驱动只生成预览,不批准提交;报告包含请求次数、校验错误、待确认内容、保存
+缓冲区写入次数和提交调用次数。请求漂移或未实现的 IPC 会让 harness 直接失败。
+
+新增的八份 `editor-*` cassette 来自明确标为 `scripted-editor` 的公开响应,
+覆盖旁白格式修正、坏 JSON、工具反馈、修正上限、普通对话、本地 IPC 失败、停止
+以及停止修正后发送新请求。它们不是供应商实录。`expected.json` 锁定真实前端
+与 Rust 解析器产出的报告,每次离线重放必须逐字段一致。
 
 ## 跑单个 Agent
 
@@ -191,7 +225,7 @@ agent-harness cassette verify outline-01      # 同一段 prompt 没有两份答
 cargo test --features agent-harness --manifest-path src-tauri/Cargo.toml
 ```
 
-三类回归，全程无网络，都已接入 CI：
+四类回归，全程无网络，都已接入 CI：
 
 1. **单 Agent** —— 遍历每盒带 `fixture.json` + `plan.json` 的 cassette，重放并断言
    Agent 的契约校验通过；带 `expected.json` 的还会逐字段比对产物。
@@ -201,6 +235,9 @@ cargo test --features agent-harness --manifest-path src-tauri/Cargo.toml
    使用中文场景文件名，触发安全文件名校验；第二轮由 JSON 修复器改成安全名称。
    回归会检查双轮录音、回放产物及 `expected.json`。`repair-responses.json` 另有
    脚本化坏 JSON / 修复响应，用于稳定测试录制 gateway 本身。
+4. **对话编辑** —— 遍历八份 `editor-*` cassette,运行生产 React hook 和 Rust
+   脚本解析器,比较待确认产物及 `expected.json`,验证重试上限和停止后的运行归属,
+   并断言未经确认的保存缓冲区写入与提交次数都为零。
 
 这是这套机制的意义所在：`agents/outline.rs` 里那套校验（章节非空、scene id 唯一、
 文件名安全）此前在 CI 里跑的永远是手写的完美 JSON，现在跑的是模型真的返回过的东西。
@@ -220,11 +257,9 @@ agent-harness --profile $LAB log --trace -n 20  # Agent 轨迹
 
 ## 不覆盖什么
 
-- **对话式编辑 Agent 的多步循环**。它的提示词、工具定义、工具执行和变更集校验都在
-  前端（`design/src/app/lib/ai-tools.ts`、`story-agent.ts`、`change-set.ts`、
-  `hooks/useAiAgent.ts`），Rust 只是转发层。`agent-harness chat --tools` 能喂手写的工具
-  定义验证供应商侧的 function-calling，但不会跑 `AGENT_TOOLS` 和那个循环本身。
-  见 [对话编辑 Agent](./conversational-agent.md)。
+- **真实 WebView 布局及点击批准的界面流程**。`editor` 用 JSDOM 驱动对话循环,
+  不启动图形窗口,不批准提交;事务提交仍由后端变更集测试覆盖。编辑 IPC 桥目前
+  支持脚本预览和场景/素材/角色/记忆读取,未接入的操作会明确失败。
 - **流式**。`ai_chat_stream` 把 `AppHandle::emit` 写死在函数体里，要支持
   `--stream` 得先把它的核心抽成一个返回 stream 的函数供两边共用。
 - **整条 Flow 编排**。`agent-harness agent` 一次跑一个 Agent；编排、恢复、事件由

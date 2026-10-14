@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "recordedAtMs": 1791967111781,
+  "provider": "scripted-editor",
+  "model": "scripted-editor",
+  "interactions": [
+    {
+      "seq": 0,
+      "kind": "chat",
+      "requestHash": "sha256:b636c65c35fe908e6723456eb939486eb06009c100ac72ba1c10142165b2f5b2",
+      "request": {
+        "system": "harness:editor:turn:v1",
+        "user": "{\"messages\":[{\"content\":\"你是 WebGAL txt 脚本编辑器助手。\\n\\n输出规则：只输出一个 JSON 对象，不要 Markdown 包裹，不要解释。\\n\\n需要修改脚本时返回 {\\\"patches\\\":[...]}；只聊天讨论时返回 {\\\"type\\\":\\\"chat\\\",\\\"message\\\":\\\"...\\\"}。\\n\\npatch type 只能是 insert、delete、replace。file 必须是当前场景文件名。\\n\\ninsert: {\\\"type\\\":\\\"insert\\\",\\\"file\\\":\\\"...\\\",\\\"afterLine\\\":正整数或\\\"end\\\",\\\"anchorText\\\":\\\"对应行原文\\\",\\\"text\\\":\\\"WebGAL txt\\\"}。\\n\\ndelete: {\\\"type\\\":\\\"delete\\\",\\\"file\\\":\\\"...\\\",\\\"startLine\\\":正整数,\\\"endLine\\\":正整数,\\\"anchorText\\\":\\\"起始行原文\\\"}。\\n\\nreplace: {\\\"type\\\":\\\"replace\\\",\\\"file\\\":\\\"...\\\",\\\"startLine\\\":正整数,\\\"endLine\\\":正整数,\\\"anchorText\\\":\\\"起始行原文\\\",\\\"text\\\":\\\"WebGAL txt\\\"}。\\n\\n行号必须对应下方带行号脚本中的 txt 行号。anchorText 请原样复制目标行完整文本。\\n\\ntext 字段直接写 WebGAL txt 行，多行用 \\\\n 分隔。\\n\\nWebGAL 命令行必须直接以命令开头，例如 changeBg:room.webp -next;，不要写“背景 changeBg:...”或“立绘 changeFigure:...”。\\n\\n引用素材时只能使用当前素材库列表中的文件名，缺少素材时返回 chat 说明，不要编造。\\n\\n当前素材库未读取到可用素材。生成脚本时不要编造素材名；如果需要素材，请明确提示缺少素材。\\n\\n当前场景：start.txt（文件名 start.txt）\\n\\n当前脚本（左侧数字是 txt 行号）：\\n1: 林夏:从这里开始我们的故事。;\",\"role\":\"system\",\"tool_call_id\":null,\"tool_calls\":null},{\"content\":\"讨论一下这个开场\",\"role\":\"user\",\"tool_call_id\":null,\"tool_calls\":null}],\"tools\":[]}"
+      },
+      "response": {
+        "text": "{\"Ok\":{\"text\":\"{\\\"type\\\":\\\"chat\\\",\\\"message\\\":\\\"这是讨论回复\\\"}\",\"toolCalls\":[]}}"
+      },
+      "elapsedMs": 0
+    }
+  ]
+}

@@ -23,7 +23,7 @@ path = "src/bin/agent-harness.rs"
 required-features = ["agent-harness"]
 
 [features]
-agent-harness = ["dep:clap", "dep:sha2"]
+agent-harness = ["dep:clap", "dep:sha2", "tokio/process"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

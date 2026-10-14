@@ -12,6 +12,7 @@
 pub mod cassette;
 pub mod chain;
 pub mod cli;
+pub mod editor;
 pub mod exchange;
 pub mod gateway;
 pub mod render;
@@ -80,6 +81,11 @@ async fn dispatch(cli: Cli) -> Result<(), String> {
         },
         Command::Probe(args) => run_probe(&render, &cli.global, args).await,
         Command::Chat(args) => run_chat(&render, &cli.global, args).await,
+        Command::Editor(args) => {
+            let report = editor::from_files(&cli.global, Path::new(&args.scenario), args.responses.as_deref().map(Path::new)).await?;
+            render.editor(&report);
+            Ok(())
+        }
         Command::Agent(args) => run_agent(&render, &cli.global, args).await,
         Command::Chain(args) => run_chain(&render, &cli.global, args).await,
         Command::Media { action } => run_media(&render, &cli.global, action).await,

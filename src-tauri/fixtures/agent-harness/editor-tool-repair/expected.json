@@ -1,0 +1,35 @@
+{
+  "bufferWrites": 0,
+  "chatRuns": [
+    0,
+    0,
+    0
+  ],
+  "commitCalls": 0,
+  "error": null,
+  "lastMessage": "已生成修改预览：场景「start.txt」：在 start.txt 末尾插入内容",
+  "missingAssets": [],
+  "pendingEdits": [
+    {
+      "afterContent": "林夏:从这里开始我们的故事。;\n:雨夜里，老旧的灯在风中摇晃。;\n",
+      "beforeContent": "林夏:从这里开始我们的故事。;",
+      "file": "start.txt",
+      "kind": "scene"
+    }
+  ],
+  "status": "pending",
+  "traces": [
+    {
+      "failedTools": [
+        "edit_scene"
+      ],
+      "mode": "function_calling",
+      "outcome": "pending_preview",
+      "turns": 3,
+      "validationErrors": []
+    }
+  ],
+  "userMessages": [
+    "随便写一个故事"
+  ]
+}

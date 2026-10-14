@@ -31,6 +31,13 @@ pub enum Exchange {
 }
 
 impl Exchange {
+    pub(crate) fn check_replay_request(&self, label: &str, request: &Value) -> Result<(), String> {
+        if let Self::Replay { api_key, cassette, .. } = self {
+            lookup(cassette, api_key, label, request, InteractionKind::Chat)?;
+        }
+        Ok(())
+    }
+
     pub fn new(
         global: &GlobalArgs,
         provider: String,

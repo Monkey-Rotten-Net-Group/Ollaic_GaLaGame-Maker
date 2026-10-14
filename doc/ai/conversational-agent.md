@@ -36,6 +36,8 @@ AI 助手通过多轮对话理解项目上下文，读取场景、素材、角�
 - 普通 AI 调用日志：`ai-log.jsonl`。
 - Agent 工具 trace：`ai-agent-trace.jsonl`，位于 Tauri 配置目录。
 - 真实模型 harness 是 ignored Rust test，只在手动指定 `--ignored --nocapture` 时运行。
+- 格式修正与停止回归由 `agent-harness editor` 离线重放生产 React hook 和 Rust
+  解析器,用例在 `src-tauri/fixtures/agent-harness/editor-*`,详见[Agent harness](./agent-harness.md)。
 
 ## 相关源码
 
