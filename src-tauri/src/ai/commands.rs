@@ -1,6 +1,6 @@
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
-use super::gateway::transport::{is_placeholder_base_url, resolved_base_url};
+use super::gateway::transport::{is_placeholder_base_url, resolved_base_url, resolved_chat_base_url};
 use super::gateway::types::ImageReference;
 // Re-exported: this module is the IPC facade, so callers keep importing the
 // media result type from here rather than reaching into the gateway.
@@ -649,7 +649,7 @@ fn build_client(cfg: &AiConfig) -> Client {
                 model
             };
 
-            let resolved = resolved_base_url(&provider, Modality::Chat, &base_url);
+            let resolved = resolved_chat_base_url(&provider, &base_url);
             if !resolved.is_empty() {
                 endpoint = Endpoint::from_owned(resolved);
             }
@@ -702,7 +702,7 @@ pub(crate) fn has_agent_chat_config() -> bool {
 }
 
 pub(crate) fn effective_endpoint(cfg: &AiConfig) -> String {
-    resolved_base_url(&cfg.provider, Modality::Chat, &cfg.base_url)
+    resolved_chat_base_url(&cfg.provider, &cfg.base_url)
 }
 
 /// Read a local image file into an image-to-image reference. Used by the

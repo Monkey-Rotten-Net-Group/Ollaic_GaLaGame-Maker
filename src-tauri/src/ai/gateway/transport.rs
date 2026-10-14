@@ -49,6 +49,18 @@ pub fn resolved_base_url(provider: &str, modality: Modality, base_url: &str) -> 
     registry::resolve_base_url(provider, modality, usable_base_url(base_url)).unwrap_or_default()
 }
 
+pub fn resolved_chat_base_url(provider: &str, base_url: &str) -> String {
+    let resolved = resolved_base_url(provider, Modality::Chat, base_url);
+    let Ok(mut url) = reqwest::Url::parse(&resolved) else {
+        return resolved;
+    };
+    // genai joins relative API paths; a missing slash would discard /v1.
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
+    }
+    url.to_string()
+}
+
 /// Join the resolved base URL with an API path. The only URL builder for
 /// image/TTS requests, so a provider's endpoint cannot differ between
 /// the request and the log line.
@@ -226,6 +238,25 @@ mod tests {
             ),
             "https://proxy.test/v1/images/generations"
         );
+    }
+
+    #[test]
+    fn chat_base_url_preserves_api_prefix_without_trailing_slash() {
+        for base in ["https://proxy.test/api/v1", "https://proxy.test/api/v1/"] {
+            let resolved = resolved_chat_base_url("custom", base);
+            let request = reqwest::Url::parse(&resolved).unwrap().join("chat/completions").unwrap();
+            assert_eq!(request.as_str(), "https://proxy.test/api/v1/chat/completions");
+        }
+    }
+
+    #[test]
+    fn chat_base_url_preserves_query_and_builtin_defaults() {
+        assert_eq!(
+            resolved_chat_base_url("custom", " https://proxy.test/v1?api-version=2026-01 "),
+            "https://proxy.test/v1/?api-version=2026-01"
+        );
+        assert_eq!(resolved_chat_base_url("deepseek", ""), "https://api.deepseek.com/v1/");
+        assert_eq!(resolved_chat_base_url("custom", ""), "");
     }
 
     #[test]

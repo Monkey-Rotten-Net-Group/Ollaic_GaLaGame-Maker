@@ -27,6 +27,7 @@ OpenAI TTS、ElevenLabs、阿里云 DashScope / CosyVoice、火山引擎 / 豆�
 ## Base URL 与 API Key
 
 - **Base URL 留空**时使用该供应商在 registry 中的内置端点。只有内置端点为空的供应商（custom、Midjourney Proxy）才必须填写，UI 会在提示里注明「必填」。
+- 聊天 Base URL 可填写为 `https://host/v1` 或 `https://host/v1/`;客户端会统一补齐末尾斜杠,保留 API 路径前缀,避免底层 SDK 把 `/v1` 替换掉。
 - 输入框里的灰色示例文本只是 placeholder，**不会被写入配置**，因此不会出现「保存了示例地址导致请求失败」。
 - `requires_api_key = false` 的供应商（Ollama、Stable Diffusion WebUI、custom）可以留空 Key，UI 会提示「该供应商通常不需要 Key」。
 

@@ -11,6 +11,37 @@ fn validate_media_download_url(url: &str) -> Result<(), String> {
     validate_download_url(&parsed)
 }
 
+#[tokio::test]
+async fn chat_client_preserves_base_url_path_with_or_without_trailing_slash() {
+    for suffix in ["/api/v1", "/api/v1/"] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 2048];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let count = stream.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let headers = String::from_utf8_lossy(&request);
+            assert!(headers.starts_with("POST /api/v1/chat/completions?api-version=test HTTP/1.1"), "{headers}");
+            let body = br#"{"id":"chat_test","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+            reply_once(&mut stream, "200 OK", &[("Content-Type", "application/json")], body).await;
+        });
+        let cfg = AiConfig {
+            provider: "custom".into(), model: "test-model".into(), api_key: "test-key".into(),
+            base_url: format!("http://{address}{suffix}?api-version=test"), capabilities: None,
+        };
+        let response = tokio::time::timeout(Duration::from_secs(5), build_client(&cfg).exec_chat(
+            &cfg.model, ChatRequest::new(vec![ChatMessage::user("OK")]), None,
+        )).await.unwrap().unwrap();
+        assert_eq!(response.first_text(), Some("OK"));
+        server.await.unwrap();
+    }
+}
+
 async fn fetch_media_bytes_with_policy<P>(
     initial_url: &str,
     resolver: &dyn MediaDnsResolver,
