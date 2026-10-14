@@ -81,6 +81,7 @@ export interface AiErrorState {
  *  message. Mirrors the backend default; an explicit bounded value keeps a
  *  misconfigured Provider from running an unbounded loop on the local UI. */
 const MAX_TURNS = 6;
+const MAX_LEGACY_REPAIRS = 2;
 
 interface AiAgentTraceTool {
   id: string;
@@ -97,6 +98,7 @@ interface AiAgentTraceTurn {
   turn: number;
   modelText: string;
   toolCalls: AiAgentTraceTool[];
+  validationError?: string;
 }
 
 interface AiAgentTrace {
@@ -838,81 +840,96 @@ export function useAiAgent(params: UseAiAgentParams) {
       ...truncateContextMessages(messages, 8),
       { role: 'user', content: text },
     ];
-    let res: Awaited<ReturnType<typeof aiChatTurn>>;
-    try {
-      res = await aiChatTurn(runId, convo, []);
-    } catch (e) {
-      // Late reject: do not mutate the trace or UI for a Stopped run or for
-      // a run that has been superseded by Run B. Without this guard a
-      // Provider that does not honor transport cancellation would still
-      // flip the UI from `idle` back to `error` minutes later.
+    for (let attempt = 0; attempt <= MAX_LEGACY_REPAIRS; attempt += 1) {
       if (!ownsRun(runId)) return;
-      trace.outcome = 'error';
-      trace.error = String(e);
-      void writeAgentTrace(trace);
-      throw e;
-    }
-    if (!ownsRun(runId)) return;
-    if (cancelledRef.current) return;
-    setStepLabel('');
-    trace.turns.push({ turn: 0, modelText: res.text ?? '', toolCalls: [] });
-    const parsed = res.text ? extractEditorResponse(res.text) : null;
-    if (!ownsRun(runId)) return;
-    if (!parsed) {
-      trace.outcome = 'invalid_legacy_response';
-      trace.finalText = res.text ?? '';
-      trace.error = 'AI 没有返回可执行方案';
-      void writeAgentTrace(trace);
-      replaceAssistantMessage(assistantId, res.text || 'AI 没有返回可执行方案，请重新描述你的需求。');
-      setStatus('idle');
-      return;
-    }
-    if (parsed.type === 'chat') {
-      trace.outcome = 'final_text_without_changes';
-      trace.finalText = parsed.message;
-      void writeAgentTrace(trace);
-      replaceAssistantMessage(assistantId, parsed.message);
-      setStatus('idle');
-      return;
-    }
-    try {
-      const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
-      if (!ownsRun(runId)) return;
-      if (freshAssets !== assets) setAssets(freshAssets);
-      trace.assetCount = freshAssets.length;
-      const edit = await stageSceneEdit(
-        undefined,
-        { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
-        buildStagingContext(freshAssets),
-      );
-      if (!ownsRun(runId)) return;
-      trace.edits = [describeEdit(edit, sceneHeaders)];
-      if (!finalizeChangeSet([edit], assistantId)) {
-        trace.outcome = 'no_executable_changes';
+      setStatus(attempt === 0 ? 'generating' : 'tooling');
+      setStepLabel(attempt === 0 ? '思考中…' : '正在修正脚本格式…');
+      let res: Awaited<ReturnType<typeof aiChatTurn>>;
+      try {
+        res = await aiChatTurn(runId, convo, []);
+      } catch (e) {
+        if (!ownsRun(runId)) return;
+        trace.outcome = 'error';
+        trace.error = String(e);
         void writeAgentTrace(trace);
-        replaceAssistantMessage(assistantId, '（patch 应用后没有变化）');
-        setStatus('idle');
-      } else {
-        trace.outcome = 'pending_preview';
-        void writeAgentTrace(trace);
+        throw e;
       }
-    } catch (e) {
-      // Stage/edit failure must not flip UI to `error` once this run has
-      // been Stopped or superseded. Without this guard a Provider that
-      // races a Stop request would still write a stale trace row and a
-      // misleading error banner.
       if (!ownsRun(runId)) return;
-      const msg = isStageError(e) ? e.message : String(e);
-      trace.outcome = 'stage_error';
-      trace.error = msg;
+      const turnTrace: AiAgentTraceTurn = { turn: attempt, modelText: res.text ?? '', toolCalls: [] };
+      trace.turns.push(turnTrace);
+      const parsed = res.text ? extractEditorResponse(res.text) : null;
+      let failure: { message: string; missingAssets?: MissingAssetIssue[] };
+      if (!parsed) {
+        failure = { message: '返回内容不是有效的编辑 JSON。修改必须返回 {"patches":[...]}，讨论必须返回 {"type":"chat","message":"..."}。patch type 只能是 insert、delete、replace，并提供对应的 file、行号和 text 字段。' };
+      } else if (parsed.type === 'chat') {
+        trace.outcome = 'final_text_without_changes';
+        trace.finalText = parsed.message;
+        void writeAgentTrace(trace);
+        replaceAssistantMessage(assistantId, parsed.message);
+        setStatus('idle');
+        return;
+      } else {
+        try {
+          const freshAssets = projectPath ? await listAllAssets(projectPath).catch(() => assets) : assets;
+          if (!ownsRun(runId)) return;
+          if (freshAssets !== assets) setAssets(freshAssets);
+          trace.assetCount = freshAssets.length;
+          const edit = await stageSceneEdit(
+            undefined,
+            { tool: 'edit_scene', file: currentSceneName, patches: parsed.patches },
+            buildStagingContext(freshAssets),
+          );
+          if (!ownsRun(runId)) return;
+          trace.edits = [describeEdit(edit, sceneHeaders)];
+          if (!finalizeChangeSet([edit], assistantId)) {
+            trace.outcome = 'no_executable_changes';
+            replaceAssistantMessage(assistantId, '（patch 应用后没有变化）');
+            setStatus('idle');
+          } else {
+            trace.outcome = 'pending_preview';
+          }
+          void writeAgentTrace(trace);
+          return;
+        } catch (e) {
+          if (!ownsRun(runId)) return;
+          if (!isStageError(e) || e.name !== 'StageError') {
+            trace.outcome = 'stage_error';
+            trace.error = String(e);
+            void writeAgentTrace(trace);
+            setStatus('error');
+            setError({ kind: 'other', retryable: true, message: String(e) });
+            return;
+          }
+          failure = { message: e.message, missingAssets: e.missingAssets };
+        }
+      }
+
+      turnTrace.validationError = failure.message;
+      if (attempt < MAX_LEGACY_REPAIRS) {
+        // Failed candidates never enter the preview; repair against the original script.
+        convo.push({ role: 'assistant', content: res.text ?? '' });
+        convo.push({ role: 'user', content: [
+          '上一次修改未通过校验，尚未应用任何内容。请修正后重新返回完整 JSON 方案，替换上一份方案，不要只解释错误。',
+          `校验错误：\n${failure.message}`,
+          failure.missingAssets?.length ? `缺失素材：${JSON.stringify(failure.missingAssets)}` : '',
+          '旁白必须写成 :文本;，对白写成 角色名:文本;。不要返回没有冒号的普通句子。WebGAL 命令必须直接以 changeBg:...; 等命令开头。',
+          `patch 的 file 必须是 ${currentSceneName}。仍以最初提供的脚本和行号为基准，保留用户的创作意图和无关内容。只输出 JSON，不要 Markdown。`,
+        ].filter(Boolean).join('\n\n') });
+        continue;
+      }
+
+      trace.outcome = parsed ? 'stage_error' : 'invalid_legacy_response';
+      trace.error = failure.message;
+      trace.finalText = res.text ?? '';
       void writeAgentTrace(trace);
-      if (isStageError(e) && e.missingAssets?.length) {
-        setMissingIssues(e.missingAssets);
+      replaceAssistantMessage(assistantId, '（修改未通过校验）');
+      if (failure.missingAssets?.length) {
+        setMissingIssues(failure.missingAssets);
         setError(null);
         setStatus('missing_assets');
       } else {
         setStatus('error');
-        setError({ kind: 'other', retryable: true, message: msg });
+        setError({ kind: 'other', retryable: true, message: `自动修正 ${MAX_LEGACY_REPAIRS} 次后仍未通过校验：\n${failure.message}` });
       }
     }
   }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
