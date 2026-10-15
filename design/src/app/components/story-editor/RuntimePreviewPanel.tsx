@@ -27,9 +27,31 @@ export function RuntimePreviewPanel({ preview, layout, sceneName, dirty, onLayou
           <button type="button" className="ollaic-icon-button" onClick={() => onLayoutChange('hidden')} aria-label="收起预览"><X className="size-4" /></button>
         </div>
       </header>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#111827]">
-        {preview.url && <iframe key={`${preview.url}:${preview.revision}`} title="WebGAL 实时预览" src={preview.url} onLoad={preview.onFrameLoad} allow="autoplay; fullscreen" allowFullScreen className="h-full w-full border-0" />}
-        {(!preview.url || preview.error) && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#111827] p-5 text-center text-sm text-slate-200">
+      <div
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#0b0f19] p-2"
+        style={{ containerType: 'size' }}
+      >
+        {preview.url && (
+          <div
+            className="relative flex items-center justify-center overflow-hidden rounded bg-black shadow-2xl ring-1 ring-white/10"
+            style={{
+              width: 'min(100cqw, calc(100cqh * 16 / 9))',
+              height: 'min(100cqh, calc(100cqw * 9 / 16))',
+              aspectRatio: '16 / 9',
+            }}
+          >
+            <iframe
+              key={`${preview.url}:${preview.revision}`}
+              title="WebGAL 实时预览"
+              src={preview.url}
+              onLoad={preview.onFrameLoad}
+              allow="autoplay; fullscreen"
+              allowFullScreen
+              className="h-full w-full border-0"
+            />
+          </div>
+        )}
+        {(!preview.url || preview.error) && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0b0f19] p-5 text-center text-sm text-slate-200">
           {preview.error ? <>
             <p role="alert">{preview.error}</p>
             <div className="flex gap-3">
