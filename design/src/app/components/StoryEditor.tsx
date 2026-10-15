@@ -126,7 +126,11 @@ export function StoryEditor() {
     updateHeader: handleHeaderUpdated,
     updateCurrentLinks: updateSceneLinks,
   } = useSceneGraphIndex(currentSceneName, nodes);
-  const [showScript, setShowScript] = useState(false);
+  const [scriptMode, setScriptMode] = useState<'compact' | 'stream' | 'script'>('compact');
+  const showScript = scriptMode === 'script';
+  const setShowScript = useCallback((show: boolean) => {
+    setScriptMode((prev) => (show ? 'script' : prev === 'script' ? 'compact' : prev));
+  }, []);
   const [commandSearchQuery, setCommandSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const runtimePreview = useRuntimePreview(projectPath, scriptSource, previewStarted);
@@ -1088,7 +1092,25 @@ export function StoryEditor() {
                 {(projectInfo?.scenes.length ? projectInfo.scenes : [currentSceneName]).map((scene) => <option key={scene} value={scene}>{sceneHeaders[scene]?.chapter || sceneHeaders[scene]?.outline ? `${sceneDisplayName(scene, sceneHeaders[scene])} · ${scene}` : scene}</option>)}
               </select>
               <button type="button" className="ollaic-icon-button" disabled={workflowOwnsProject} onClick={() => setSceneManagerOpen(true)} aria-label="场景管理" title="场景管理"><FolderOpen className="size-4" /></button>
-              <button type="button" className="ollaic-top-action" onClick={() => setShowScript((value) => !value)} aria-label={showScript ? '切换到指令流视图' : '切换到脚本编辑器'}><FileText className="size-4 sm:hidden" /><span className="hidden sm:inline">{showScript ? '指令视图' : '脚本源码'}</span></button>
+              <select
+                aria-label="编辑器视图模式"
+                value={scriptMode}
+                disabled={workflowOwnsProject}
+                onChange={(event) => setScriptMode(event.target.value as 'compact' | 'stream' | 'script')}
+                className="min-w-0 rounded-md border border-border bg-surface-container-lowest px-2 py-1.5 text-xs text-foreground"
+              >
+                <option value="compact">剧本视图</option>
+                <option value="stream">指令卡片</option>
+                <option value="script">脚本源码</option>
+              </select>
+              <button
+                type="button"
+                className="sr-only"
+                onClick={() => setScriptMode((m) => (m === 'script' ? 'compact' : 'script'))}
+                aria-label={scriptMode === 'script' ? '切换到指令流视图' : '切换到脚本编辑器'}
+              >
+                {scriptMode === 'script' ? '指令视图' : '脚本源码'}
+              </button>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? 'split' : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
@@ -1112,7 +1134,7 @@ export function StoryEditor() {
                         <textarea value={scriptSource} onChange={(event) => { setScriptSource(event.target.value); markDirty(); }} className="min-h-0 w-full flex-1 resize-none bg-transparent p-4 text-sm leading-relaxed outline-none font-mono-family" spellCheck={false} aria-label="WebGAL 脚本编辑器" />
                       </div>
                     ) : (
-                      <ScriptCommandStream nodes={nodes} selectedNode={selectedNode} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders}
+                      <ScriptCommandStream displayMode={scriptMode === 'compact' ? 'compact' : 'stream'} nodes={nodes} selectedNode={selectedNode} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders}
                         onSelectNode={setSelectedNode} onInsertNode={insertNode} onDeleteNode={deleteNode} onCopyNode={copyNode} onCutNode={cutNode} onPasteNode={pasteNode} onReorderNodes={reorderNodes} onJumpToIndex={jumpToNode} onCreateUnlockNode={createUnlockNode}
                         clipboardNode={clipboardNode} characterColors={characterColors} characters={charactersForAi} searchQuery={commandSearchQuery} previewEntries={aiPreviewEntries} projectPath={projectPath ?? undefined} />
                     )}

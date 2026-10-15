@@ -2,8 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useDrag, useDrop } from 'react-dnd';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
-  ArrowRight, BookOpen, Clipboard, Copy, FileText, GitBranch, GripVertical, Image,
-  MoreHorizontal, Music, Plus, Scissors, Search, Trash2, Users,
+  ArrowRight, BookOpen, ChevronDown, Clipboard, Copy, FileText, GitBranch, GripVertical, Image,
+  MoreHorizontal, Music, Play, Plus, Scissors, Search, Trash2, Users,
 } from 'lucide-react';
 import type { Character } from '../../lib/character-types';
 import type { SceneHeader } from '../../lib/webgal-ipc';
@@ -23,6 +23,8 @@ import {
 } from '../ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { commandIconFor, getCommandSummary } from './command-presentation';
+
+export type ScriptStreamDisplayMode = 'stream' | 'compact';
 
 interface ScriptCommandStreamProps {
   nodes: WebGalNode[];
@@ -44,13 +46,14 @@ interface ScriptCommandStreamProps {
   searchQuery?: string;
   previewEntries?: NodeDiffEntry[];
   projectPath?: string;
+  displayMode?: ScriptStreamDisplayMode;
 }
 
 // --- Sub-components for DnD and insert zones ---
 
 const CMD_ITEM = 'script-command';
 
-function InsertZone({ atIndex, onInsert }: { atIndex: number; onInsert: (type: WebGalCommandType, atIndex: number) => void }) {
+function InsertZone({ atIndex, onInsert, compact = false }: { atIndex: number; onInsert: (type: WebGalCommandType, atIndex: number) => void; compact?: boolean }) {
   const [open, setOpen] = useState(false);
 
   const insertCommand = useCallback((type: WebGalCommandType) => {
@@ -59,17 +62,17 @@ function InsertZone({ atIndex, onInsert }: { atIndex: number; onInsert: (type: W
   }, [atIndex, onInsert]);
 
   return (
-    <div className="group relative mx-auto flex h-6 max-w-3xl items-center justify-center">
-      <div className="absolute inset-x-0 top-1/2 h-px bg-outline-variant/20 group-hover:bg-secondary/40 transition-colors" />
+    <div className={`group relative mx-auto flex items-center justify-center ${compact ? 'h-1.5' : 'h-6'} max-w-4xl`}>
+      <div className={`absolute inset-x-0 top-1/2 h-px ${compact ? 'bg-transparent group-hover:bg-secondary/40' : 'bg-outline-variant/20 group-hover:bg-secondary/40'} transition-colors`} />
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="relative z-10 flex h-5 w-5 items-center justify-center rounded-full border border-outline-variant/30 bg-surface-bright text-[10px] text-muted-foreground opacity-0 shadow-sm transition-colors transition-opacity duration-150 group-hover:opacity-100 hover:border-secondary hover:text-secondary data-[state=open]:opacity-100"
+            className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full border border-outline-variant/30 bg-surface-bright text-[9px] text-muted-foreground opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100 hover:border-secondary hover:text-secondary data-[state=open]:opacity-100"
             title="插入指令"
             aria-label="插入指令"
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-2.5 w-2.5" />
           </button>
         </PopoverTrigger>
         <PopoverContent
@@ -490,6 +493,354 @@ function ScriptCommandCard({
     </div>
   );
 }
+
+function ScriptCommandCompactRow({
+  node,
+  index,
+  displayIndex,
+  selected,
+  Icon,
+  tag,
+  isDialogue,
+  isBackground,
+  isBranch,
+  charColor,
+  displayCharacter,
+  characterInherited,
+  continuationLines,
+  selectedNodeId,
+  onSelectNode,
+  onInsertNode,
+  onDeleteNode,
+  onCopyNode,
+  onCutNode,
+  onPasteNode,
+  onReorderNodes,
+  onJumpToIndex,
+  onCreateUnlockNode,
+  clipboardNode,
+  query,
+  characters,
+  projectPath,
+}: ScriptCommandCardProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  const [{ isDragging }, drag, preview] = useDrag({
+    type: CMD_ITEM,
+    item: () => ({ index, id: node.id }),
+    canDrag: () => Boolean(onReorderNodes) && !query,
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
+
+  const [, drop] = useDrop({
+    accept: CMD_ITEM,
+    hover: (item: { index: number; id: string }, monitor) => {
+      if (!ref.current || !onReorderNodes) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+      const hoverBoundingRect = ref.current.getBoundingClientRect();
+      const hoverMiddleY = (hoverBoundingRect.bottom - hoverBoundingRect.top) / 2;
+      const clientOffset = monitor.getClientOffset();
+      if (!clientOffset) return;
+      const hoverClientY = clientOffset.y - hoverBoundingRect.top;
+      if (dragIndex < hoverIndex && hoverClientY < hoverMiddleY) return;
+      if (dragIndex > hoverIndex && hoverClientY > hoverMiddleY) return;
+      onReorderNodes(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
+
+  drag(drop(ref));
+  const canCreateUnlock = onCreateUnlockNode
+    && ((node.type === 'changeBg' && (node.asset || node.content || '').trim() && (node.asset || node.content || '').trim() !== 'none')
+      || (node.type === 'bgm' && (node.asset || node.content || '').trim() && (node.asset || node.content || '').trim() !== 'none'));
+  const unlockLabel = node.type === 'changeBg' ? '加入CG鉴赏' : '加入BGM鉴赏';
+
+  const rowBgClass = isBackground
+    ? selected
+      ? 'border-emerald-500 bg-emerald-500/15'
+      : 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10'
+    : isBranch
+      ? selected
+        ? 'border-amber-500 bg-amber-500/15'
+        : 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10'
+      : selected
+        ? 'border-primary bg-primary/10 shadow-sm'
+        : 'border-outline-variant/25 bg-surface-bright/70 hover:bg-surface-container-low hover:border-outline-variant/50';
+
+  return (
+    <div
+      ref={preview}
+      key={node.id}
+      data-cmd-card
+      data-cmd-index={index}
+      data-node-id={node.id}
+      className="group relative flex w-full max-w-4xl items-stretch"
+      style={{ opacity: isDragging ? 0.4 : 1 }}
+    >
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            ref={ref}
+            onClick={() => onSelectNode(node)}
+            className={`flex min-h-9 w-full items-center gap-2.5 rounded border px-3 py-1.5 text-xs transition-colors cursor-pointer ${rowBgClass}`}
+          >
+            {/* Index & hover Play button */}
+            <div className="relative flex h-5 w-7 shrink-0 items-center justify-center font-mono text-[11px] text-muted-foreground">
+              {onJumpToIndex ? (
+                <>
+                  <span className="transition-opacity duration-150 group-hover:opacity-0">{String(displayIndex + 1).padStart(2, '0')}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onJumpToIndex(index);
+                    }}
+                    className="absolute inset-0 m-auto flex h-5 w-5 items-center justify-center rounded bg-primary/20 text-primary opacity-0 transition-opacity duration-150 hover:bg-primary hover:text-primary-foreground group-hover:opacity-100"
+                    title="跳到此处运行"
+                    aria-label={`运行到此处第 ${displayIndex + 1} 行`}
+                  >
+                    <Play className="h-3 w-3 fill-current ml-0.5" />
+                  </button>
+                </>
+              ) : (
+                <span>{String(displayIndex + 1).padStart(2, '0')}</span>
+              )}
+            </div>
+
+            {/* Tag / Category Badge */}
+            {isDialogue ? (
+              <span
+                className={`shrink-0 max-w-28 truncate rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                  characterInherited ? 'opacity-65' : ''
+                }`}
+                style={
+                  charColor
+                    ? { backgroundColor: `${charColor}20`, color: charColor }
+                    : { backgroundColor: 'var(--color-primary-container, rgba(56,189,248,0.15))', color: 'var(--color-primary)' }
+                }
+                title={characterInherited ? '继承自上一句角色' : undefined}
+              >
+                {displayCharacter || '旁白'}
+              </span>
+            ) : isBackground ? (
+              <span className="flex shrink-0 items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500">
+                <Image className="h-3 w-3" /> 背景
+              </span>
+            ) : isBranch ? (
+              <span className="flex shrink-0 items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-500">
+                <GitBranch className="h-3 w-3" /> 分支
+              </span>
+            ) : node.type === 'bgm' || node.type === 'playEffect' || node.type === 'playVideo' ? (
+              <span className="flex shrink-0 items-center gap-1 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-500">
+                <Music className="h-3 w-3" /> {node.type === 'bgm' ? 'BGM' : node.type === 'playEffect' ? '音效' : '视频'}
+              </span>
+            ) : node.type === 'changeFigure' ? (
+              <span className="flex shrink-0 items-center gap-1 rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-bold text-purple-400">
+                <Users className="h-3 w-3" /> 立绘
+              </span>
+            ) : (
+              <span className="flex shrink-0 items-center gap-1 rounded bg-surface-container-high px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Icon className="h-3 w-3" /> {tag}
+              </span>
+            )}
+
+            {/* Main Content */}
+            <div className="min-w-0 flex-1">
+              {isDialogue ? (
+                <>
+                  <span className="text-on-surface">
+                    "{node.content || '……'}"
+                  </span>
+                  {continuationLines && continuationLines.length > 0 && (
+                    <div className="mt-1 space-y-0.5 border-t border-outline-variant/15 pt-1">
+                      {continuationLines.map((lineNode) => {
+                        const lineSelected = selectedNodeId === lineNode.id;
+                        return (
+                          <div
+                            key={lineNode.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectNode(lineNode);
+                            }}
+                            className={`flex items-center gap-1.5 text-[11px] transition-colors ${
+                              lineSelected ? 'font-semibold text-primary' : 'text-on-surface-variant/80 hover:text-foreground'
+                            }`}
+                          >
+                            <span className="rounded bg-outline-variant/20 px-1 text-[9px] text-muted-foreground">承上</span>
+                            <span className="truncate">"{lineNode.content || '……'}"</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : isBackground ? (
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-foreground">
+                    {node.asset || node.content || '未选择背景'}
+                  </span>
+                  {projectPath && (node.asset || node.content) && (
+                    <img
+                      src={convertFileSrc(`${projectPath}/game/background/${node.asset || node.content}`)}
+                      alt=""
+                      className="h-4 w-6 rounded border border-emerald-500/20 object-cover"
+                    />
+                  )}
+                </div>
+              ) : isBranch ? (
+                <span className="font-medium text-tertiary">
+                  {(node.choices?.length ? node.choices : [{ text: getCommandSummary(node), target: '@next' }])
+                    .map((choice) => `${choice.text} ➔ ${choice.target}`)
+                    .join(' | ')}
+                </span>
+              ) : node.type === 'changeFigure' ? (
+                <span className="truncate text-foreground">
+                  {figureLabel(node, characters)}
+                </span>
+              ) : node.type === 'bgm' || node.type === 'playEffect' || node.type === 'playVideo' ? (
+                <span className="font-mono text-[11px] text-foreground">
+                  {node.asset || node.content || '未选择素材'}{node.volume !== undefined ? ` (音量: ${node.volume})` : ''}
+                </span>
+              ) : (
+                <span className="truncate text-muted-foreground">
+                  {getCommandSummary(node)}
+                </span>
+              )}
+            </div>
+
+            {/* Extra Metadata Badges */}
+            {(node.voice || node.figureEmotion) && (
+              <div className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
+                {node.voice && (
+                  <span className="rounded bg-outline-variant/20 px-1.5 py-0.5">
+                    语音: {node.voice}
+                  </span>
+                )}
+                {node.figureEmotion && (
+                  <span className="rounded bg-outline-variant/20 px-1.5 py-0.5">
+                    表情: {node.figureEmotion}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Hover Actions: Drag & Dropdown */}
+            <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                type="button"
+                ref={onReorderNodes ? drag : undefined}
+                onClick={(e) => e.stopPropagation()}
+                className="rounded p-1 text-outline-variant/60 hover:bg-surface-container-high hover:text-foreground cursor-grab active:cursor-grabbing"
+                title="拖拽排序"
+                aria-label="拖拽排序"
+              >
+                <GripVertical className="h-3 w-3" />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded p-1 text-outline-variant/60 hover:bg-surface-container-high hover:text-foreground"
+                    title="更多操作"
+                    aria-label="更多操作"
+                  >
+                    <MoreHorizontal className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  {onCopyNode && (
+                    <DropdownMenuItem onClick={() => onCopyNode(node.id)}>
+                      <Copy className="h-4 w-4" /> 复制
+                    </DropdownMenuItem>
+                  )}
+                  {onCutNode && (
+                    <DropdownMenuItem onClick={() => onCutNode(node.id)}>
+                      <Scissors className="h-4 w-4" /> 剪切
+                    </DropdownMenuItem>
+                  )}
+                  {onPasteNode && (
+                    <DropdownMenuItem
+                      onClick={() => onPasteNode(index)}
+                      disabled={!clipboardNode}
+                    >
+                      <Clipboard className="h-4 w-4" /> 粘贴到此处
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onInsertNode(node.type, index + 1)}>
+                    <Plus className="h-4 w-4" /> 在下方插入
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onInsertNode(node.type, index)}>
+                    <ArrowRight className="h-4 w-4 -rotate-180" /> 在上方插入
+                  </DropdownMenuItem>
+                  {onJumpToIndex && (
+                    <DropdownMenuItem onClick={() => onJumpToIndex(index)}>
+                      <Play className="h-4 w-4" /> 跳到运行时
+                    </DropdownMenuItem>
+                  )}
+                  {canCreateUnlock && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => onCreateUnlockNode?.(node, index + 1)}>
+                        <BookOpen className="h-4 w-4" /> {unlockLabel}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  <DropdownMenuSeparator />
+                  {onDeleteNode && (
+                    <DropdownMenuItem
+                      onClick={() => onDeleteNode(node.id)}
+                      className="text-error focus:text-error"
+                    >
+                      <Trash2 className="h-4 w-4" /> 删除
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-40">
+          {onCopyNode && (
+            <ContextMenuItem onClick={() => onCopyNode(node.id)} className="gap-2 text-xs">
+              <Copy className="h-3.5 w-3.5" /> 复制
+            </ContextMenuItem>
+          )}
+          {onCutNode && (
+            <ContextMenuItem onClick={() => onCutNode(node.id)} className="gap-2 text-xs">
+              <Scissors className="h-3.5 w-3.5" /> 剪切
+            </ContextMenuItem>
+          )}
+          {onPasteNode && (
+            <ContextMenuItem onClick={() => onPasteNode(index)} disabled={!clipboardNode} className="gap-2 text-xs">
+              <Clipboard className="h-3.5 w-3.5" /> 粘贴到此处
+            </ContextMenuItem>
+          )}
+          {canCreateUnlock && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => onCreateUnlockNode?.(node, index + 1)} className="gap-2 text-xs">
+                <BookOpen className="h-3.5 w-3.5" /> {unlockLabel}
+              </ContextMenuItem>
+            </>
+          )}
+          {onDeleteNode && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => onDeleteNode(node.id)} className="gap-2 text-xs text-error focus:text-error">
+                <Trash2 className="h-3.5 w-3.5" /> 删除
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+    </div>
+  );
+}
+
 export function ScriptCommandStream({
   nodes,
   selectedNode,
@@ -510,8 +861,10 @@ export function ScriptCommandStream({
   searchQuery,
   previewEntries,
   projectPath,
+  displayMode = 'stream',
 }: ScriptCommandStreamProps) {
   const query = searchQuery?.trim().toLowerCase() ?? '';
+  const isCompact = displayMode === 'compact';
 
   // Right-click on empty area (between/around cards) → paste at the position
   // nearest the cursor, so the user can choose where the clipboard node lands.
@@ -598,12 +951,123 @@ export function ScriptCommandStream({
         })
     : nodes.map((node, index) => ({ node, index })).filter(({ node }) => !isMetadataComment(node));
 
+  interface ScriptSection {
+    id: string;
+    title: string;
+    bgNode?: WebGalNode;
+    bgAsset?: string;
+    firstIndex: number;
+    items: Array<{ node: WebGalNode; index: number }>;
+    dialogueCount: number;
+  }
+
+  const sections = useMemo(() => {
+    const list: ScriptSection[] = [];
+    let currentSection: ScriptSection = {
+      id: 'section-init',
+      title: sceneHeaders?.[currentSceneName]?.chapter || '序幕 · 开场',
+      firstIndex: 0,
+      items: [],
+      dialogueCount: 0,
+    };
+
+    for (let i = 0; i < visibleNodes.length; i++) {
+      const item = visibleNodes[i];
+      const { node, index } = item;
+
+      if (node.type === 'changeBg' && i > 0 && currentSection.items.length > 0) {
+        let title = '';
+        if (index > 0) {
+          const prevNode = nodes[index - 1];
+          if (prevNode && prevNode.type === 'comment' && !isMetadataComment(prevNode) && prevNode.content?.trim()) {
+            title = prevNode.content.trim().replace(/^[;；]\s*/, '').replace(/^小节[：:]\s*/, '');
+          }
+        }
+        const bgAsset = (node.asset || node.content || '').trim();
+        if (!title && bgAsset && bgAsset !== 'none') {
+          const cleanStem = bgAsset.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+          title = `小节 ${list.length + 1} · ${cleanStem}`;
+        }
+        if (!title) {
+          title = `小节 ${list.length + 1}`;
+        }
+
+        list.push(currentSection);
+        currentSection = {
+          id: `section-${node.id}`,
+          title,
+          bgNode: node,
+          bgAsset: bgAsset && bgAsset !== 'none' ? bgAsset : undefined,
+          firstIndex: index,
+          items: [item],
+          dialogueCount: 0,
+        };
+      } else {
+        if (node.type === 'changeBg' && !currentSection.bgNode) {
+          currentSection.bgNode = node;
+          const bgAsset = (node.asset || node.content || '').trim();
+          if (bgAsset && bgAsset !== 'none') {
+            currentSection.bgAsset = bgAsset;
+            if (currentSection.title === '序幕 · 开场' || !currentSection.title) {
+              const cleanStem = bgAsset.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+              currentSection.title = `小节 1 · ${cleanStem}`;
+            }
+          }
+        }
+        currentSection.items.push(item);
+        if (node.type === 'dialogue') {
+          currentSection.dialogueCount += 1;
+        }
+      }
+    }
+
+    if (currentSection.items.length > 0 || list.length === 0) {
+      list.push(currentSection);
+    }
+
+    return list;
+  }, [visibleNodes, nodes, currentSceneName, sceneHeaders]);
+
+  const hasMultipleSections = sections.length > 1;
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
+
+  const toggleSection = useCallback((sectionId: string) => {
+    setCollapsedSectionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  }, []);
+
+  const collapseAllSections = useCallback(() => {
+    setCollapsedSectionIds(new Set(sections.map((s) => s.id)));
+  }, [sections]);
+
+  const expandAllSections = useCallback(() => {
+    setCollapsedSectionIds(new Set());
+  }, []);
+
+  useEffect(() => {
+    if (!selectedNode) return;
+    const targetSection = sections.find((s) => s.items.some((it) => it.node.id === selectedNode.id));
+    if (targetSection && collapsedSectionIds.has(targetSection.id)) {
+      setCollapsedSectionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetSection.id);
+        return next;
+      });
+    }
+  }, [selectedNode, sections, collapsedSectionIds]);
+
   return (
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="pointer-events-none absolute inset-0 opacity-[0.03] ollaic-dot-grid" />
       <div className="relative z-10 flex h-10 shrink-0 items-center justify-between border-b border-outline-variant/20 bg-surface-bright/50 px-4">
         <div className="flex min-w-0 items-center gap-4">
-          <span className="shrink-0 text-xs font-bold tracking-widest text-on-surface-variant">指令流编辑</span>
+          <span className="shrink-0 text-xs font-bold tracking-widest text-on-surface-variant">
+            {isCompact ? '剧本视图' : '指令卡片'}
+          </span>
           <div className="flex gap-2">
             {(() => {
               const header = sceneHeaders?.[currentSceneName];
@@ -623,6 +1087,15 @@ export function ScriptCommandStream({
           </div>
         </div>
         <div className="flex items-center gap-3 text-on-surface-variant/50">
+          {hasMultipleSections && !query && (
+            <button
+              type="button"
+              onClick={collapsedSectionIds.size > 0 ? expandAllSections : collapseAllSections}
+              className="rounded border border-outline-variant/30 bg-surface-container-high/50 px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-surface-container-high hover:text-foreground transition-colors"
+            >
+              {collapsedSectionIds.size > 0 ? '全部展开' : '全部折叠'}
+            </button>
+          )}
           {query && (
             <span className="rounded-full bg-primary-container/40 px-2 py-0.5 text-[10px] font-semibold text-primary">
               {visibleNodes.length} / {nodes.length}
@@ -649,7 +1122,7 @@ export function ScriptCommandStream({
         </div>
       ) : (
       <div
-        className="relative z-10 flex-1 overflow-y-auto p-8"
+        className="relative z-10 flex-1 overflow-y-auto p-4 sm:p-6"
         onContextMenu={(e) => {
           if (!clipboardNode || !onPasteNode) return;
           // A card right-click is handled by the card's own context menu.
@@ -659,7 +1132,7 @@ export function ScriptCommandStream({
           setAreaMenu({ x: e.clientX, y: e.clientY, atIndex });
         }}
       >
-        <div className="mx-auto max-w-4xl space-y-6 pb-48">
+        <div className={`mx-auto max-w-4xl ${isCompact ? 'space-y-1 pb-32' : 'space-y-6 pb-48'}`}>
         {nodes.length === 0 ? (
           <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 border border-dashed border-outline-variant/50 bg-surface-bright p-8 text-center text-muted-foreground">
             <FileText className="h-10 w-10 opacity-50" />
@@ -673,66 +1146,155 @@ export function ScriptCommandStream({
             <Search className="h-6 w-6 opacity-50" />
             <div className="text-sm">没有匹配 "{query}" 的指令</div>
           </div>
-        ) : visibleNodes.map(({ node, index }, visibleIndex) => {
-          if (absorbedIds.has(node.id)) return null; // merged into its head card
-          const Icon = commandIconFor(node.type);
-          const continuationLines = continuationsByHead.get(node.id);
-          const selected = selectedNode?.id === node.id
-            || (continuationLines?.some((c) => c.id === selectedNode?.id) ?? false);
-          const isDialogue = node.type === 'dialogue';
-          const isBackground = node.type === 'changeBg';
-          const isBranch = node.type === 'choose';
-          const tag = isBackground ? 'BG_LOAD' : isDialogue ? 'TEXT_CMD' : isBranch ? 'BRANCH_LOGIC' : node.type.toUpperCase();
-          const tagClass = categoryTagClass[getCommandCategory(node.type)];
-          const ownChar = node.character?.trim();
-          const displayCharacter = isDialogue ? (ownChar || effectiveSpeakers.get(node.id) || '') : '';
-          const characterInherited = isDialogue && !ownChar && !!displayCharacter;
-          const charColor = isDialogue && displayCharacter && characterColors?.[displayCharacter]
-            ? characterColors[displayCharacter]
-            : undefined;
+        ) : (
+          sections.map((section) => {
+            const isSectionCollapsed = !query && collapsedSectionIds.has(section.id);
+            return (
+              <div key={section.id} className="section-block">
+                {hasMultipleSections && (
+                  <div
+                    className="group mb-2 mt-4 first:mt-0 flex cursor-pointer select-none items-center justify-between rounded-md border border-outline-variant/30 bg-surface-container-low/70 px-3 py-1.5 text-xs transition-colors hover:border-primary/40 hover:bg-surface-container-low"
+                    onClick={() => toggleSection(section.id)}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="flex h-4 w-4 items-center justify-center text-muted-foreground transition-transform group-hover:text-primary">
+                        <ChevronDown className={`size-3.5 transition-transform duration-200 ${isSectionCollapsed ? '-rotate-90' : ''}`} />
+                      </span>
+                      <span className="truncate font-semibold text-foreground">
+                        {section.title}
+                      </span>
+                      {section.bgAsset && (
+                        <span className="flex shrink-0 items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-500">
+                          <Image className="size-2.5" />
+                          {section.bgAsset}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                      <span>{section.dialogueCount} 句对白 · {section.items.length} 条指令</span>
+                      {isSectionCollapsed && (
+                        <span className="rounded bg-surface-container-high px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          已折叠
+                        </span>
+                      )}
+                      {onJumpToIndex && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onJumpToIndex(section.firstIndex);
+                          }}
+                          className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-primary/20 hover:text-primary group-hover:opacity-100"
+                          title="跳到本节开头运行"
+                          aria-label={`跳到${section.title}开头运行`}
+                        >
+                          <Play className="ml-0.5 size-2.5 fill-current" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-          return (
-            <Fragment key={node.id}>
-              {/* Insert zone before each node */}
-              {onInsertNode && (
-                <InsertZone atIndex={index} onInsert={onInsertNode} />
-              )}
-              <ScriptCommandCard
-                node={node}
-                index={index}
-                displayIndex={visibleIndex}
-                selected={selected}
-                Icon={Icon}
-                tag={tag}
-                tagClass={tagClass}
-                isDialogue={isDialogue}
-                isBackground={isBackground}
-                isBranch={isBranch}
-                charColor={charColor}
-                displayCharacter={displayCharacter}
-                characterInherited={characterInherited}
-                continuationLines={continuationLines}
-                selectedNodeId={selectedNode?.id}
-                onSelectNode={onSelectNode}
-                onInsertNode={onInsertNode}
-                onDeleteNode={onDeleteNode}
-                onCopyNode={onCopyNode}
-                onCutNode={onCutNode}
-                onPasteNode={onPasteNode}
-                onReorderNodes={onReorderNodes}
-                onJumpToIndex={onJumpToIndex}
-                onCreateUnlockNode={onCreateUnlockNode}
-                clipboardNode={clipboardNode}
-                query={query}
-                characters={characters}
-                projectPath={projectPath}
-              />
-            </Fragment>
-          );
-        })}
+                {!isSectionCollapsed && (
+                  <div className={isCompact ? 'space-y-1' : 'space-y-6'}>
+                    {section.items.map(({ node, index }) => {
+                      if (absorbedIds.has(node.id)) return null;
+                      const Icon = commandIconFor(node.type);
+                      const continuationLines = continuationsByHead.get(node.id);
+                      const selected = selectedNode?.id === node.id
+                        || (continuationLines?.some((c) => c.id === selectedNode?.id) ?? false);
+                      const isDialogue = node.type === 'dialogue';
+                      const isBackground = node.type === 'changeBg';
+                      const isBranch = node.type === 'choose';
+                      const tag = isBackground ? 'BG_LOAD' : isDialogue ? 'TEXT_CMD' : isBranch ? 'BRANCH_LOGIC' : node.type.toUpperCase();
+                      const tagClass = categoryTagClass[getCommandCategory(node.type)];
+                      const ownChar = node.character?.trim();
+                      const displayCharacter = isDialogue ? (ownChar || effectiveSpeakers.get(node.id) || '') : '';
+                      const characterInherited = isDialogue && !ownChar && !!displayCharacter;
+                      const charColor = isDialogue && displayCharacter && characterColors?.[displayCharacter]
+                        ? characterColors[displayCharacter]
+                        : undefined;
+
+                      return (
+                        <Fragment key={node.id}>
+                          {onInsertNode && (
+                            <InsertZone atIndex={index} onInsert={onInsertNode} compact={isCompact} />
+                          )}
+                          {isCompact ? (
+                            <ScriptCommandCompactRow
+                              node={node}
+                              index={index}
+                              displayIndex={index}
+                              selected={selected}
+                              Icon={Icon}
+                              tag={tag}
+                              tagClass={tagClass}
+                              isDialogue={isDialogue}
+                              isBackground={isBackground}
+                              isBranch={isBranch}
+                              charColor={charColor}
+                              displayCharacter={displayCharacter}
+                              characterInherited={characterInherited}
+                              continuationLines={continuationLines}
+                              selectedNodeId={selectedNode?.id}
+                              onSelectNode={onSelectNode}
+                              onInsertNode={onInsertNode}
+                              onDeleteNode={onDeleteNode}
+                              onCopyNode={onCopyNode}
+                              onCutNode={onCutNode}
+                              onPasteNode={onPasteNode}
+                              onReorderNodes={onReorderNodes}
+                              onJumpToIndex={onJumpToIndex}
+                              onCreateUnlockNode={onCreateUnlockNode}
+                              clipboardNode={clipboardNode}
+                              query={query}
+                              characters={characters}
+                              projectPath={projectPath}
+                            />
+                          ) : (
+                            <ScriptCommandCard
+                              node={node}
+                              index={index}
+                              displayIndex={index}
+                              selected={selected}
+                              Icon={Icon}
+                              tag={tag}
+                              tagClass={tagClass}
+                              isDialogue={isDialogue}
+                              isBackground={isBackground}
+                              isBranch={isBranch}
+                              charColor={charColor}
+                              displayCharacter={displayCharacter}
+                              characterInherited={characterInherited}
+                              continuationLines={continuationLines}
+                              selectedNodeId={selectedNode?.id}
+                              onSelectNode={onSelectNode}
+                              onInsertNode={onInsertNode}
+                              onDeleteNode={onDeleteNode}
+                              onCopyNode={onCopyNode}
+                              onCutNode={onCutNode}
+                              onPasteNode={onPasteNode}
+                              onReorderNodes={onReorderNodes}
+                              onJumpToIndex={onJumpToIndex}
+                              onCreateUnlockNode={onCreateUnlockNode}
+                              clipboardNode={clipboardNode}
+                              query={query}
+                              characters={characters}
+                              projectPath={projectPath}
+                            />
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
         {/* Insert zone at end */}
         {onInsertNode && nodes.length > 0 && (
-          <InsertZone atIndex={nodes.length} onInsert={onInsertNode} />
+          <InsertZone atIndex={nodes.length} onInsert={onInsertNode} compact={isCompact} />
         )}
         </div>
 
