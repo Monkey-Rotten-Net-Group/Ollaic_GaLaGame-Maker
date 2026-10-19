@@ -1,5 +1,12 @@
 import { normalizePatchText, type EditorPatch } from './editor-patch';
 
+export class EditorPatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EditorPatchError';
+  }
+}
+
 export interface ResolvedLine {
   line: number;
   corrected: boolean;
@@ -22,14 +29,14 @@ function splitInsertText(text: string): string[] {
 
 function assertRange(startLine: number, endLine: number, total: number): void {
   if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine || endLine > total) {
-    throw new Error(`行号范围 ${startLine}-${endLine} 超出当前脚本范围 1-${total}`);
+    throw new EditorPatchError(`行号范围 ${startLine}-${endLine} 超出当前脚本范围 1-${total}`);
   }
 }
 
 export function resolveLineWithAnchor(lines: string[], lineNo: number, anchorText?: string): ResolvedLine {
-  if (!Number.isInteger(lineNo) || lineNo < 1) throw new Error(`行号 ${lineNo} 不是有效正整数`);
+  if (!Number.isInteger(lineNo) || lineNo < 1) throw new EditorPatchError(`行号 ${lineNo} 不是有效正整数`);
   if (!anchorText) {
-    if (lineNo > lines.length) throw new Error(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
+    if (lineNo > lines.length) throw new EditorPatchError(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
     return { line: lineNo, corrected: false };
   }
 
@@ -49,8 +56,8 @@ export function resolveLineWithAnchor(lines: string[], lineNo: number, anchorTex
   });
   if (matches.length === 1) return { line: matches[0], corrected: true };
 
-  if (matches.length > 1) throw new Error(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
-  throw new Error(`无法定位 anchorText：${anchorText}`);
+  if (matches.length > 1) throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
+  throw new EditorPatchError(`无法定位 anchorText：${anchorText}`);
 }
 
 export function applyEditorPatch(content: string, patch: EditorPatch): AppliedEditorPatch {

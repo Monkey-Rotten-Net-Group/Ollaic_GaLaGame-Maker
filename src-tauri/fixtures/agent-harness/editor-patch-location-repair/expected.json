@@ -1,0 +1,30 @@
+{
+  "bufferWrites": 0,
+  "chatRuns": [0, 0, 0],
+  "commitCalls": 0,
+  "error": null,
+  "lastMessage": "已生成修改预览：场景「start.txt」：替换 start.txt 第 1 行",
+  "missingAssets": [],
+  "pendingEdits": [
+    {
+      "afterContent": ":updated;\n",
+      "beforeContent": ":original;",
+      "file": "start.txt",
+      "kind": "scene"
+    }
+  ],
+  "status": "pending",
+  "traces": [
+    {
+      "failedTools": [],
+      "mode": "legacy",
+      "outcome": "pending_preview",
+      "turns": 3,
+      "validationErrors": [
+        "无法定位 anchorText：:missing;",
+        "行号范围 1-9 超出当前脚本范围 1-1"
+      ]
+    }
+  ],
+  "userMessages": ["Update the narration."]
+}

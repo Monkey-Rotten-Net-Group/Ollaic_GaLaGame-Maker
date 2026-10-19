@@ -1,0 +1,5 @@
+[
+  {"Ok":{"text":"{\"patches\":[{\"type\":\"replace\",\"file\":\"start.txt\",\"startLine\":1,\"endLine\":1,\"anchorText\":\":missing;\",\"text\":\":updated;\"}]}","toolCalls":[]}},
+  {"Ok":{"text":"{\"patches\":[{\"type\":\"replace\",\"file\":\"start.txt\",\"startLine\":1,\"endLine\":9,\"text\":\":updated;\"}]}","toolCalls":[]}},
+  {"Ok":{"text":"{\"patches\":[{\"type\":\"replace\",\"file\":\"start.txt\",\"startLine\":1,\"endLine\":1,\"anchorText\":\":original;\",\"text\":\":updated;\"}]}","toolCalls":[]}}
+]

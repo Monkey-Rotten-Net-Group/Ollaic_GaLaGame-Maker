@@ -180,6 +180,7 @@ async fn editor_cassettes_replay_the_production_hook_and_backend_parser() {
     let cases = [
         ("editor-narration-repair", "pending", 2),
         ("editor-json-repair", "pending", 2),
+        ("editor-patch-location-repair", "pending", 3),
         ("editor-tool-repair", "pending", 3),
         ("editor-repair-limit", "error", 3),
         ("editor-chat", "idle", 1),

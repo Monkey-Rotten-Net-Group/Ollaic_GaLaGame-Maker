@@ -42,6 +42,7 @@ import {
   type StagingDraft,
 } from '../lib/change-set';
 import { extractEditorResponse } from '../lib/editor-patch';
+import { EditorPatchError } from '../lib/editor-executor';
 import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
 import {
   buildMemoryContext,
@@ -936,7 +937,7 @@ export function useAiAgent(params: UseAiAgentParams) {
           return;
         } catch (e) {
           if (!ownsRun(runId)) return;
-          if (!isStageError(e) || e.name !== 'StageError') {
+          if (!(e instanceof EditorPatchError) && (!isStageError(e) || e.name !== 'StageError')) {
             trace.outcome = 'stage_error';
             trace.error = String(e);
             void writeAgentTrace(trace);
@@ -944,7 +945,7 @@ export function useAiAgent(params: UseAiAgentParams) {
             setError({ kind: 'other', retryable: true, message: String(e) });
             return;
           }
-          failure = { message: e.message, missingAssets: e.missingAssets };
+          failure = { message: e.message, missingAssets: isStageError(e) ? e.missingAssets : undefined };
         }
       }
 
