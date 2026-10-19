@@ -27,7 +27,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await openFlowBoard(page, viewport, 'draft');
     await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
     await page.getByLabel('AI 创作输入').fill('保留这段编辑输入');
-    if (viewport.width < 640) await page.getByRole('button', { name: '关闭 Agent 面板' }).click();
+    if (viewport.width < 640) await page.getByRole('button', { name: '收起 Agent 面板' }).click();
     await page.getByRole('button', { name: '场景图', exact: true }).click();
     const graph = page.getByRole('region', { name: '场景图画布' });
     const branch = graph.getByRole('button', { name: /chapter2/ });
@@ -63,7 +63,7 @@ test('live draft preview expands without reloading its iframe or losing the Agen
   await expect(frame).toBeVisible();
   await expect.poll(() => messages.some((message) => message.data.command === 6)).toBe(true);
   await frame.evaluate((element) => element.setAttribute('data-persisted', 'yes'));
-  await page.getByRole('button', { name: '切换到脚本编辑器' }).click();
+  await page.getByLabel('编辑器视图模式').selectOption('script');
   // Preview works without autosave and without writing the draft to disk.
   await page.getByRole('switch').click();
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:预览这一句新的草稿。;');
@@ -71,17 +71,166 @@ test('live draft preview expands without reloading its iframe or losing the Agen
   const saveCalls = await page.evaluate(() => (window as unknown as { __flowCalls: { command: string }[] }).__flowCalls.filter((call) => call.command === 'save_scene'));
   expect(saveCalls).toHaveLength(0);
   const splitHeight = (await frame.boundingBox())!.height;
-  await page.getByRole('button', { name: '放大预览' }).click();
+  await page.getByRole('button', { name: '全屏大预览' }).click();
   expect((await frame.boundingBox())!.height).toBeGreaterThan(splitHeight * 1.6);
   await expect(page.getByLabel('AI 创作输入')).toBeVisible();
   await expect(frame).toHaveAttribute('data-persisted', 'yes');
   await page.screenshot({ path: testInfo.outputPath('editor-large-preview.png') });
-  await page.getByRole('button', { name: '返回分屏预览' }).click();
+  await page.getByRole('button', { name: '返回工作区预览' }).click();
   await expect(page.getByLabel('WebGAL 脚本编辑器')).toHaveValue('林夏:预览这一句新的草稿。;');
+  await page.getByRole('button', { name: '脱离为悬浮画中画' }).click();
+  const previewHeader = page.getByLabel('实时预览区域').locator('header');
+  const floatingBounds = await page.getByLabel('实时预览区域').boundingBox();
+  await previewHeader.getByText('实时预览', { exact: true }).dblclick();
+  await expect(frame).toBeHidden();
+  await page.getByRole('button', { name: '全屏大预览' }).click();
+  await expect(frame).toBeVisible();
+  await expect(frame).toHaveAttribute('data-persisted', 'yes');
+  await page.getByRole('button', { name: '返回工作区预览' }).click();
+  await expect(frame).toBeHidden();
+  await previewHeader.getByText('实时预览', { exact: true }).dblclick();
+  await expect(frame).toBeVisible();
+  expect(await page.getByLabel('实时预览区域').boundingBox()).toEqual(floatingBounds);
+  await previewHeader.getByText('实时预览', { exact: true }).dblclick();
+  await page.getByRole('button', { name: '吸附到底部底栏' }).click();
+  await expect(frame).toBeVisible();
+  await expect(frame).toHaveAttribute('data-persisted', 'yes');
   await page.getByRole('button', { name: '收起预览' }).click();
   await page.getByRole('button', { name: '实时预览', exact: true }).click();
   await expect(frame).toHaveAttribute('data-persisted', 'yes');
 });
+
+test('bottom preview sash persists dragging and restores its default height on double click', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('ollaic_webgal_preview_dock_height', '450'));
+  await page.route('**/__runtime-test*', (route) => route.fulfill({ contentType: 'text/html', body: 'WebGAL' }));
+  await page.routeWebSocket('**/api/webgalsync', (socket) => {
+    socket.send(JSON.stringify({ data: { command: 1 } }));
+  });
+  await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
+  await page.getByRole('button', { name: '实时预览', exact: true }).click();
+  const preview = page.getByLabel('实时预览区域');
+  const sash = page.locator('.editor-dock-resizer');
+  await expect(preview).toHaveCSS('height', '450px');
+  const bounds = (await sash.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2 - 30, { steps: 5 });
+  await page.mouse.up();
+  await expect(preview).toHaveCSS('height', '480px');
+  expect(await page.evaluate(() => localStorage.getItem('ollaic_webgal_preview_dock_height'))).toBe('480');
+  await sash.dblclick();
+  await expect(preview).toHaveCSS('height', '350px');
+  expect(await page.evaluate(() => localStorage.getItem('ollaic_webgal_preview_dock_height'))).toBe('350');
+  await sash.dblclick();
+  await expect(preview).toHaveCSS('height', '350px');
+});
+
+test('bottom preview sash follows its rendered height after reaching the CSS limit', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('ollaic_webgal_preview_dock_height', '700'));
+  await page.route('**/__runtime-test*', (route) => route.fulfill({ contentType: 'text/html', body: 'WebGAL' }));
+  await page.routeWebSocket('**/api/webgalsync', (socket) => socket.send(JSON.stringify({ data: { command: 1 } })));
+  await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
+  await page.getByRole('button', { name: '实时预览', exact: true }).click();
+  const preview = page.getByLabel('实时预览区域');
+  const sash = page.locator('.editor-dock-resizer');
+  const initialHeight = (await preview.boundingBox())!.height;
+  expect(initialHeight).toBeLessThan(700);
+  const dragBy = async (dy: number) => {
+    const bounds = (await sash.boundingBox())!;
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + dy, { steps: 5 });
+    await page.mouse.up();
+  };
+  const expectHeightPersisted = async () => {
+    const actualHeight = (await preview.boundingBox())!.height;
+    const storedHeight = await page.evaluate(() => Number(localStorage.getItem('ollaic_webgal_preview_dock_height')));
+    expect(storedHeight).toBeCloseTo(actualHeight, 1);
+  };
+  await dragBy(30);
+  expect((await preview.boundingBox())!.height).toBeCloseTo(initialHeight - 30, 1);
+  await expectHeightPersisted();
+  await dragBy(-100);
+  expect((await preview.boundingBox())!.height).toBeCloseTo(initialHeight, 1);
+  await expectHeightPersisted();
+  await dragBy(30);
+  expect((await preview.boundingBox())!.height).toBeCloseTo(initialHeight - 30, 1);
+  await expectHeightPersisted();
+});
+
+test('bottom preview restores heights above 900px across reloads and smaller viewports', async ({ page }) => {
+  await page.route('**/__runtime-test*', (route) => route.fulfill({ contentType: 'text/html', body: 'WebGAL' }));
+  await page.routeWebSocket('**/api/webgalsync', (socket) => socket.send(JSON.stringify({ data: { command: 1 } })));
+  await openFlowBoard(page, { width: 1440, height: 1440 }, 'draft');
+  await page.getByRole('button', { name: '实时预览', exact: true }).click();
+  const preview = page.getByLabel('实时预览区域');
+  const bounds = (await page.locator('.editor-dock-resizer').boundingBox())!;
+  const initialHeight = (await preview.boundingBox())!.height;
+  const x = bounds.x + bounds.width / 2;
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y - (950 - initialHeight), { steps: 5 });
+  await page.mouse.up();
+  await expect(preview).toHaveCSS('height', '950px');
+  expect(await page.evaluate(() => localStorage.getItem('ollaic_webgal_preview_dock_height'))).toBe('950');
+  await page.reload();
+  await page.getByRole('button', { name: '实时预览', exact: true }).click();
+  await expect(preview).toHaveCSS('height', '950px');
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.getByRole('button', { name: '实时预览', exact: true }).click();
+  expect((await preview.boundingBox())!.height).toBeLessThan(950);
+  expect(await page.evaluate(() => localStorage.getItem('ollaic_webgal_preview_dock_height'))).toBe('950');
+  await page.setViewportSize({ width: 1440, height: 1440 });
+  await expect(preview).toHaveCSS('height', '950px');
+});
+
+for (const mode of ['dock', 'float', 'resize'] as const) {
+  for (const reason of ['blur', 'release'] as const) {
+    test(`${mode} preview drag ends on ${reason} without leaving an overlay`, async ({ page, context }) => {
+      await page.route('**/__runtime-test*', (route) => route.fulfill({ contentType: 'text/html', body: 'WebGAL' }));
+      await page.routeWebSocket('**/api/webgalsync', (socket) => socket.send(JSON.stringify({ data: { command: 1 } })));
+      await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
+      await page.getByRole('button', { name: '实时预览', exact: true }).click();
+      if (mode !== 'dock') await page.getByRole('button', { name: '脱离为悬浮画中画' }).click();
+      const preview = page.getByLabel('实时预览区域');
+      const handle = mode === 'dock' ? page.locator('.editor-dock-resizer')
+        : mode === 'float' ? preview.locator('header strong') : page.getByTitle('按住等比缩放浮窗大小');
+      const bounds = (await handle.boundingBox())!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + bounds.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + 10, y - 10, { steps: 3 });
+      const before = await preview.boundingBox();
+      if (reason === 'blur') {
+        const other = await context.newPage();
+        await other.goto('about:blank');
+        await other.bringToFront();
+        await other.mouse.up();
+        // Headless Chromium does not consistently send an OS focus event on tab switches.
+        await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+        await page.bringToFront();
+        await expect(page.locator('.fixed.cursor-grabbing, .fixed.cursor-row-resize')).toHaveCount(0);
+        await other.close();
+      }
+      // CDP supplies buttons: 0 independently of Playwright's per-page mouse state.
+      const input = await context.newCDPSession(page);
+      await input.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + 60, y: y - 60, buttons: 0 });
+      expect(await preview.boundingBox()).toEqual(before);
+      await expect(page.locator('.fixed.cursor-grabbing, .fixed.cursor-row-resize')).toHaveCount(0);
+      const saved = await page.evaluate((mode) => localStorage.getItem(mode === 'dock'
+        ? 'ollaic_webgal_preview_dock_height' : 'ollaic_webgal_preview_float'), mode);
+      if (mode === 'dock') expect(Number(saved)).toBeCloseTo(before!.height, 1);
+      else expect(JSON.parse(saved!)).toEqual({ x: before!.x, y: before!.y, width: before!.width, height: before!.height });
+      await page.mouse.up();
+    });
+  }
+}
 
 test('narrow workspace can switch from Agent to a large preview without overflow', async ({ page }) => {
   await page.route('**/__runtime-test*', (route) => route.fulfill({ contentType: 'text/html', body: 'WebGAL' }));
@@ -90,9 +239,9 @@ test('narrow workspace can switch from Agent to a large preview without overflow
     socket.onClose(() => clearInterval(heartbeat));
   });
   await openFlowBoard(page, { width: 390, height: 844 }, 'draft');
-  await page.getByRole('button', { name: '关闭 Agent 面板' }).click();
+  await page.getByRole('button', { name: '收起 Agent 面板' }).click();
   await page.getByRole('button', { name: '实时预览', exact: true }).click();
-  await page.getByRole('button', { name: '放大预览' }).click();
+  await page.getByRole('button', { name: '全屏大预览' }).click();
   await expect(page.getByTitle('WebGAL 实时预览')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.getByRole('button', { name: '打开 Agent 面板' }).click();
@@ -131,7 +280,7 @@ test('restored unsaved drafts cannot autosave over production output', async ({ 
 test('preparing production also saves drafts cached in other scenes', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
   await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
-  await page.getByRole('button', { name: '切换到脚本编辑器' }).click();
+  await page.getByLabel('编辑器视图模式').selectOption('script');
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:第一场景的未保存修改。;');
   await page.getByRole('button', { name: '应用更改', exact: true }).click();
   await page.getByLabel('当前场景').selectOption('chapter2.txt');

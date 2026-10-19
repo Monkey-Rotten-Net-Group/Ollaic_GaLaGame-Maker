@@ -44,7 +44,6 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
-import { PerformanceTimeline } from './PerformanceTimeline';
 import { FlowBoardView } from './FlowBoard';
 import { useFlowRunController } from '../hooks/useFlowRunController';
 import { useRuntimePreview } from '../hooks/useRuntimePreview';
@@ -73,11 +72,95 @@ export function StoryEditor() {
   const agentMode = searchParams.get('agent') === 'workflow' ? 'workflow' : 'edit';
   const [agentOpen, setAgentOpen] = useState(true);
   const [previewLayout, setPreviewLayout] = useState<PreviewLayout>('hidden');
+  const [preferredDockLayout, setPreferredDockLayout] = useState<'split' | 'float'>('split');
   const [previewStarted, setPreviewStarted] = useState(false);
   const changePreviewLayout = useCallback((layout: PreviewLayout) => {
     setPreviewLayout(layout);
+    if (layout === 'split' || layout === 'float') {
+      setPreferredDockLayout(layout);
+    }
     if (layout !== 'hidden') setPreviewStarted(true);
   }, []);
+
+  const DEFAULT_BOTTOM_DOCK_HEIGHT = 350;
+  const DOCK_HEIGHT_STORAGE_KEY = 'ollaic_webgal_preview_dock_height';
+  const [bottomDockHeight, setBottomDockHeight] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_BOTTOM_DOCK_HEIGHT;
+    try {
+      const raw = localStorage.getItem(DOCK_HEIGHT_STORAGE_KEY);
+      if (raw) {
+        const parsed = Number(raw);
+        // Layout caps the displayed height; larger saved sizes remain valid on tall windows.
+        if (Number.isFinite(parsed) && parsed >= 180) return parsed;
+      }
+    } catch {}
+    return DEFAULT_BOTTOM_DOCK_HEIGHT;
+  });
+  const [isResizingDock, setIsResizingDock] = useState(false);
+  const [dockDragMoved, setDockDragMoved] = useState(false);
+  const dockResizeRef = useRef<{ startY: number; startHeight: number; maxHeight: number } | null>(null);
+
+  const handleDockResizeStart = (event: React.MouseEvent) => {
+    if (event.button !== 0) return;
+    const stage = event.currentTarget.parentElement;
+    const panel = stage?.querySelector<HTMLElement>(':scope > .editor-preview-pane');
+    if (!stage || !panel) return;
+    const panelStyle = window.getComputedStyle(panel);
+    const cssMaxHeight = Number.parseFloat(panelStyle.maxHeight);
+    const stageHeight = stage.clientHeight;
+    const maxHeight = Number.isFinite(cssMaxHeight)
+      ? (panelStyle.maxHeight.endsWith('%') ? stageHeight * cssMaxHeight / 100 : cssMaxHeight)
+      : stageHeight;
+    event.preventDefault();
+    setIsResizingDock(true);
+    setDockDragMoved(false);
+    dockResizeRef.current = {
+      startY: event.clientY,
+      startHeight: panel.getBoundingClientRect().height,
+      // Use the same bounds as the rendered panel, including CSS's minimum winning over its maximum.
+      maxHeight: Math.max(180, maxHeight),
+    };
+  };
+
+  useEffect(() => {
+    if (!isResizingDock) return;
+    let latestHeight = bottomDockHeight;
+    let moved = dockDragMoved;
+    const finishResize = () => {
+      if (!dockResizeRef.current) return;
+      dockResizeRef.current = null;
+      setIsResizingDock(false);
+      setDockDragMoved(false);
+      if (moved) {
+        try {
+          localStorage.setItem(DOCK_HEIGHT_STORAGE_KEY, String(latestHeight));
+        } catch {}
+      }
+    };
+    const handleMouseMove = (event: MouseEvent) => {
+      if ((event.buttons & 1) === 0) {
+        finishResize();
+        return;
+      }
+      if (!dockResizeRef.current) return;
+      const dy = event.clientY - dockResizeRef.current.startY;
+      // Arm the drag on press, but keep clicks available until the pointer moves.
+      if (!moved && Math.abs(dy) < 3) return;
+      moved = true;
+      setDockDragMoved(true);
+      const nextHeight = Math.max(180, Math.min(dockResizeRef.current.maxHeight, dockResizeRef.current.startHeight - dy));
+      latestHeight = nextHeight;
+      setBottomDockHeight(nextHeight);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', finishResize);
+    window.addEventListener('blur', finishResize);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', finishResize);
+      window.removeEventListener('blur', finishResize);
+    };
+  }, [isResizingDock, bottomDockHeight, dockDragMoved]);
   const setAgentMode = (mode: 'workflow' | 'edit') => {
     const next = new URLSearchParams(searchParams);
     next.set('agent', mode);
@@ -419,9 +502,10 @@ export function StoryEditor() {
 
   const jumpToNode = useCallback(async (index: number) => {
     if (dirtyRef.current && !await handleSave()) return;
-    changePreviewLayout('split');
+    setPreviewLayout((prev) => (prev === 'hidden' ? preferredDockLayout : prev));
+    setPreviewStarted(true);
     runtimePreview.jump(currentSceneName, index + 1);
-  }, [dirtyRef, handleSave, changePreviewLayout, runtimePreview, currentSceneName]);
+  }, [dirtyRef, handleSave, preferredDockLayout, runtimePreview, currentSceneName]);
 
   // Guard navigation that would discard unsaved changes (back to home, window close)
   const guardedNavigate = useCallback((action: () => void) => {
@@ -1113,12 +1197,15 @@ export function StoryEditor() {
               </button>
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? 'split' : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
+              <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? preferredDockLayout : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
               <button type="button" className={`ollaic-top-action ${viewMode === 'worldline' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={viewMode === 'worldline'} onClick={toggleSceneGraph}><GitBranch className="size-4" /><span className="hidden sm:inline">场景图</span><span className="sr-only sm:hidden">场景图</span></button>
               <button type="button" className="ollaic-icon-button" onClick={() => setAgentOpen((value) => !value)} aria-label={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'} aria-expanded={agentOpen} title={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'}>{agentOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}</button>
             </div>
           </header>
           {workspaceError && <div role="alert" className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">{workspaceError}{dirty && <button type="button" className="ml-3 underline" onClick={() => { void navigator.clipboard.writeText(scriptSource).catch((err) => setWorkspaceError(`复制草稿失败：${String(err)}`)); }}>复制当前草稿</button>}<button type="button" className="ml-3 underline" onClick={() => { void reloadAfterSnapshot().then(() => { setWorkspaceError(null); setWorkflowSyncRequired(false); }).catch((err) => setWorkspaceError(String(err))); }}>{dirty ? '读取生产结果（放弃当前草稿）' : '重新读取'}</button>{!workflowSyncRequired && <button type="button" className="ml-3 underline" onClick={() => setWorkspaceError(null)}>关闭提示</button>}</div>}
+          {isResizingDock && dockDragMoved && (
+            <div className="fixed inset-0 z-[100] cursor-row-resize select-none" />
+          )}
           <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {workflowOwnsProject && <div role="status" className="shrink-0 border-b border-primary/15 bg-primary/5 px-4 py-2 text-xs text-muted-foreground">{workflowSyncRequired ? '请先处理上方提示，再继续编辑。' : workflowRefreshing ? '正在同步生产结果…' : 'Workflow 正在管理项目，脚本暂时只读。停止生产后可继续编辑。'}</div>}
@@ -1141,14 +1228,37 @@ export function StoryEditor() {
                     {selectedNode && !showScript && <div className="absolute inset-y-0 right-0 z-30 w-full max-w-80 border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
                       <DetailPanel node={selectedNode} onUpdateNode={updateSelectedNode} onDeleteNode={deleteSelectedNode} onClose={() => setSelectedNode(null)} characterNames={charactersForAi.map((character) => character.name)} projectPath={projectPath ?? undefined} characters={charactersForAi} projectId={projectId} scenes={projectInfo?.scenes ?? []} sceneHeaders={sceneHeaders} />
                     </div>}
-                    <PerformanceTimeline nodes={nodes} selectedNodeId={selectedNode?.id} onSelectNode={(id) => { const found = nodes.find((node) => node.id === id); if (found) setSelectedNode(found); }} />
                   </div>
                   {viewMode === 'worldline' && <div className="min-h-0 flex-1" ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
                     <FullScreenWorldline scenes={projectInfo?.scenes ?? [currentSceneName]} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders} sceneLinkMap={sceneLinkMap} nodes={nodes} selectedNode={selectedNode} onSelectNode={setSelectedNode} onOpenScene={stableSwitchScene} onClose={toggleSceneGraph}
                       characterColors={characterColors} onNewScene={handleNewScene} onDeleteScene={handleDeleteScene} onRenameScene={handleRenameScene} onOpenSceneManager={() => setSceneManagerOpen(true)} onDeleteNode={deleteNode} onJumpToIndex={jumpToNode} />
                   </div>}
                 </div>
-                {previewStarted && <RuntimePreviewPanel preview={runtimePreview} layout={previewLayout} sceneName={currentSceneName} dirty={dirty} onLayoutChange={changePreviewLayout} onSettings={() => setAppSettingsOpen(true)} />}
+                {previewStarted && previewLayout === 'split' && (
+                  <div
+                    className={`editor-dock-resizer ${isResizingDock && dockDragMoved ? 'is-resizing' : ''}`}
+                    onMouseDown={handleDockResizeStart}
+                    onDoubleClick={() => {
+                      setBottomDockHeight(DEFAULT_BOTTOM_DOCK_HEIGHT);
+                      try { localStorage.setItem(DOCK_HEIGHT_STORAGE_KEY, String(DEFAULT_BOTTOM_DOCK_HEIGHT)); } catch {}
+                    }}
+                    title="按住上下拖动调整预览窗口高度，双击恢复默认"
+                  >
+                    <div className="editor-dock-resizer-line" />
+                  </div>
+                )}
+                {previewStarted && (
+                  <RuntimePreviewPanel
+                    preview={runtimePreview}
+                    layout={previewLayout}
+                    dockLayout={preferredDockLayout}
+                    height={bottomDockHeight}
+                    sceneName={currentSceneName}
+                    dirty={dirty}
+                    onLayoutChange={changePreviewLayout}
+                    onSettings={() => setAppSettingsOpen(true)}
+                  />
+                )}
               </div>
               <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-4 text-[10px] text-muted-foreground"><span>{scriptSource.length.toLocaleString()} 字</span><span className="hidden sm:inline">约 {Math.max(1, Math.ceil(scriptSource.length / 380))} 分钟阅读</span><span className="ml-auto">WebGAL</span></footer>
             </div>
