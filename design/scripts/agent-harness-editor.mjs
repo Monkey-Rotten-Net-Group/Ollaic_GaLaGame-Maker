@@ -94,9 +94,15 @@ async function run({ scenario, projectPath }) {
     await waitFor(() => {
       if (chatCalls.length < scenario.unmountAfterCall) throw new Error('waiting to leave the editor');
     }, { timeout: 5000 });
-    await act(async () => { hook.unmount(); });
     if (scenario.switchProject) {
-      await mount({ ...params, projectId: 'another-project' });
+      await act(async () => { hook.rerender({ ...params, projectId: 'another-project' }); });
+      await act(async () => {
+        hook.result.current.attachUpload('kept-attachment');
+        hook.result.current.attachUpload('removed-attachment');
+      });
+      await act(async () => { hook.result.current.detachUpload('removed-attachment'); });
+    } else {
+      await act(async () => { hook.unmount(); });
     }
     if (scenario.returnBeforeResponse) {
       await returnToProject();
@@ -110,6 +116,7 @@ async function run({ scenario, projectPath }) {
         phase: 'anotherProject', busy: hook.result.current.busy,
         userMessages: hook.result.current.messages.filter((message) => message.role === 'user').length,
         pending: hook.result.current.pendingChangeSet !== null,
+        attachedIds: hook.result.current.attachedIds,
       });
       await act(async () => { hook.unmount(); });
     }
@@ -139,6 +146,7 @@ async function run({ scenario, projectPath }) {
       failedTools: trace.turns.flatMap((turn) => turn.toolCalls.filter((call) => !call.ok).map((call) => call.name)),
     })),
     ...(navigation.length ? { navigation } : {}),
+    ...(scenario.switchProject ? { attachedIds: agent.attachedIds } : {}),
   };
   hook.unmount();
   dom.window.close();

@@ -1225,7 +1225,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setPendingChangeSet({ ...pendingChangeSet, status: 'reverted' });
     setStatus('idle');
     setInput('请基于我当前最新的脚本内容，重新生成一个不覆盖我手动修改的方案。');
-  }, [pendingChangeSet]);
+  }, [commitInFlightRef, pendingChangeSet, setInput, setPendingChangeSet, setStatus]);
 
   const openAssets = useCallback(() => {
     if (projectId) navigate(`/editor/${projectId}/assets`);
@@ -1243,7 +1243,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setError(null);
     setStatus('idle');
     setInput(lastRequest?.prompt ?? '');
-  }, [lastRequest]);
+  }, [lastRequest, setError, setInput, setMissingIssues, setStatus]);
 
   // Reset transient UI state shared by all session-switching actions.
   const resetTransient = useCallback(() => {
@@ -1307,17 +1307,17 @@ export function useAiAgent(params: UseAiAgentParams) {
     } finally {
       if (projectPathRef.current === operationProjectPath) setUploadBusy(false);
     }
-  }, [projectPath]);
+  }, [projectPath, projectPathRef, setAttachedIds, setUploadBusy, setUploadError, setUploads]);
 
   /** Attach an already-stored reference file to the pending message. */
   const attachUpload = useCallback((id: string) => {
     setAttachedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-  }, []);
+  }, [setAttachedIds]);
 
   /** Detach from the pending message without deleting the stored file. */
   const detachUpload = useCallback((id: string) => {
     setAttachedIds((prev) => prev.filter((value) => value !== id));
-  }, []);
+  }, [setAttachedIds]);
 
   const removeUpload = useCallback(async (id: string) => {
     if (!projectPath) return;
@@ -1334,7 +1334,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         setUploadError(String(e).replace(/^Error:\s*/, ''));
       }
     }
-  }, [projectPath]);
+  }, [projectPath, projectPathRef, setAttachedIds, setUploadError, setUploads]);
 
   /** Fetch the head of a reference file so the user can inspect what the AI sees. */
   const previewUpload = useCallback(async (id: string): Promise<AiUploadContent | null> => {
@@ -1349,16 +1349,16 @@ export function useAiAgent(params: UseAiAgentParams) {
       }
       return null;
     }
-  }, [projectPath]);
+  }, [projectPath, projectPathRef, setUploadError]);
 
-  const clearUploadError = useCallback(() => setUploadError(null), []);
+  const clearUploadError = useCallback(() => setUploadError(null), [setUploadError]);
 
   const saveMemory = useCallback(async (next: ProjectMemory) => {
     if (!projectPath) return;
     const payload = next ?? emptyProjectMemory();
     await saveProjectMemory(projectPath, payload);
     setMemory(payload);
-  }, [projectPath]);
+  }, [projectPath, setMemory]);
 
   const stop = useCallback(() => {
     cancelledRef.current = true;
