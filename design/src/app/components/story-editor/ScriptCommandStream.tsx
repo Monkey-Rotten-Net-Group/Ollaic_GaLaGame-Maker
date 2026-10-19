@@ -583,7 +583,10 @@ function ScriptCommandCompactRow({
         <ContextMenuTrigger asChild>
           <div
             ref={ref}
-            onClick={() => onSelectNode(node)}
+            onClick={(event) => {
+              // Menu portals bubble through React but are outside the row.
+              if (event.currentTarget.contains(event.target as Node)) onSelectNode(node);
+            }}
             className={`flex min-h-9 w-full items-center gap-2.5 rounded border px-3 py-1.5 text-xs transition-colors cursor-pointer ${rowBgClass}`}
           >
             {/* Index & hover Play button */}
@@ -597,7 +600,7 @@ function ScriptCommandCompactRow({
                       e.stopPropagation();
                       onJumpToIndex(index);
                     }}
-                    className="absolute inset-0 m-auto flex h-5 w-5 items-center justify-center rounded bg-primary/20 text-primary opacity-0 transition-opacity duration-150 hover:bg-primary hover:text-primary-foreground group-hover:opacity-100"
+                    className="absolute inset-0 m-auto flex h-5 w-5 items-center justify-center rounded bg-primary/20 text-primary opacity-0 transition-opacity duration-150 hover:bg-primary hover:text-primary-foreground group-hover:opacity-100 group-focus-within:opacity-100"
                     title="跳到此处运行"
                     aria-label={`运行到此处第 ${displayIndex + 1} 行`}
                   >
@@ -648,65 +651,75 @@ function ScriptCommandCompactRow({
 
             {/* Main Content */}
             <div className="min-w-0 flex-1">
-              {isDialogue ? (
-                <>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectNode(node);
+                }}
+                aria-pressed={selectedNodeId === node.id}
+                className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {isDialogue ? (
                   <span className="text-on-surface">
                     "{node.content || '……'}"
                   </span>
-                  {continuationLines && continuationLines.length > 0 && (
-                    <div className="mt-1 space-y-0.5 border-t border-outline-variant/15 pt-1">
-                      {continuationLines.map((lineNode) => {
-                        const lineSelected = selectedNodeId === lineNode.id;
-                        return (
-                          <div
-                            key={lineNode.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSelectNode(lineNode);
-                            }}
-                            className={`flex items-center gap-1.5 text-[11px] transition-colors ${
-                              lineSelected ? 'font-semibold text-primary' : 'text-on-surface-variant/80 hover:text-foreground'
-                            }`}
-                          >
-                            <span className="rounded bg-outline-variant/20 px-1 text-[9px] text-muted-foreground">承上</span>
-                            <span className="truncate">"{lineNode.content || '……'}"</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              ) : isBackground ? (
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[11px] text-foreground">
-                    {node.asset || node.content || '未选择背景'}
+                ) : isBackground ? (
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-foreground">
+                      {node.asset || node.content || '未选择背景'}
+                    </span>
+                    {projectPath && (node.asset || node.content) && (
+                      <img
+                        src={convertFileSrc(`${projectPath}/game/background/${node.asset || node.content}`)}
+                        alt=""
+                        className="h-4 w-6 rounded border border-emerald-500/20 object-cover"
+                      />
+                    )}
                   </span>
-                  {projectPath && (node.asset || node.content) && (
-                    <img
-                      src={convertFileSrc(`${projectPath}/game/background/${node.asset || node.content}`)}
-                      alt=""
-                      className="h-4 w-6 rounded border border-emerald-500/20 object-cover"
-                    />
-                  )}
+                ) : isBranch ? (
+                  <span className="font-medium text-tertiary">
+                    {(node.choices?.length ? node.choices : [{ text: getCommandSummary(node), target: '@next' }])
+                      .map((choice) => `${choice.text} ➔ ${choice.target}`)
+                      .join(' | ')}
+                  </span>
+                ) : node.type === 'changeFigure' ? (
+                  <span className="truncate text-foreground">
+                    {figureLabel(node, characters)}
+                  </span>
+                ) : node.type === 'bgm' || node.type === 'playEffect' || node.type === 'playVideo' ? (
+                  <span className="font-mono text-[11px] text-foreground">
+                    {node.asset || node.content || '未选择素材'}{node.volume !== undefined ? ` (音量: ${node.volume})` : ''}
+                  </span>
+                ) : (
+                  <span className="truncate text-muted-foreground">
+                    {getCommandSummary(node)}
+                  </span>
+                )}
+              </button>
+              {continuationLines && continuationLines.length > 0 && (
+                <div className="mt-1 space-y-0.5 border-t border-outline-variant/15 pt-1">
+                  {continuationLines.map((lineNode) => {
+                    const lineSelected = selectedNodeId === lineNode.id;
+                    return (
+                      <button
+                        type="button"
+                        aria-pressed={selectedNodeId === lineNode.id}
+                        key={lineNode.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectNode(lineNode);
+                        }}
+                        className={`flex items-center gap-1.5 w-full rounded text-left text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                          lineSelected ? 'font-semibold text-primary' : 'text-on-surface-variant/80 hover:text-foreground'
+                        }`}
+                      >
+                        <span className="rounded bg-outline-variant/20 px-1 text-[9px] text-muted-foreground">承上</span>
+                        <span className="truncate">"{lineNode.content || '……'}"</span>
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : isBranch ? (
-                <span className="font-medium text-tertiary">
-                  {(node.choices?.length ? node.choices : [{ text: getCommandSummary(node), target: '@next' }])
-                    .map((choice) => `${choice.text} ➔ ${choice.target}`)
-                    .join(' | ')}
-                </span>
-              ) : node.type === 'changeFigure' ? (
-                <span className="truncate text-foreground">
-                  {figureLabel(node, characters)}
-                </span>
-              ) : node.type === 'bgm' || node.type === 'playEffect' || node.type === 'playVideo' ? (
-                <span className="font-mono text-[11px] text-foreground">
-                  {node.asset || node.content || '未选择素材'}{node.volume !== undefined ? ` (音量: ${node.volume})` : ''}
-                </span>
-              ) : (
-                <span className="truncate text-muted-foreground">
-                  {getCommandSummary(node)}
-                </span>
               )}
             </div>
 
@@ -727,7 +740,7 @@ function ScriptCommandCompactRow({
             )}
 
             {/* Hover Actions: Drag & Dropdown */}
-            <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
               <button
                 type="button"
                 ref={onReorderNodes ? drag : undefined}
@@ -1031,6 +1044,10 @@ export function ScriptCommandStream({
   const hasMultipleSections = sections.length > 1;
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(new Set());
 
+  useEffect(() => {
+    setCollapsedSectionIds(new Set());
+  }, [currentSceneName]);
+
   const toggleSection = useCallback((sectionId: string) => {
     setCollapsedSectionIds((prev) => {
       const next = new Set(prev);
@@ -1048,17 +1065,25 @@ export function ScriptCommandStream({
     setCollapsedSectionIds(new Set());
   }, []);
 
+  const selectedNodeId = selectedNode?.id;
+  const selectedSectionId = sections.find((section) =>
+    section.items.some(({ node }) => node.id === selectedNodeId))?.id;
+  const lastSelectionRef = useRef<{ scene: string; nodeId: string | undefined } | null>(null);
+
+  // Reveal a newly selected command without undoing later manual collapses.
+  // Edits and search filters can rebuild sections without changing selection.
   useEffect(() => {
-    if (!selectedNode) return;
-    const targetSection = sections.find((s) => s.items.some((it) => it.node.id === selectedNode.id));
-    if (targetSection && collapsedSectionIds.has(targetSection.id)) {
-      setCollapsedSectionIds((prev) => {
-        const next = new Set(prev);
-        next.delete(targetSection.id);
-        return next;
-      });
-    }
-  }, [selectedNode, sections, collapsedSectionIds]);
+    const previous = lastSelectionRef.current;
+    lastSelectionRef.current = { scene: currentSceneName, nodeId: selectedNodeId };
+    if (previous?.scene === currentSceneName && previous.nodeId === selectedNodeId) return;
+    if (!selectedSectionId) return;
+    setCollapsedSectionIds((prev) => {
+      if (!prev.has(selectedSectionId)) return prev;
+      const next = new Set(prev);
+      next.delete(selectedSectionId);
+      return next;
+    });
+  }, [currentSceneName, selectedNodeId, selectedSectionId]);
 
   return (
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -1148,7 +1173,7 @@ export function ScriptCommandStream({
           </div>
         ) : (
           sections.map((section) => {
-            const isSectionCollapsed = !query && collapsedSectionIds.has(section.id);
+            const isSectionCollapsed = hasMultipleSections && !query && collapsedSectionIds.has(section.id);
             return (
               <div key={section.id} className="section-block">
                 {hasMultipleSections && (
