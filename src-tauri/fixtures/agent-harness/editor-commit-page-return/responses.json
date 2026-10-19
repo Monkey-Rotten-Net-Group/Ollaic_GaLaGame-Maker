@@ -1,0 +1,4 @@
+[
+  {"Ok":{"text":"","toolCalls":[{"id":"edit","name":"edit_scene","arguments":{"file":"start.txt","patches":[{"type":"replace","file":"start.txt","startLine":1,"endLine":1,"anchorText":":original;","text":":updated;"}]}},{"id":"create","name":"create_scene","arguments":{"name":"chapter_02.txt"}}]}},
+  {"Ok":{"text":"Ready for approval.","toolCalls":[]}}
+]

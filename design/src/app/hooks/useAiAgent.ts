@@ -128,6 +128,7 @@ export const INITIAL_AI_MESSAGE: ChatMessage = {
 interface UseAiAgentParams {
   projectId?: string;
   projectPath: string | null;
+  documentReady?: boolean;
   uploadsRevision?: number;
   currentSceneName: string;
   sceneHeaders: Record<string, SceneHeader>;
@@ -145,7 +146,7 @@ interface UseAiAgentParams {
   pushHistory: (nodes: WebGalNode[]) => void;
   /** Blocks editor saves for affected scenes until the backend commit settles. */
   onCommitStart?: (sceneFiles: string[]) => Promise<void> | void;
-  onCommitSettled?: () => void;
+  onCommitSettled?: (applied: boolean, sceneFiles: readonly string[]) => void;
   /** Returns an unsaved non-current scene draft, when one exists. */
   readSceneDraft?: (sceneFile: string) => Promise<string | undefined>;
   /** Reconciles a committed edit with the currently visible scene buffer. */
@@ -278,19 +279,11 @@ export function useAiAgent(params: UseAiAgentParams) {
     nodes,
     scriptSource,
     characters,
-    setNodes,
-    setScriptSource,
-    setDirty,
-    setSaveStatus,
     setSelectedNode,
     setShowScript,
-    pushHistory,
     onCommitStart,
     onCommitSettled,
     readSceneDraft,
-    reconcileCurrentScene,
-    onScenesChanged,
-    onCharactersChanged,
   } = viewParams;
   let mappedProjectPath: string | null = null;
   try { if (projectId) mappedProjectPath = localStorage.getItem(`project-path-${projectId}`); } catch {}
@@ -299,6 +292,12 @@ export function useAiAgent(params: UseAiAgentParams) {
   const boundProjectPath = projectAiRef<string | null>(projectKey, 'boundProjectPath', mappedProjectPath ?? providedProjectPath);
   if (providedPathMatches) boundProjectPath.current = providedProjectPath;
   const projectPath = providedPathMatches ? providedProjectPath : mappedProjectPath ?? boundProjectPath.current;
+  const activeViewRef = projectAiRef<{ params: UseAiAgentParams; projectPath: string | null } | null>(projectKey, 'activeView', null);
+  useLayoutEffect(() => {
+    const active = { params, projectPath };
+    activeViewRef.current = active;
+    return () => { if (activeViewRef.current === active) activeViewRef.current = null; };
+  }, [activeViewRef, params, projectPath]);
 
   const {
     messages,
@@ -349,7 +348,6 @@ export function useAiAgent(params: UseAiAgentParams) {
   const currentRunIdRef = projectAiRef<string | null>(projectKey, 'runId', null);
   const ownsRun = useCallback((runId: string) => currentRunIdRef.current === runId, [currentRunIdRef]);
   const currentSceneNameRef = projectAiRef(projectKey, 'sceneName', currentSceneName);
-  const currentSceneRevisionRef = projectAiRef(projectKey, 'sceneRevision', 0);
   const projectPathRef = projectAiRef(projectKey, 'projectPath', projectPath);
   const previousProjectPathRef = projectAiRef(projectKey, 'previousProjectPath', projectPath);
   const resourcesProjectPathRef = projectAiRef<string | null>(projectKey, 'resourcesProjectPath', null);
@@ -364,14 +362,12 @@ export function useAiAgent(params: UseAiAgentParams) {
   // scene snapshot they started with; this ref is only used to decide whether a
   // finished preview should update the currently visible canvas.
   useLayoutEffect(() => {
-    if (currentSceneNameRef.current !== currentSceneName) currentSceneRevisionRef.current += 1;
     currentSceneNameRef.current = currentSceneName;
   }, [projectKey, currentSceneName]);
 
   useLayoutEffect(() => {
     if (previousProjectPathRef.current === projectPath) return;
     previousProjectPathRef.current = projectPath;
-    currentSceneRevisionRef.current += 1;
     requestTokenRef.current += 1;
     const staleRunId = currentRunIdRef.current;
     currentRunIdRef.current = null;
@@ -1081,8 +1077,6 @@ export function useAiAgent(params: UseAiAgentParams) {
     if (!projectPath) return;
     const operationProjectPath = projectPath;
     const operationSessionId = activeId;
-    const sceneRevision = currentSceneRevisionRef.current;
-    const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === currentSceneName);
     let result: ApplyChangeSetResult;
     try {
       result = await applyAiChangeSet(
@@ -1135,20 +1129,25 @@ export function useAiAgent(params: UseAiAgentParams) {
       return;
     }
 
-    if (currentSceneEdit && currentSceneRevisionRef.current === sceneRevision) {
-      if (reconcileCurrentScene) {
-        reconcileCurrentScene(currentSceneEdit);
+    // Commit completion belongs to the currently mounted project view, which
+    // may differ from the page that originally approved it.
+    const active = activeViewRef.current;
+    const current = active?.projectPath === operationProjectPath ? active.params : null;
+    const currentSceneEdit = set.edits.find((e): e is SceneEdit => e.kind === 'scene' && e.file === current?.currentSceneName);
+    if (current && current.documentReady !== false && currentSceneEdit) {
+      if (current.reconcileCurrentScene) {
+        current.reconcileCurrentScene(currentSceneEdit);
       } else {
-        pushHistory(options.historyNodes ?? currentSceneEdit.beforeNodes);
-        setNodes(currentSceneEdit.afterNodes);
-        setScriptSource(currentSceneEdit.afterContent);
-        setSelectedNode(null);
-        setDirty(false);
-        setSaveStatus('saved');
+        current.pushHistory(options.historyNodes ?? current.nodes);
+        current.setNodes(currentSceneEdit.afterNodes);
+        current.setScriptSource(currentSceneEdit.afterContent);
+        current.setSelectedNode(null);
+        current.setDirty(false);
+        current.setSaveStatus('saved');
       }
     }
-    if (set.edits.some((edit) => edit.kind === 'create_scene')) onScenesChanged?.();
-    if (set.edits.some((edit) => edit.kind === 'character' || edit.kind === 'create_character')) onCharactersChanged?.();
+    if (set.edits.some((edit) => edit.kind === 'create_scene')) current?.onScenesChanged?.();
+    if (set.edits.some((edit) => edit.kind === 'character' || edit.kind === 'create_character')) current?.onCharactersChanged?.();
     const memoryEdit = set.edits.find((edit): edit is MemoryEdit => edit.kind === 'memory');
     if (memoryEdit) setMemory(memoryEdit.after);
     replaceAssistantMessage(set.sourceMessageId, `已同意修改：${summarizeChangeSet(set, sceneHeaders)}`, {
@@ -1156,21 +1155,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     });
     setPendingChangeSet({ ...set, status: 'accepted' });
     setStatus('accepted');
+    return true;
   }, [
     activeId,
     currentSceneName,
     sceneHeaders,
-    onScenesChanged,
-    onCharactersChanged,
+    activeViewRef,
     projectPath,
-    pushHistory,
-    reconcileCurrentScene,
     replaceAssistantMessage,
-    setDirty,
-    setNodes,
-    setSaveStatus,
-    setScriptSource,
-    setSelectedNode,
     scriptSource,
   ]);
 
@@ -1184,11 +1176,12 @@ export function useAiAgent(params: UseAiAgentParams) {
     const affectedSceneFiles = set.edits.flatMap((edit) =>
       edit.kind === 'scene' || edit.kind === 'create_scene' ? [edit.file] : [],
     );
+    let applied = false;
     try {
       if (onCommitStart) await onCommitStart(affectedSceneFiles);
-      await persistChangeSet(set, options);
+      applied = await persistChangeSet(set, options) === true;
     } finally {
-      onCommitSettled?.();
+      onCommitSettled?.(applied, affectedSceneFiles);
       commitInFlightRef.current = false;
       setCommitting(false);
     }

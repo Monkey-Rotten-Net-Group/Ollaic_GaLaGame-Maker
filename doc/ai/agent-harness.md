@@ -84,14 +84,17 @@ agent-harness --record editor-narration-repair editor \
 失败。`unmountAfterCall` 模拟离页,`returnBeforeResponse` 控制是否在响应前返回,
 `switchProject` 切换到独立项目,`loadingOnReturn` 和 `stalePathOnReturn` 覆盖返回时
 项目路径尚未加载或暂时仍为上一项目路径的情况。
-驱动只生成预览,不批准提交;报告包含请求次数、校验错误、待确认内容、保存
+默认只生成预览;`commitNavigation` 会批准修改,在提交中离页并返回,随后再次保存,
+检查保存锁、缓冲区和磁盘内容。该场景同时修改当前脚本并新建场景,
+`loadingOnReturn` 还验证等待提交后加载脚本,以及新场景出现在刷新后的列表中。
+所有写入均发生在临时项目。报告包含请求次数、校验错误、待确认内容、保存
 缓冲区写入次数和提交调用次数。请求漂移或未实现的 IPC 会让 harness 直接失败。
 
-十一份 `editor-*` cassette 来自明确标为 `scripted-editor` 的公开响应,
+十三份 `editor-*` cassette 来自明确标为 `scripted-editor` 的公开响应,
 覆盖旁白格式修正、坏 JSON、工具反馈、修正上限、普通对话、本地 IPC 失败、停止
-以及停止修正后发送新请求,另有离页完成、运行中返回及切换项目三个场景。它们不是
-供应商实录。`expected.json` 锁定真实前端
-与 Rust 解析器产出的报告,每次离线重放必须逐字段一致。
+以及停止修正后发送新请求,另有离页完成、运行中返回、切换项目、patch 锚点与行号
+错误修正、提交中返回页面的场景。它们不是供应商实录。`expected.json` 锁定预览报告,
+每次离线重放必须逐字段一致;提交场景额外断言保存锁和再次保存后的真实磁盘内容。
 
 ## 跑单个 Agent
 

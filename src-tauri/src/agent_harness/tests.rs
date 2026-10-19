@@ -214,6 +214,34 @@ async fn editor_cassettes_replay_the_production_hook_and_backend_parser() {
 }
 
 #[tokio::test]
+async fn editor_commit_page_return_keeps_saves_locked_and_reconciles_the_buffer() {
+    let root = cassette::default_root();
+    let dir = root.join("editor-commit-page-return");
+    for loading in [false, true] {
+        let global = super::cli::GlobalArgs {
+            profile: None, record: None, replay: Some("editor-commit-page-return".into()),
+            cassette_dir: Some(root.display().to_string()), json: true,
+        };
+        let mut scenario = super::editor::EditorScenario::load(&dir.join("editor.json")).unwrap();
+        scenario.loading_on_return = loading;
+        let report = super::editor::run(&global, scenario, None).await.unwrap();
+        assert_eq!(report["status"], "accepted", "{report}");
+        assert_eq!(report["error"], serde_json::Value::Null);
+        assert_eq!(report["commitCalls"], 2);
+        assert_eq!(report["chatRuns"].as_array().unwrap().len(), 2);
+        let navigation = &report["commitNavigation"];
+        assert_eq!(navigation["saveBlocked"], true, "{report}");
+        assert_eq!(navigation["bufferContent"], ":updated;\n", "{report}");
+        assert_eq!(navigation["diskContent"], ":updated;\n", "{report}");
+        assert_eq!(navigation["scenesBeforeCommit"], serde_json::json!(["start.txt"]));
+        assert_eq!(navigation["projectScenes"], serde_json::json!(["chapter_02.txt", "start.txt"]), "{report}");
+        if loading {
+            assert_eq!(navigation["loadBlocked"], true, "{report}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn editor_replay_rejects_a_changed_prompt_without_using_the_live_provider() {
     let root = cassette::default_root();
     let global = super::cli::GlobalArgs {

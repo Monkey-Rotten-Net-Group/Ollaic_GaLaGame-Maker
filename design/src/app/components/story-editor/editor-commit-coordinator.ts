@@ -1,6 +1,9 @@
+import { projectAiRef } from '../../lib/project-ai-runtime';
+
 export interface EditorCommitCoordinator {
   beginCommit(sceneFiles: readonly string[]): Promise<void>;
-  settleCommit(): void;
+  settleCommit(applied?: boolean): void;
+  waitForCommit(sceneFile: string): Promise<void>;
   canSave(sceneFile: string): boolean;
   startSave(sceneFile: string): (() => void) | null;
   cacheDraft<T>(sceneFile: string, draft: T): void;
@@ -14,6 +17,7 @@ export function createEditorCommitCoordinator(): EditorCommitCoordinator {
   const drafts = new Map<string, unknown>();
   const activeSaveCounts = new Map<string, number>();
   const idleWaiters = new Map<string, Set<() => void>>();
+  const commitWaiters = new Set<() => void>();
 
   return {
     async beginCommit(sceneFiles) {
@@ -27,8 +31,16 @@ export function createEditorCommitCoordinator(): EditorCommitCoordinator {
         });
       }));
     },
-    settleCommit() {
+    settleCommit(applied = false) {
+      if (applied) inFlightScenes.forEach((sceneFile) => drafts.delete(sceneFile));
       inFlightScenes.clear();
+      commitWaiters.forEach((resolve) => resolve());
+      commitWaiters.clear();
+    },
+    async waitForCommit(sceneFile) {
+      if (inFlightScenes.has(sceneFile)) {
+        await new Promise<void>((resolve) => commitWaiters.add(resolve));
+      }
     },
     canSave(sceneFile) {
       return !inFlightScenes.has(sceneFile);
@@ -64,4 +76,9 @@ export function createEditorCommitCoordinator(): EditorCommitCoordinator {
       drafts.clear();
     },
   };
+}
+
+export function getProjectEditorCommitCoordinator(project: string): EditorCommitCoordinator {
+  const ref = projectAiRef<EditorCommitCoordinator | null>(`editor:${project}`, 'commitCoordinator', null);
+  return ref.current ??= createEditorCommitCoordinator();
 }

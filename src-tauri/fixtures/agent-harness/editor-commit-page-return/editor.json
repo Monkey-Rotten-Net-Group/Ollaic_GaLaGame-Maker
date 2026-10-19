@@ -1,0 +1,7 @@
+{
+  "scene": "start.txt",
+  "script": ":original;",
+  "prompt": "Update the narration and create chapter_02.txt.",
+  "tools": true,
+  "commitNavigation": true
+}

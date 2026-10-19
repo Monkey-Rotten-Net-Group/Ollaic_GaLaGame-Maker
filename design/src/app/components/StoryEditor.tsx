@@ -57,7 +57,7 @@ import { useSceneDocument } from './story-editor/useSceneDocument';
 import { useSceneGraphIndex } from './story-editor/useSceneGraphIndex';
 import { useProjectSnapshots } from './story-editor/useProjectSnapshots';
 import { useProjectExport } from './story-editor/useProjectExport';
-import { createEditorCommitCoordinator } from './story-editor/editor-commit-coordinator';
+import { getProjectEditorCommitCoordinator } from './story-editor/editor-commit-coordinator';
 
 // Fixed auto-save cadence (ms). Auto-save is toggled on/off from the top-bar
 // switch; there is no user-configurable interval.
@@ -189,9 +189,8 @@ export function StoryEditor() {
   const pendingActionRef = useRef<(() => void) | null>(null);
 
   // Synchronous ownership gate shared by autosave, cached drafts, and the AI
-  // commit seam. A ref makes commit-start visible before React can re-render.
-  const editorCommitCoordinatorRef = useRef(createEditorCommitCoordinator());
-  const editorCommitCoordinator = editorCommitCoordinatorRef.current;
+  // commit path. Ownership must also survive leaving and reopening this page.
+  const editorCommitCoordinator = getProjectEditorCommitCoordinator(projectId ?? projectPath ?? 'demo');
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoSaveRef = useRef<ReturnType<typeof setInterval>>();
@@ -237,6 +236,7 @@ export function StoryEditor() {
           for (const sceneName of sceneCandidates) {
             const scenePath = await getScenePath(storedPath, sceneName);
             try {
+              await editorCommitCoordinator.waitForCommit(sceneName);
               const loaded = await loadScene(scenePath);
               setCurrentSceneName(sceneName);
             // Restore sessionStorage draft left by assets-page navigation
@@ -297,6 +297,7 @@ export function StoryEditor() {
         // Load scene header comments + outgoing scene-jump map for the graph view
         const info = await openProject(storedPath).catch(() => null);
         if (info) {
+          setProjectInfo(info);
           void refreshSceneGraph(storedPath, info.scenes);
         }
       } else {
@@ -310,7 +311,7 @@ export function StoryEditor() {
       setLoading(false);
     };
     init();
-  }, [projectId, requestedSceneName, requestedScene, chooseInitialScene, loadCharacterColors, refreshSceneGraph, setDirty, setNodes, setScriptSource]);
+  }, [projectId, requestedSceneName, requestedScene, chooseInitialScene, editorCommitCoordinator, loadCharacterColors, refreshSceneGraph, setDirty, setNodes, setScriptSource]);
 
   // ---------------------------------------------------------------------------
   // 同步节点到脚本文本
@@ -342,6 +343,7 @@ export function StoryEditor() {
   // Save
   // ---------------------------------------------------------------------------
   const handleSave = useCallback(async (forWorkflow = false): Promise<boolean> => {
+    if (loading) return false;
     if (workflowOwnsProjectRef.current && !forWorkflow) return false;
     const finishSave = editorCommitCoordinator.startSave(currentSceneName);
     if (!finishSave) return false;
@@ -400,6 +402,7 @@ export function StoryEditor() {
   }, [
     currentSceneName,
     editorCommitCoordinator,
+    loading,
     refreshSceneGraph,
     updateSceneLinks,
     nodes,
@@ -575,6 +578,7 @@ export function StoryEditor() {
 
       const scenePath = await getScenePath(selected, sceneName);
       try {
+        await editorCommitCoordinator.waitForCommit(sceneName);
         const loaded = await loadScene(scenePath);
         const text = await serializeScene(loaded);
         if (sceneLoadTokenRef.current !== myToken) return;
@@ -601,7 +605,7 @@ export function StoryEditor() {
     } catch (e) {
       console.error('Open project failed:', e);
     }
-  }, [projectId, refreshSceneGraph, chooseInitialScene, loadCharacterColors, setDirty, setNodes, setScriptSource]);
+  }, [projectId, editorCommitCoordinator, refreshSceneGraph, chooseInitialScene, loadCharacterColors, setDirty, setNodes, setScriptSource]);
 
   // ---------------------------------------------------------------------------
   // Switch scene within project
@@ -622,6 +626,7 @@ export function StoryEditor() {
     setCurrentSceneName(sceneName);
     const scenePath = await getScenePath(projectPath, sceneName);
     try {
+      await editorCommitCoordinator.waitForCommit(sceneName);
       // Prefer a cached draft over the saved file
       const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(sceneName);
       if (draft) {
@@ -909,6 +914,7 @@ export function StoryEditor() {
   const aiAgent = useAiAgent({
     projectId,
     projectPath,
+    documentReady: !loading,
     uploadsRevision: aiUploadsRevision,
     currentSceneName,
     sceneHeaders,
@@ -925,7 +931,12 @@ export function StoryEditor() {
     setShowScript,
     pushHistory,
     onCommitStart: (sceneFiles) => editorCommitCoordinator.beginCommit(sceneFiles),
-    onCommitSettled: () => editorCommitCoordinator.settleCommit(),
+    onCommitSettled: (applied, sceneFiles) => {
+      if (applied) sceneFiles.forEach((scene) => {
+        try { sessionStorage.removeItem(`scene-draft-${projectId}-${scene}`); } catch {}
+      });
+      editorCommitCoordinator.settleCommit(applied);
+    },
     readSceneDraft: readCachedSceneDraft,
     reconcileCurrentScene: reconcileCurrentAiScene,
     onScenesChanged: async () => {

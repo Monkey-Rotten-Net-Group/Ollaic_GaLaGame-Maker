@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use super::cli::GlobalArgs;
 use super::exchange::Exchange;
@@ -46,6 +46,8 @@ pub struct EditorScenario {
     pub loading_on_return: bool,
     #[serde(default)]
     pub stale_path_on_return: bool,
+    #[serde(default)]
+    pub commit_navigation: bool,
 }
 
 impl EditorScenario {
@@ -97,6 +99,7 @@ struct Backend {
     turns: AtomicUsize,
     runs: ChatRunRegistry,
     failure: Mutex<Option<String>>,
+    commit_ready: Notify,
     live: bool,
 }
 
@@ -106,6 +109,41 @@ impl Backend {
             return Err(error.clone());
         }
         match command {
+            "release_editor_commit" => {
+                self.commit_ready.notify_one();
+                Ok(Value::Null)
+            }
+            "apply_ai_change_set" => {
+                let request: crate::ai::change_set::ApplyChangeSetRequest =
+                    serde_json::from_value(args["request"].clone()).map_err(|e| e.to_string())?;
+                if request.project_path != self.project {
+                    return Err("editor harness writes only its temporary project".into());
+                }
+                if self.scenario.commit_navigation {
+                    self.commit_ready.notified().await;
+                }
+                serde_json::to_value(crate::ai::change_set::apply_ai_change_set(request))
+                    .map_err(|e| e.to_string())
+            }
+            "load_scene" | "save_scene" => {
+                let path = PathBuf::from(string(&args, "path")?)
+                    .canonicalize().map_err(|e| e.to_string())?;
+                let root = PathBuf::from(&self.project)
+                    .canonicalize().map_err(|e| e.to_string())?;
+                if !path.starts_with(root) {
+                    return Err("editor harness accesses only its temporary project".into());
+                }
+                let path = path.to_string_lossy().into_owned();
+                if command == "load_scene" {
+                    serde_json::to_value(crate::webgal::commands::load_scene(path)?)
+                        .map_err(|e| e.to_string())
+                } else {
+                    let nodes = serde_json::from_value(args["nodes"].clone())
+                        .map_err(|e| e.to_string())?;
+                    crate::webgal::commands::save_scene(path, nodes)?;
+                    Ok(Value::Null)
+                }
+            }
             "parse_scene" => serde_json::to_value(crate::webgal::commands::parse_scene(string(
                 &args, "source",
             )?)?)
@@ -287,6 +325,7 @@ pub async fn run(
         turns: AtomicUsize::new(0),
         runs: ChatRunRegistry::new(),
         failure: Mutex::new(None),
+        commit_ready: Notify::new(),
         live,
     });
     let design = Path::new(env!("CARGO_MANIFEST_DIR"))

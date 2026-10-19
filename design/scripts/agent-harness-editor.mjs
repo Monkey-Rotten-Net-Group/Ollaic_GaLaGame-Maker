@@ -48,25 +48,47 @@ async function run({ scenario, projectPath }) {
     },
   };
 
-  const [{ act, renderHook, waitFor }, React, { MemoryRouter }, { useAiAgent }] = await Promise.all([
+  const [{ act, renderHook, waitFor }, React, { MemoryRouter }, { useAiAgent }, { getProjectEditorCommitCoordinator }] = await Promise.all([
     import('@testing-library/react'), import('react'), import('react-router'), import('../src/app/hooks/useAiAgent.ts'),
+    import('../src/app/components/story-editor/editor-commit-coordinator.ts'),
   ]);
   const scriptSource = scenario.script;
   localStorage.setItem('project-path-editor-harness', projectPath);
   const nodes = await invoke('parse_scene', { source: scriptSource });
   let bufferWrites = 0;
+  let bufferNodes = nodes;
+  let bufferSource = scriptSource;
+  let projectScenes;
+  let refreshingScenes = Promise.resolve();
   const noop = () => {};
   const write = () => { bufferWrites++; };
   const params = {
     projectId: 'editor-harness', projectPath, currentSceneName: scenario.scene,
     sceneHeaders: {}, nodes, selectedNode: null, scriptSource, dirty: false, characters: [],
-    setNodes: write, setScriptSource: write, setDirty: write, setSaveStatus: noop,
+    setNodes: (value) => { write(); bufferNodes = value; },
+    setScriptSource: (value) => { write(); bufferSource = value; },
+    setDirty: write, setSaveStatus: noop,
     setSelectedNode: noop, setShowScript: noop, pushHistory: write,
+    onScenesChanged: () => {
+      refreshingScenes = invoke('list_scenes').then((scenes) => { projectScenes = scenes; });
+    },
   };
   const wrapper = ({ children }) => React.createElement(MemoryRouter, null, children);
   let hook;
   const mount = async (initialProps) => {
-    await act(async () => { hook = renderHook((props) => useAiAgent(props), { wrapper, initialProps }); });
+    await act(async () => {
+      hook = renderHook((props) => {
+        const coordinator = getProjectEditorCommitCoordinator(props.projectId);
+        return {
+          ...useAiAgent({
+            ...props,
+            onCommitStart: (files) => coordinator.beginCommit(files),
+            onCommitSettled: (applied) => coordinator.settleCommit(applied),
+          }),
+          coordinator,
+        };
+      }, { wrapper, initialProps });
+    });
   };
   const returnToProject = async () => {
     await mount(scenario.loadingOnReturn ? { ...params, projectPath: null } : params);
@@ -123,6 +145,55 @@ async function run({ scenario, projectPath }) {
     await returnToProject();
   }
 
+  let commitNavigation;
+  if (scenario.commitNavigation) {
+    let accepting;
+    act(() => { accepting = hook.result.current.acceptChange(); });
+    await waitFor(() => {
+      if (!calls.includes('apply_ai_change_set')) throw new Error('waiting for approval');
+    });
+    await act(async () => { hook.unmount(); });
+    await mount({ ...params, documentReady: !scenario.loadingOnReturn });
+    const saveBlocked = !hook.result.current.coordinator.canSave(scenario.scene);
+    let path;
+    await act(async () => {
+      path = await invoke('get_scene_path', { sceneName: scenario.scene });
+      projectScenes = await invoke('list_scenes');
+    });
+    const scenesBeforeCommit = projectScenes;
+    let loadStarted = false;
+    const restoring = scenario.loadingOnReturn ? (async () => {
+      await hook.result.current.coordinator.waitForCommit(scenario.scene);
+      loadStarted = true;
+      const loaded = await window.__TAURI_INTERNALS__.invoke('load_scene', { path });
+      const source = await invoke('serialize_scene', { nodes: loaded });
+      params.setNodes(loaded);
+      params.setScriptSource(source);
+      hook.rerender({ ...params, nodes: loaded, scriptSource: source, documentReady: true });
+    })() : Promise.resolve();
+    await Promise.resolve();
+    const loadBlocked = !loadStarted;
+    await act(async () => {
+      await invoke('release_editor_commit');
+      await accepting;
+      await restoring;
+      await refreshingScenes;
+    });
+    const bufferContent = bufferSource;
+    const finishSave = hook.result.current.coordinator.startSave(scenario.scene);
+    if (!finishSave) throw new Error('commit did not release the save lock');
+    try {
+      await window.__TAURI_INTERNALS__.invoke('save_scene', { path, nodes: bufferNodes });
+    } finally {
+      finishSave();
+    }
+    commitNavigation = {
+      saveBlocked, bufferContent, diskContent: await invoke('read_file_text', { path }),
+      scenesBeforeCommit, projectScenes,
+      ...(scenario.loadingOnReturn ? { loadBlocked } : {}),
+    };
+  }
+
   const agent = hook.result.current;
   const runIds = new Map();
   const report = {
@@ -147,6 +218,7 @@ async function run({ scenario, projectPath }) {
     })),
     ...(navigation.length ? { navigation } : {}),
     ...(scenario.switchProject ? { attachedIds: agent.attachedIds } : {}),
+    ...(commitNavigation ? { commitNavigation } : {}),
   };
   hook.unmount();
   dom.window.close();
