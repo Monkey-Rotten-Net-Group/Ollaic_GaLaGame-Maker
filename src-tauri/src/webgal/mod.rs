@@ -6,4 +6,5 @@ pub mod references;
 pub mod runtime_manager;
 pub mod runtime_server;
 pub mod serializer;
+pub mod storage;
 pub mod types;

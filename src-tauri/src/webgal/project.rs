@@ -140,6 +140,14 @@ fn ensure_appreciation_enabled(config: &mut HashMap<String, String>) -> bool {
 #[tauri::command]
 pub fn init_project(app: AppHandle, base_dir: String, name: String) -> Result<ProjectInfo, String> {
     let root = PathBuf::from(&base_dir).join(&name);
+    init_project_at(&app, &root, &name)
+}
+
+pub(super) fn init_project_at(
+    app: &AppHandle,
+    root: &Path,
+    name: &str,
+) -> Result<ProjectInfo, String> {
     let game = root.join("game");
 
     // Create all subdirectories
@@ -149,7 +157,7 @@ pub fn init_project(app: AppHandle, base_dir: String, name: String) -> Result<Pr
     }
 
     // Write default config.txt
-    let config = default_project_config(&name);
+    let config = default_project_config(name);
 
     let config_path = game.join("config.txt");
     fs::write(&config_path, serialize_config(&config))

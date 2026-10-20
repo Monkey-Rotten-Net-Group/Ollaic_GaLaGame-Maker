@@ -133,6 +133,7 @@ fn resolve_template_dir(app: &tauri::AppHandle) -> PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let template_dir = resolve_template_dir(app.handle());
@@ -171,6 +172,9 @@ pub fn run() {
             // Project management
             webgal::project::init_project,
             webgal::project::open_project,
+            webgal::storage::get_project_storage,
+            webgal::storage::create_managed_project,
+            webgal::storage::import_project_archive,
             webgal::project::save_config,
             webgal::project::get_scene_path,
             webgal::project::create_scene,
