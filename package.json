@@ -18,9 +18,12 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "android:dev": "tauri android dev",
-    "android:build": "tauri android build --apk --target aarch64",
-    "android:open": "tauri android dev --open"
+    "android:dev": "bash scripts/android-native.sh dev",
+    "android:build": "bash scripts/android-native.sh build",
+    "android:open": "bash scripts/android-native.sh open",
+    "android:tauri:dev": "tauri android dev",
+    "android:tauri:build": "tauri android build --apk --target aarch64",
+    "android:tauri:open": "tauri android dev --open"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"

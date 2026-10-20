@@ -52,15 +52,9 @@ Vite 默认使用 `127.0.0.1:1420`，Tauri 会打开桌面窗口。
 
 ### Android 开发
 
-Android 原生工程位于 `src-tauri/gen/android/`，使用 SDK 36、JDK 21 和 Android NDK。
-终端需要配置 `JAVA_HOME`、`ANDROID_HOME` 和 `NDK_HOME`；环境配置后重新打开终端。
-安装 Rust 目标：
+独立的 Kotlin / Jetpack Compose 原生应用位于 [`android/`](android/README.md)，使用 Material 3 和 Ollaic 品牌配色。这个 Gradle 工程不依赖 React、WebView 或 Tauri，不打包桌面前端、Rust 动态库和抠图模型。
 
-```bash
-rustup target add aarch64-linux-android
-```
-
-日常开发先在 Android Studio 的 Device Manager 中启动 ARM64 虚拟设备，也可以在单独的终端启动：
+需要 JDK 21 和 Android SDK 36；当前首页原型不需要 NDK 或 Rust 工具链。先在 Android Studio 的 Device Manager 中启动虚拟设备，也可以在终端启动：
 
 ```bash
 emulator -list-avds
@@ -73,29 +67,28 @@ emulator -avd YOUR_AVD_NAME
 pnpm android:dev
 ```
 
-Tauri 会构建、安装并启动应用，同时启动 Vite；修改前端会热更新，修改 Rust 会重新构建。
-按 `Ctrl+C` 停止开发进程，虚拟设备可以继续运行。
+这个命令构建调试 APK，安装到正在运行的模拟器并启动应用，不启动 Vite。默认只选择模拟器；需要指定设备时设置 `ANDROID_SERIAL`。
 
-构建用于本地安装的 ARM64 调试 APK：
+只构建调试 APK：
 
 ```bash
-pnpm android:build --debug
+pnpm android:build
 ```
 
-APK 输出到 `src-tauri/gen/android/app/build/outputs/apk/`。
-不加 `--debug` 则构建 release APK；发布签名需要另行配置。
+APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。也可以直接运行 `android/gradlew -p android :app:assembleDebug`，整个构建不调用桌面工具链。
 
-需要使用 Android Studio 调试时，运行 `pnpm android:open`，并保持这个终端进程运行。
-这个命令只打开原生工程并启动开发服务；后续同步、构建和运行由 IDE 控制。
+使用 Android Studio 时运行 `pnpm android:open`，或直接打开 `android/`：
 
 1. 在 Settings → Build, Execution, Deployment → Build Tools → Gradle 中，将 Gradle JDK 设为 JDK 21。
 2. 点击 File → Sync Project with Gradle Files，等待同步完成。
-3. 在 Build Variants 中选择 `arm64Debug`，与当前 ARM64 工具链保持一致。
-4. 在 Device Manager 中启动 ARM64 虚拟设备，顶部运行配置选择 `app`、目标选择虚拟设备，然后点击 Run。
+3. 在 Build Variants 中选择 `debug`。
+4. 在 Device Manager 中启动虚拟设备，顶部运行配置选择 `app`、目标选择虚拟设备，然后点击 Run。
 
-日常需要自动构建、安装和启动时，使用 `pnpm android:dev`。切换这两个命令前，先按 `Ctrl+C` 停止正在运行的开发进程。
+原生首页支持系统深色模式、搜索、筛选、列表/网格切换，以及本地草稿的创建、编辑、收藏和回收站。这些草稿只保存首页元数据，不是已经初始化的 WebGAL 工程；ZIP 导入暂时禁用。后续通过共享 Rust 核心和原生绑定接入完整项目功能。
 
-当前先完成 Android 工程和启动基础。手机布局、触控操作、应用内项目存储及文件导入导出仍需继续适配。
+旧 Tauri Android 测试工程仍在 `src-tauri/gen/android/`，对应命令为 `pnpm android:tauri:dev`、`pnpm android:tauri:build --debug` 和 `pnpm android:tauri:open`，需要额外的 NDK 和 Android Rust 目标。它不参与独立原生应用的构建。
+
+旧 Web 首页保留了移动端私有目录和 ZIP 导入适配，ZIP 最大 512 MiB、解压后最大 2 GiB。独立原生应用不会读取旧 Web 项目列表。两种 Android 构建沿用同一应用 ID，覆盖安装保留私有文件，卸载会删除私有数据。
 
 ### 验证
 
