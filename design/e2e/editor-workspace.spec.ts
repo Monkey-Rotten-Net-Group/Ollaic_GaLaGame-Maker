@@ -19,7 +19,7 @@ test('one editing entry keeps both Agent drafts and workflow selection', async (
   await expect(page.getByText('场景关系图', { exact: true })).toBeVisible();
   await expect(page.getByRole('tab', { name: '编辑 Agent', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '场景图', exact: true }).click();
-  await expect(page.getByRole('button', { name: /TEXT_CMD 林夏/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /从这里开始我们的故事/ })).toBeVisible();
 });
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
@@ -42,7 +42,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole('button', { name: '重置缩放' })).toHaveText('100%');
     await page.keyboard.press('Escape');
     await expect(graph).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /TEXT_CMD 林夏/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /从这里开始我们的故事/ })).toBeVisible();
     if (viewport.width < 640) await page.getByRole('button', { name: '打开 Agent 面板' }).click();
     await expect(page.getByLabel('AI 创作输入')).toHaveValue('保留这段编辑输入');
   });
@@ -258,7 +258,7 @@ test('production ownership survives Agent switches and reloads scenes before edi
   await expect(page.getByTestId('flow-run-status')).toContainText('已停止');
   await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeEnabled();
-  await expect(page.getByRole('button', { name: /TEXT_CMD 林夏.*生产之后的场景/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /生产之后的场景/ })).toBeVisible();
 });
 
 test('restored unsaved drafts cannot autosave over production output', async ({ page }) => {
@@ -274,7 +274,7 @@ test('restored unsaved drafts cannot autosave over production output', async ({ 
   await page.getByRole('button', { name: '读取生产结果（放弃当前草稿）', exact: true }).click();
   await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeEnabled();
-  await expect(page.getByRole('button', { name: /TEXT_CMD 林夏.*生产之后的场景/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /生产之后的场景/ })).toBeVisible();
 });
 
 test('preparing production also saves drafts cached in other scenes', async ({ page }) => {
