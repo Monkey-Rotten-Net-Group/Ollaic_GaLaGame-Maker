@@ -27,6 +27,7 @@ pub(crate) mod webgal;
 use pipeline::commands::Orchestrator;
 use std::path::PathBuf;
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 use webgal::runtime_manager::{self, RuntimeInfo};
 use webgal::runtime_server::RuntimeServer;
 
@@ -72,16 +73,10 @@ async fn runtime_broadcast(
 }
 
 #[tauri::command]
-fn open_in_browser(url: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&url).spawn();
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd")
-        .args(["/C", "start", "", &url])
-        .spawn();
-    #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
-    result.map(|_| ()).map_err(|e| e.to_string())
+fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -134,9 +129,11 @@ fn resolve_template_dir(app: &tauri::AppHandle) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("./WebGAL_Template"))
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let template_dir = resolve_template_dir(app.handle());
             if !template_dir.exists() {

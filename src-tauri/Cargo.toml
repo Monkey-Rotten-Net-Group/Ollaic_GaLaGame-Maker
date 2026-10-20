@@ -10,6 +10,7 @@ default-run = "ollaic"
 [lib]
 name = "ollaic"
 path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "ollaic"
@@ -37,6 +38,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2.7.0"
+tauri-plugin-opener = "2"
 genai = "0.5"
 futures = "0.3"
 futures-util = "0.3"
