@@ -1,0 +1,622 @@
+<div id="flow-redesign-proposal">
+  <style>
+    #flow-redesign-proposal {
+      --flow-bg: light-dark(#fdfbf5, #19171b);
+      --flow-surface: light-dark(#ffffff, #242126);
+      --flow-soft: light-dark(#f2f4f7, #302c32);
+      --flow-text: light-dark(#191c1e, #f5eff2);
+      --flow-muted: light-dark(#65545a, #bbaeb5);
+      --flow-line: light-dark(#e3e0e5, #413a42);
+      --flow-accent: light-dark(#a43758, #f0a0bc);
+      --flow-accent-soft: light-dark(#fbeaf0, #402833);
+      --flow-button: light-dark(#a43758, #dd85a5);
+      --flow-button-text: light-dark(#ffffff, #25151d);
+      --flow-good: light-dark(#006b56, #8bd8bf);
+      --flow-warn: light-dark(#87530b, #e7bf77);
+      --flow-warn-soft: light-dark(#fff5df, #382e22);
+      --flow-error: light-dark(#b53838, #f39b9b);
+      color: var(--flow-text);
+      font-family: Inter, 'Hanken Grotesk', system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    #flow-redesign-proposal * { box-sizing: border-box; }
+    #flow-redesign-proposal [hidden] { display: none !important; }
+    #flow-redesign-proposal .flow-window { min-height: 840px; background: var(--flow-bg); border: 1px solid var(--flow-line); border-radius: 10px; overflow: hidden; }
+    #flow-redesign-proposal .flow-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; min-height: 52px; padding: 10px 20px; background: var(--flow-surface); border-bottom: 1px solid var(--flow-line); }
+    #flow-redesign-proposal .flow-brand { color: var(--flow-accent); font-size: 18px; font-weight: 600; }
+    #flow-redesign-proposal .flow-crumb { margin-left: 18px; padding-left: 18px; border-left: 1px solid var(--flow-line); color: var(--flow-muted); }
+    #flow-redesign-proposal .flow-preview { font-size: 11px; color: var(--flow-muted); }
+    #flow-redesign-proposal .flow-shell { display: grid; grid-template-columns: 76px minmax(0, 1fr); min-height: 786px; }
+    #flow-redesign-proposal .flow-nav { display: flex; flex-direction: column; gap: 14px; padding: 22px 9px; border-right: 1px solid var(--flow-line); background: var(--flow-surface); }
+    #flow-redesign-proposal .flow-nav-item { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 2px; color: var(--flow-muted); font-size: 11px; border-radius: 6px; }
+    #flow-redesign-proposal .flow-nav-item.flow-active { background: var(--flow-accent-soft); color: var(--flow-accent); }
+    #flow-redesign-proposal .flow-main { min-width: 0; padding: 26px 28px 16px; }
+    #flow-redesign-proposal .flow-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    #flow-redesign-proposal h2 { margin: 0; color: var(--flow-text); font-size: 22px; font-weight: 600; line-height: 1.5; }
+    #flow-redesign-proposal h3 { margin: 0; color: var(--flow-text); font-size: 17px; font-weight: 600; }
+    #flow-redesign-proposal h4 { margin: 0; font-size: 14px; font-weight: 600; }
+    #flow-redesign-proposal p { margin: 0; }
+    #flow-redesign-proposal .flow-subtitle { margin-top: 5px; color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    #flow-redesign-proposal .flow-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; min-height: 34px; border: 1px solid var(--flow-line); border-radius: 6px; background: var(--flow-surface); color: var(--flow-text); font: inherit; font-size: 12px; }
+    #flow-redesign-proposal .flow-btn:hover { background: var(--flow-soft); }
+    #flow-redesign-proposal .flow-btn:focus-visible, #flow-redesign-proposal .flow-stage:focus-visible, #flow-redesign-proposal .flow-step-button:focus-visible { outline: 2px solid var(--flow-accent); outline-offset: 3px; }
+    #flow-redesign-proposal .flow-primary { background: var(--flow-button); border-color: var(--flow-button); color: var(--flow-button-text); }
+    #flow-redesign-proposal .flow-primary:hover { filter: brightness(1.08); background: var(--flow-button); }
+    #flow-redesign-proposal .flow-quiet { background: transparent; border-color: transparent; color: var(--flow-muted); }
+    #flow-redesign-proposal .flow-status-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--flow-line); }
+    #flow-redesign-proposal .flow-run-state { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    #flow-redesign-proposal .flow-state-marker { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--flow-accent); }
+    #flow-redesign-proposal .flow-count { color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-warning { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 11px 13px; border-radius: 6px; color: var(--flow-warn); background: var(--flow-warn-soft); font-size: 12px; }
+    #flow-redesign-proposal .flow-error { color: var(--flow-error); background: var(--flow-surface); border: 1px solid var(--flow-error); }
+    #flow-redesign-proposal .flow-stage-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; margin-top: 24px; }
+    #flow-redesign-proposal .flow-stage-nav { display: flex; flex-direction: column; gap: 8px; }
+    #flow-redesign-proposal .flow-stage { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 9px; width: 100%; padding: 13px 10px; border: 1px solid transparent; border-radius: 8px; color: var(--flow-text); background: transparent; text-align: left; font: inherit; }
+    #flow-redesign-proposal .flow-stage[aria-pressed="true"] { background: var(--flow-surface); border-color: var(--flow-line); }
+    #flow-redesign-proposal .flow-stage-number { display: flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 50%; background: var(--flow-soft); color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-stage[aria-pressed="true"] .flow-stage-number { background: var(--flow-accent-soft); color: var(--flow-accent); }
+    #flow-redesign-proposal .flow-stage-name { display: block; font-weight: 600; }
+    #flow-redesign-proposal .flow-stage-status { display: block; margin-top: 3px; color: var(--flow-muted); font-size: 11px; }
+    #flow-redesign-proposal .flow-work-area { min-width: 0; min-height: 390px; padding: 23px; border: 1px solid var(--flow-line); border-radius: 10px; background: var(--flow-surface); }
+    #flow-redesign-proposal .flow-section-caption { color: var(--flow-muted); font-size: 11px; margin-bottom: 7px; }
+    #flow-redesign-proposal .flow-description { margin-top: 8px; color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-result { margin: 22px 0; padding: 17px 0; border-top: 1px solid var(--flow-line); border-bottom: 1px solid var(--flow-line); }
+    #flow-redesign-proposal .flow-result-text { margin-top: 8px; font-size: 13px; line-height: 1.8; }
+    #flow-redesign-proposal .flow-task-list { list-style: none; margin: 0; padding: 0; }
+    #flow-redesign-proposal .flow-task { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; }
+    #flow-redesign-proposal .flow-task-name { display: flex; align-items: center; gap: 7px; }
+    #flow-redesign-proposal .flow-task-status { color: var(--flow-muted); font-size: 11px; }
+    #flow-redesign-proposal .flow-success { color: var(--flow-good); }
+    #flow-redesign-proposal .flow-current { color: var(--flow-accent); }
+    #flow-redesign-proposal .flow-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 20px; color: var(--flow-muted); font-size: 11px; }
+    #flow-redesign-proposal .flow-list-heading { margin-top: 24px; margin-bottom: 9px; color: var(--flow-muted); font-size: 11px; }
+    #flow-redesign-proposal .flow-list { padding: 0; margin: 0; list-style: none; border-top: 1px solid var(--flow-line); }
+    #flow-redesign-proposal .flow-step-button { width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 57px; padding: 10px 12px; background: var(--flow-surface); border: 0; border-bottom: 1px solid var(--flow-line); color: var(--flow-text); text-align: left; font: inherit; }
+    #flow-redesign-proposal .flow-step-button:hover { background: var(--flow-soft); }
+    #flow-redesign-proposal .flow-step-button[aria-pressed="true"] { background: var(--flow-accent-soft); }
+    #flow-redesign-proposal .flow-step-summary { display: block; color: var(--flow-muted); font-size: 11px; margin-top: 1px; }
+    #flow-redesign-proposal .flow-step-state { font-size: 11px; }
+    #flow-redesign-proposal .flow-detail { margin-top: 18px; padding: 18px; border: 1px solid var(--flow-line); border-radius: 8px; background: var(--flow-surface); }
+    #flow-redesign-proposal .flow-detail-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    #flow-redesign-proposal .flow-detail-body { margin-top: 12px; color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-detail-actions { margin-top: 14px; }
+    #flow-redesign-proposal .flow-records { padding: 18px; margin-top: 14px; background: var(--flow-surface); border: 1px solid var(--flow-line); border-radius: 8px; }
+    #flow-redesign-proposal .flow-records summary { color: var(--flow-muted); }
+    #flow-redesign-proposal .flow-records dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 18px; margin: 12px 0; font-size: 12px; }
+    #flow-redesign-proposal .flow-records dt { color: var(--flow-muted); }
+    #flow-redesign-proposal .flow-records dd { margin: 0; overflow-wrap: anywhere; }
+    #flow-redesign-proposal .flow-editor { margin-top: 15px; }
+    #flow-redesign-proposal .flow-editor label { display: block; margin-bottom: 5px; font-size: 12px; }
+    #flow-redesign-proposal .flow-editor textarea { width: 100%; min-height: 90px; padding: 10px; background: var(--flow-surface); border: 1px solid var(--flow-line); border-radius: 6px; color: var(--flow-text); font: inherit; resize: vertical; }
+    #flow-redesign-proposal .flow-editor .flow-actions { justify-content: flex-end; margin-top: 8px; }
+    #flow-redesign-proposal .flow-menu { margin-top: 8px; padding: 10px; border: 1px solid var(--flow-line); border-radius: 8px; background: var(--flow-surface); }
+    #flow-redesign-proposal .flow-menu .flow-actions { gap: 5px; }
+    #flow-redesign-proposal .flow-notice { font-size: 11px; color: var(--flow-muted); margin-top: 8px; }
+    #flow-redesign-proposal .flow-setup { max-width: 820px; margin: 0 auto; }
+    #flow-redesign-proposal .flow-setup h2 { font-size: 20px; }
+    #flow-redesign-proposal .flow-capabilities { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 18px 0; font-size: 12px; color: var(--flow-muted); }
+    #flow-redesign-proposal .flow-choice-group { margin: 20px 0 0; }
+    #flow-redesign-proposal .flow-choice-heading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 7px; font-size: 12px; }
+    #flow-redesign-proposal .flow-choice-heading span { color: var(--flow-muted); font-size: 11px; }
+    #flow-redesign-proposal .flow-choice-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-bottom: 1px solid var(--flow-line); background: var(--flow-surface); }
+    #flow-redesign-proposal .flow-choice-label { display: flex; flex: 1 1 230px; align-items: flex-start; gap: 12px; min-width: 0; }
+    #flow-redesign-proposal .flow-choice-label input { margin: 4px 0 0; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--flow-accent); }
+    #flow-redesign-proposal .flow-choice-label strong { display: block; font-weight: 500; }
+    #flow-redesign-proposal .flow-choice-label small { display: block; color: var(--flow-muted); font-size: 11px; margin-top: 1px; }
+    #flow-redesign-proposal .flow-source { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: 28px; }
+    #flow-redesign-proposal .flow-source select { max-width: 100%; padding: 5px 8px; border: 1px solid var(--flow-line); border-radius: 5px; background: var(--flow-surface); color: var(--flow-text); font: inherit; font-size: 11px; }
+    #flow-redesign-proposal .flow-source-status { color: var(--flow-muted); font-size: 11px; }
+    #flow-redesign-proposal .flow-media-options { margin-top: 8px; padding: 13px 16px; background: var(--flow-soft); border-radius: 6px; }
+    #flow-redesign-proposal .flow-media-options label { display: inline-flex; align-items: center; gap: 7px; margin-right: 15px; font-size: 12px; }
+    #flow-redesign-proposal .flow-media-options input { accent-color: var(--flow-accent); }
+    #flow-redesign-proposal .flow-validation { padding: 13px 16px; margin-top: 16px; border: 1px solid var(--flow-error); border-radius: 6px; background: var(--flow-surface); color: var(--flow-error); font-size: 12px; }
+    #flow-redesign-proposal .flow-validation ul { margin: 6px 0 10px; padding-left: 18px; }
+    #flow-redesign-proposal .flow-start-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 13px; margin: 22px 0 0; padding-top: 18px; border-top: 1px solid var(--flow-line); }
+    #flow-redesign-proposal .flow-start-footer p { color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-btn:disabled { opacity: 0.45; filter: none; }
+    #flow-redesign-proposal .flow-setup-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; padding: 13px 16px; background: var(--flow-accent-soft); border-radius: 6px; }
+    #flow-redesign-proposal .flow-advanced { margin-top: 15px; color: var(--flow-muted); font-size: 12px; }
+    #flow-redesign-proposal .flow-advanced label { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; }
+    @media (max-width: 700px) {
+      #flow-redesign-proposal .flow-main { padding: 20px 18px 15px; }
+      #flow-redesign-proposal .flow-stage-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+      #flow-redesign-proposal .flow-stage-nav { flex-direction: row; }
+      #flow-redesign-proposal .flow-stage { grid-template-columns: minmax(0, 1fr); padding: 10px 8px; }
+      #flow-redesign-proposal .flow-stage-number { display: none; }
+      #flow-redesign-proposal .flow-stage-name { font-size: 12px; }
+      #flow-redesign-proposal .flow-stage-status { font-size: 11px; }
+      #flow-redesign-proposal .flow-window { min-height: 900px; }
+      #flow-redesign-proposal .flow-work-area { padding: 18px; }
+    }
+    @media (max-width: 440px) {
+      #flow-redesign-proposal .flow-shell { grid-template-columns: minmax(0, 1fr); }
+      #flow-redesign-proposal .flow-nav { flex-direction: row; justify-content: space-between; gap: 2px; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--flow-line); }
+      #flow-redesign-proposal .flow-nav-item { padding: 4px; flex-direction: row; gap: 4px; }
+      #flow-redesign-proposal .flow-nav-item:first-child { display: none; }
+      #flow-redesign-proposal .flow-title-row { flex-direction: column; }
+      #flow-redesign-proposal .flow-status-row { margin-top: 16px; }
+      #flow-redesign-proposal .flow-crumb { margin-left: 8px; padding-left: 8px; }
+      #flow-redesign-proposal .flow-window { min-height: 1040px; }
+      #flow-redesign-proposal .flow-btn { min-height: 40px; }
+      #flow-redesign-proposal .flow-step-button { padding: 10px 8px; gap: 8px; }
+    }
+    @media (pointer: coarse) {
+      #flow-redesign-proposal .flow-btn { min-height: 44px; }
+      #flow-redesign-proposal .flow-editor textarea { font-size: 16px; }
+    }
+  </style>
+  <div class="viz-carousel" aria-label="生产流布局方案" data-previous-label="上一种布局" data-next-label="下一种布局">
+    <section data-variant="运行前选择" aria-label="运行前选择方案">
+      <div class="flow-window" id="flow-run-setup" aria-label="运行前选择">
+        <header class="flow-topbar"><div><span class="flow-brand">Ollaic</span><span class="flow-crumb">生产流</span></div><span class="flow-preview">方案预览 · 示例项目</span></header>
+        <div class="flow-shell">
+          <nav class="flow-nav" aria-label="项目导航"><span class="flow-nav-item"><i data-lucide="home" aria-hidden="true"></i>首页</span><span class="flow-nav-item flow-active" aria-current="page"><i data-lucide="workflow" aria-hidden="true"></i>生产流</span><span class="flow-nav-item"><i data-lucide="book-open" aria-hidden="true"></i>脚本流</span><span class="flow-nav-item"><i data-lucide="git-branch" aria-hidden="true"></i>场景</span><span class="flow-nav-item"><i data-lucide="boxes" aria-hidden="true"></i>资源库</span></nav>
+          <main class="flow-main">
+            <div class="flow-setup">
+              <div class="flow-section-caption">初夏来信 · 准备生产</div>
+              <h2>这次要制作哪些内容？</h2>
+              <p class="flow-subtitle">近未来校园中，两位创作者共同完成一部视觉小说。</p>
+              <div class="flow-capabilities"><span data-text-capability>对话接口已配置</span><span data-media-capability>图片、语音、音乐接口未配置</span><button class="flow-btn flow-quiet cursor-interaction" type="button" data-setup-action="settings">配置接口<i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div>
+              <p class="flow-notice" data-settings-notice hidden>正式界面会打开现有 AI 设置，返回后重新检查本次所需接口。</p>
+              <section class="flow-choice-group" aria-label="故事构思步骤">
+                <div class="flow-choice-heading"><strong>故事构思</strong><span>3 个步骤</span></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="0" checked><span><strong>故事规划</strong><small>生成故事梗概与核心冲突</small></span></label><div class="flow-source" data-step-source="0" hidden><select aria-label="故事规划关闭后的处理" data-source-select="0"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="0"></span></div></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="1" checked><span><strong>世界观设定</strong><small>整理世界观与术语</small></span></label><div class="flow-source" data-step-source="1" hidden><select aria-label="世界观设定关闭后的处理" data-source-select="1"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="1"></span></div></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="2" checked><span><strong>章节大纲</strong><small>生成章节、场景计划与分支</small></span></label><div class="flow-source" data-step-source="2" hidden><select aria-label="章节大纲关闭后的处理" data-source-select="2"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="2"></span></div></div>
+              </section>
+              <section class="flow-choice-group" aria-label="内容编写步骤">
+                <div class="flow-choice-heading"><strong>内容编写</strong><span>4 个步骤</span></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="3" checked><span><strong>角色设计</strong><small>生成角色资料与关系</small></span></label><div class="flow-source" data-step-source="3" hidden><select aria-label="角色设计关闭后的处理" data-source-select="3"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="3"></span></div></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="4" checked><span><strong>对白创作</strong><small>编写对白、选择与角色表演</small></span></label><div class="flow-source" data-step-source="4" hidden><select aria-label="对白创作关闭后的处理" data-source-select="4"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="4"></span></div></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="5" checked><span><strong>素材规划</strong><small>整理素材需求，仅使用对话接口</small></span></label><div class="flow-source" data-step-source="5" hidden><select aria-label="素材规划关闭后的处理" data-source-select="5"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="5"></span></div></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="6" checked><span><strong>场景编排</strong><small>将对白编排成 WebGAL 场景，无需生成接口</small></span></label><div class="flow-source" data-step-source="6" hidden><select aria-label="场景编排关闭后的处理" data-source-select="6"><option value="omit">本次不执行</option><option value="existing">使用已有结果</option></select><span class="flow-source-status" data-source-status="6"></span></div></div>
+              </section>
+              <section class="flow-choice-group" aria-label="素材制作步骤">
+                <div class="flow-choice-heading"><strong>素材制作</strong><span>1 个步骤</span></div>
+                <div class="flow-choice-row"><label class="flow-choice-label cursor-interaction"><input type="checkbox" data-run-step="7"><span><strong>素材生成与绑定</strong><small data-media-hint>未配置素材接口，本次建议不执行</small></span></label><span class="flow-source-status" data-asset-selection>本次不执行</span></div>
+                <div class="flow-media-options" data-media-options hidden><p class="flow-section-caption">制作范围</p><label class="cursor-interaction"><input type="checkbox" data-media-type="image" checked>图片<span class="flow-source-status" data-media-type-status="image"></span></label><label class="cursor-interaction"><input type="checkbox" data-media-type="voice" checked>语音<span class="flow-source-status" data-media-type-status="voice"></span></label><label class="cursor-interaction"><input type="checkbox" data-media-type="music" checked>音乐<span class="flow-source-status" data-media-type-status="music"></span></label></div>
+              </section>
+              <details class="flow-advanced"><summary class="cursor-interaction">更多运行设置</summary><label class="cursor-interaction"><input type="checkbox" data-local-fallback><span>允许本地内容降级<small class="flow-step-summary">缺少对话接口时，使用本地内容方案；结果会标记为降级。</small></span></label></details>
+              <div class="flow-validation" role="alert" data-setup-validation hidden><strong>开始前需要处理</strong><ul data-setup-issues></ul><div class="flow-actions"><button type="button" class="flow-btn cursor-interaction" data-setup-action="restore">恢复需要的前置步骤</button><button type="button" class="flow-btn flow-quiet cursor-interaction" data-setup-action="remove">取消受影响的后续步骤</button></div></div>
+              <div class="flow-warning" data-setup-fallback-warning hidden><i data-lucide="triangle-alert" aria-hidden="true"></i><span>本次内容生成会使用本地降级方案，需要人工检查结果。</span></div>
+              <div class="flow-start-footer"><div aria-live="polite"><strong data-setup-count>将执行 7 个步骤</strong><p data-setup-result>将生成故事内容与场景，本次不生成素材。</p></div><button class="flow-btn flow-primary cursor-interaction" type="button" data-setup-action="start"><i data-lucide="play" aria-hidden="true"></i><span data-setup-start-label>开始生产</span></button></div>
+              <div class="flow-setup-summary" data-setup-confirmed hidden><div><strong>生产范围已确认</strong><p class="flow-notice" data-setup-snapshot></p></div><button type="button" class="flow-btn cursor-interaction" data-setup-action="back">返回调整范围</button></div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+    <section data-variant="阶段总览" aria-label="阶段总览方案" hidden>
+      <div class="flow-window" data-design="stages" aria-label="阶段总览">
+        <header class="flow-topbar">
+          <div><span class="flow-brand">Ollaic</span><span class="flow-crumb">生产流</span></div>
+          <span class="flow-preview">方案预览 · 示例项目</span>
+        </header>
+        <div class="flow-shell">
+          <nav class="flow-nav" aria-label="项目导航">
+            <span class="flow-nav-item"><i data-lucide="home" aria-hidden="true"></i>首页</span>
+            <span class="flow-nav-item flow-active" aria-current="page"><i data-lucide="workflow" aria-hidden="true"></i>生产流</span>
+            <span class="flow-nav-item"><i data-lucide="book-open" aria-hidden="true"></i>脚本流</span>
+            <span class="flow-nav-item"><i data-lucide="git-branch" aria-hidden="true"></i>场景</span>
+            <span class="flow-nav-item"><i data-lucide="boxes" aria-hidden="true"></i>资源库</span>
+          </nav>
+          <main class="flow-main">
+            <div class="flow-title-row">
+              <div><h2>初夏来信</h2><p class="flow-subtitle" data-brief-summary>近未来校园中，两位创作者共同完成一部视觉小说。</p></div>
+              <button type="button" class="flow-btn flow-quiet cursor-interaction" data-action="brief" aria-expanded="false"><i data-lucide="pencil" aria-hidden="true"></i>编辑简报</button>
+            </div>
+            <div class="flow-editor" data-brief-editor hidden>
+              <label for="stage-brief">创作简报 · 用于下一次生产</label>
+              <textarea id="stage-brief">近未来校园中，两位创作者共同完成一部视觉小说。</textarea>
+              <div class="flow-actions"><button class="flow-btn cursor-interaction" type="button" data-action="save-brief">保存简报</button></div>
+            </div>
+            <div class="flow-status-row">
+              <div class="flow-run-state" aria-live="polite"><span class="flow-state-marker" aria-hidden="true"></span><span data-run-label>已暂停</span><span class="flow-count" data-run-count>已完成 4 / 8 步</span></div>
+              <div class="flow-actions">
+                <button class="flow-btn flow-primary cursor-interaction" type="button" data-action="primary"><i data-lucide="play" aria-hidden="true"></i><span data-primary-label>继续生产</span></button>
+                <button class="flow-btn cursor-interaction" type="button" data-action="more" aria-expanded="false">更多<i data-lucide="chevron-down" aria-hidden="true"></i></button>
+              </div>
+            </div>
+            <div class="flow-menu" data-more-menu hidden>
+              <div class="flow-actions">
+                <button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="once">执行下一步</button>
+                <button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="graph">流程图与依赖</button>
+                <button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="stop">停止本次生产</button>
+              </div>
+              <p class="flow-notice" data-menu-notice hidden></p>
+            </div>
+            <div class="flow-warning" data-downgrade hidden><i data-lucide="triangle-alert" aria-hidden="true"></i><span>故事规划使用了本地降级结果，建议人工检查。</span></div>
+            <div class="flow-warning flow-error" data-failure role="alert" hidden><i data-lucide="circle-alert" aria-hidden="true"></i><span>对白创作失败：模型返回的内容不符合格式要求。已经完成的内容仍然保留。</span></div>
+            <div class="flow-stage-layout">
+              <nav class="flow-stage-nav" aria-label="制作阶段">
+                <button class="flow-stage cursor-interaction" type="button" data-phase="0" aria-pressed="false"><span class="flow-stage-number">1</span><span><span class="flow-stage-name">故事构思</span><span class="flow-stage-status" data-phase-status="0">已完成 · 3 / 3</span></span></button>
+                <button class="flow-stage cursor-interaction" type="button" data-phase="1" aria-pressed="true"><span class="flow-stage-number">2</span><span><span class="flow-stage-name">内容编写</span><span class="flow-stage-status" data-phase-status="1">已暂停 · 1 / 4</span></span></button>
+                <button class="flow-stage cursor-interaction" type="button" data-phase="2" aria-pressed="false"><span class="flow-stage-number">3</span><span><span class="flow-stage-name">素材制作</span><span class="flow-stage-status" data-phase-status="2">待开始 · 0 / 1</span></span></button>
+              </nav>
+              <section class="flow-work-area" aria-label="阶段内容">
+                <div class="flow-section-caption" data-phase-caption>当前阶段</div>
+                <h3 data-phase-title>内容编写</h3>
+                <p class="flow-description" data-phase-description>角色设计已经完成，继续生产后开始编写场景对白。</p>
+                <div class="flow-result">
+                  <h4 data-result-heading>已完成的内容</h4>
+                  <p class="flow-result-text" data-result-text>林夏 · 编剧　陆川 · 视觉设计师</p>
+                  <div class="flow-actions" style="margin-top:12px"><button class="flow-btn cursor-interaction" type="button" data-action="output"><i data-lucide="arrow-up-right" aria-hidden="true"></i><span data-output-label>查看角色</span></button></div>
+                </div>
+                <div class="flow-detail-top"><span class="flow-section-caption">阶段步骤</span><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="steps" aria-expanded="false">展开 4 个步骤<i data-lucide="chevron-down" aria-hidden="true"></i></button></div>
+                <ol class="flow-task-list" data-phase-steps hidden></ol>
+              </section>
+            </div>
+            <section class="flow-detail" data-step-detail aria-label="步骤详情" hidden>
+              <div class="flow-detail-top"><h4 data-detail-title>对白创作</h4><button type="button" class="flow-btn flow-quiet cursor-interaction" data-action="close-detail" aria-label="关闭步骤详情"><i data-lucide="x" aria-hidden="true"></i></button></div>
+              <p class="flow-detail-body" data-detail-text></p>
+              <div class="flow-actions flow-detail-actions"><button class="flow-btn cursor-interaction" type="button" data-action="requirements">修改要求</button><button class="flow-btn cursor-interaction" type="button" data-action="retry">从此步重跑</button><button class="flow-btn cursor-interaction" type="button" data-action="skip">跳过此步</button><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="records">执行记录</button></div>
+              <div class="flow-editor" data-requirements hidden><label for="stage-requirements">步骤创作要求</label><textarea id="stage-requirements">突出两位主角在共同创作时的冲突与选择。</textarea><div class="flow-actions"><button class="flow-btn cursor-interaction" type="button" data-action="apply-requirements">保存并重跑</button></div></div>
+            </section>
+            <details class="flow-records" data-records hidden>
+              <summary class="cursor-interaction">本次运行详情</summary>
+              <dl><dt>运行编号</dt><dd>run_example</dd><dt>成本 / Token</dt><dd>$0.0300 / 12,400</dd><dt>历史记录</dt><dd>故事规划、世界观、章节大纲、角色设计已完成。</dd></dl>
+              <div class="flow-actions"><button class="flow-btn cursor-interaction" type="button" data-action="pin">固定记录</button><button class="flow-btn cursor-interaction" type="button" data-action="export">导出记录</button><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="cleanup">清理记录</button></div>
+              <p class="flow-notice" data-record-notice hidden></p>
+            </details>
+            <footer class="flow-footer"><span>已用成本 $0.0300<span data-extra-time> · 00:32</span></span><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="records" aria-expanded="false">运行详情与日志<i data-lucide="chevron-right" aria-hidden="true"></i></button></footer>
+          </main>
+        </div>
+      </div>
+    </section>
+    <section data-variant="步骤清单" aria-label="步骤清单方案" hidden>
+      <div class="flow-window" data-design="list" aria-label="步骤清单">
+        <header class="flow-topbar"><div><span class="flow-brand">Ollaic</span><span class="flow-crumb">生产流</span></div><span class="flow-preview">方案预览 · 示例项目</span></header>
+        <div class="flow-shell">
+          <nav class="flow-nav" aria-label="项目导航"><span class="flow-nav-item"><i data-lucide="home" aria-hidden="true"></i>首页</span><span class="flow-nav-item flow-active" aria-current="page"><i data-lucide="workflow" aria-hidden="true"></i>生产流</span><span class="flow-nav-item"><i data-lucide="book-open" aria-hidden="true"></i>脚本流</span><span class="flow-nav-item"><i data-lucide="git-branch" aria-hidden="true"></i>场景</span><span class="flow-nav-item"><i data-lucide="boxes" aria-hidden="true"></i>资源库</span></nav>
+          <main class="flow-main">
+            <div class="flow-title-row"><div><h2>初夏来信</h2><p class="flow-subtitle" data-brief-summary>近未来校园中，两位创作者共同完成一部视觉小说。</p></div><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="brief" aria-expanded="false"><i data-lucide="pencil" aria-hidden="true"></i>编辑简报</button></div>
+            <div class="flow-editor" data-brief-editor hidden><label for="list-brief">创作简报 · 用于下一次生产</label><textarea id="list-brief">近未来校园中，两位创作者共同完成一部视觉小说。</textarea><div class="flow-actions"><button class="flow-btn cursor-interaction" type="button" data-action="save-brief">保存简报</button></div></div>
+            <div class="flow-status-row"><div class="flow-run-state" aria-live="polite"><span class="flow-state-marker" aria-hidden="true"></span><span data-run-label>已暂停</span><span class="flow-count" data-run-count>已完成 4 / 8 步</span></div><div class="flow-actions"><button class="flow-btn flow-primary cursor-interaction" type="button" data-action="primary"><i data-lucide="play" aria-hidden="true"></i><span data-primary-label>继续生产</span></button><button class="flow-btn cursor-interaction" type="button" data-action="more" aria-expanded="false">更多<i data-lucide="chevron-down" aria-hidden="true"></i></button></div></div>
+            <div class="flow-menu" data-more-menu hidden><div class="flow-actions"><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="once">执行下一步</button><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="graph">流程图与依赖</button><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="stop">停止本次生产</button></div><p class="flow-notice" data-menu-notice hidden></p></div>
+            <div class="flow-warning" data-downgrade hidden><i data-lucide="triangle-alert" aria-hidden="true"></i><span>故事规划使用了本地降级结果，建议人工检查。</span></div>
+            <div class="flow-warning flow-error" data-failure role="alert" hidden><i data-lucide="circle-alert" aria-hidden="true"></i><span>对白创作失败：模型返回的内容不符合格式要求。已经完成的内容仍然保留。</span></div>
+            <p class="flow-list-heading">制作步骤 · 点击查看结果或修改要求</p>
+            <ol class="flow-list" data-all-steps></ol>
+            <section class="flow-detail" data-step-detail aria-label="步骤详情" hidden>
+              <div class="flow-detail-top"><h4 data-detail-title>对白创作</h4><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="close-detail" aria-label="关闭步骤详情"><i data-lucide="x" aria-hidden="true"></i></button></div>
+              <p class="flow-detail-body" data-detail-text></p>
+              <div class="flow-actions flow-detail-actions"><button class="flow-btn cursor-interaction" type="button" data-action="requirements">修改要求</button><button class="flow-btn cursor-interaction" type="button" data-action="retry">从此步重跑</button><button class="flow-btn cursor-interaction" type="button" data-action="skip">跳过此步</button><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="records">执行记录</button></div>
+              <div class="flow-editor" data-requirements hidden><label for="list-requirements">步骤创作要求</label><textarea id="list-requirements">突出两位主角在共同创作时的冲突与选择。</textarea><div class="flow-actions"><button class="flow-btn cursor-interaction" type="button" data-action="apply-requirements">保存并重跑</button></div></div>
+            </section>
+            <details class="flow-records" data-records hidden><summary class="cursor-interaction">本次运行详情</summary><dl><dt>运行编号</dt><dd>run_example</dd><dt>成本 / Token</dt><dd>$0.0300 / 12,400</dd><dt>历史记录</dt><dd>故事规划、世界观、章节大纲、角色设计已完成。</dd></dl><div class="flow-actions"><button class="flow-btn cursor-interaction" type="button" data-action="pin">固定记录</button><button class="flow-btn cursor-interaction" type="button" data-action="export">导出记录</button><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="cleanup">清理记录</button></div><p class="flow-notice" data-record-notice hidden></p></details>
+            <footer class="flow-footer"><span>已用成本 $0.0300<span data-extra-time> · 00:32</span></span><button class="flow-btn flow-quiet cursor-interaction" type="button" data-action="records" aria-expanded="false">运行详情与日志<i data-lucide="chevron-right" aria-hidden="true"></i></button></footer>
+          </main>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('flow-redesign-proposal');
+      const steps = [
+        { name: '故事规划', summary: '共同创作让两人重新理解彼此。', output: '共同创作让两位主角重新理解彼此，以首映作为故事的情绪收束。' },
+        { name: '世界观设定', summary: '近未来校园与记忆编辑终端', output: '近未来校园。创作者使用记忆编辑终端，将共同经历转化为视觉小说。' },
+        { name: '章节大纲', summary: '重逢 / 共写 / 首映', output: '第一章：重逢。第二章：共写。第三章：首映。' },
+        { name: '角色设计', summary: '林夏 / 陆川', output: '林夏 · 编剧，重视故事里的真实情感。陆川 · 视觉设计师，习惯用画面表达自己。' },
+        { name: '对白创作', summary: '等待继续生产', output: '此步骤尚未完成。继续生产后会编写场景对白。' },
+        { name: '素材规划', summary: '等待对白完成', output: '根据场景与对白整理背景、立绘、音乐和语音需求。' },
+        { name: '场景编排', summary: '等待素材规划', output: '将场景计划和对白编排为可编辑的 WebGAL 场景。' },
+        { name: '素材生成', summary: '等待场景编排', output: '生成所需素材，并检查它们是否成功绑定到场景与角色。' },
+      ];
+      const phases = [
+        { name: '故事构思', indices: [0, 1, 2], description: '故事梗概、世界观与章节结构已经生成。', heading: '故事梗概', result: '共同创作让两位主角重新理解彼此，以首映作为故事的情绪收束。', action: '查看故事规划', outputStep: 0 },
+        { name: '内容编写', indices: [3, 4, 5, 6], description: '角色设计已经完成，继续生产后开始编写场景对白。', heading: '已完成的内容', result: '林夏 · 编剧　陆川 · 视觉设计师', action: '查看角色', outputStep: 3 },
+        { name: '素材制作', indices: [7], description: '场景编排完成后，会根据素材需求开始生成与绑定。', heading: '素材结果', result: '尚未开始素材生成。', action: '查看素材任务', outputStep: 7 },
+      ];
+      const states = { paused: '已暂停', running: '生产中', failed: '需要处理', completed: '已完成', stopped: '已停止' };
+      const completedOutputs = {
+        4: '场景对白已生成，覆盖重逢、共写与首映三个章节。可进入现有场景编辑器查看和修改。',
+        5: '已整理所需背景、角色立绘、音乐与语音任务，可查看各任务的生成要求。',
+        6: '场景文件已生成，可进入现有场景编辑器继续编辑。',
+        7: '示例素材已生成，可查看候选产物和正式素材，并检查场景绑定。',
+      };
+      const saved = window.openai?.widgetState?.privateContent?.designs ?? {};
+      const contexts = [];
+      function persist() {
+        const designs = Object.fromEntries(contexts.map(context => [context.design, context.state]));
+        window.openai?.setWidgetState?.({ modelContent: { ...window.openai?.widgetState?.modelContent, proposal: '生产流重设计', states: contexts.map(context => ({ design: context.design, status: context.state.status, phase: context.state.phase })) }, privateContent: { ...window.openai?.widgetState?.privateContent, designs } }).catch(() => {});
+      }
+      function text(node, selector, value) { const element = node.querySelector(selector); if (element) element.textContent = value; }
+      for (const app of root.querySelectorAll('[data-design]')) {
+        const design = app.dataset.design;
+        const restored = saved[design] ?? {};
+        const state = { status: states[restored.status] ? restored.status : 'paused', phase: [0, 1, 2].includes(restored.phase) ? restored.phase : 1, downgrade: Boolean(restored.downgrade), showTime: restored.showTime !== false };
+        let selectedStep = 4;
+        let stepsExpanded = false;
+        const context = { app, design, state, render };
+        contexts.push(context);
+        function status(index) {
+          if (state.status === 'completed' || index < 4) return index === 0 && state.downgrade ? '已降级' : '已完成';
+          if (index === 4 && state.status === 'failed') return '失败';
+          if (index === 4 && state.status === 'running') return '运行中';
+          return '待运行';
+        }
+        function openDetail(index, customText) {
+          selectedStep = index;
+          const detail = app.querySelector('[data-step-detail]');
+          detail.hidden = false;
+          text(app, '[data-detail-title]', steps[index].name);
+          text(app, '[data-detail-text]', customText || (status(index) === '失败' ? '模型响应未通过格式校验，尚未写入此步骤的结果。可以修改创作要求后重跑。' : state.status === 'completed' ? completedOutputs[index] || steps[index].output : steps[index].output));
+          app.querySelector('[data-requirements]').hidden = true;
+          app.querySelector('[data-action="skip"]').hidden = status(index) !== '待运行';
+          app.querySelector('[data-action="retry"]').disabled = status(index) === '运行中';
+          app.querySelector('[data-action="requirements"]').disabled = status(index) === '运行中';
+        }
+        function stepRow(index, simple) {
+          const step = steps[index];
+          const current = status(index);
+          const li = document.createElement('li');
+          li.className = simple ? 'flow-task' : '';
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = simple ? 'flow-btn flow-quiet cursor-interaction' : 'flow-step-button cursor-interaction';
+          button.dataset.step = String(index);
+          button.setAttribute('aria-label', `${step.name}，${current}，查看详情`);
+          if (simple) {
+            button.textContent = step.name;
+          } else {
+            button.setAttribute('aria-pressed', 'false');
+            const number = document.createElement('span');
+            number.className = 'flow-stage-number';
+            number.textContent = String(index + 1);
+            number.setAttribute('aria-hidden', 'true');
+            const description = document.createElement('span');
+            const name = document.createElement('span');
+            name.textContent = step.name;
+            const summary = document.createElement('span');
+            summary.className = 'flow-step-summary';
+            summary.textContent = state.status === 'completed' && index >= 4 ? '已生成，点击查看内容' : step.summary;
+            description.append(name, summary);
+            button.append(number, description);
+          }
+          const badge = document.createElement('span');
+          badge.className = simple ? 'flow-task-status' : 'flow-step-state';
+          if (current === '已完成') badge.classList.add('flow-success');
+          if (current === '运行中') badge.classList.add('flow-current');
+          if (current === '失败') badge.style.color = 'var(--flow-error)';
+          if (current === '已降级') badge.style.color = 'var(--flow-warn)';
+          badge.textContent = current;
+          if (simple) li.append(button, badge); else { button.append(badge); li.append(button); }
+          return li;
+        }
+        function render() {
+          text(app, '[data-run-label]', states[state.status]);
+          text(app, '[data-run-count]', state.status === 'completed' ? '已完成 8 / 8 步' : '已完成 4 / 8 步');
+          text(app, '[data-primary-label]', state.status === 'running' ? '暂停生产' : state.status === 'failed' ? '重试对白创作' : state.status === 'completed' ? '查看生成内容' : state.status === 'stopped' ? '准备新流程' : '继续生产');
+          app.querySelector('[data-failure]').hidden = state.status !== 'failed';
+          app.querySelector('[data-downgrade]').hidden = !state.downgrade;
+          app.querySelector('[data-extra-time]').hidden = !state.showTime;
+          const once = app.querySelector('[data-action="once"]');
+          once.disabled = state.status !== 'paused';
+          app.querySelector('[data-action="stop"]').disabled = !['running', 'paused'].includes(state.status);
+          if (design === 'stages') {
+            for (const button of app.querySelectorAll('[data-phase]')) button.setAttribute('aria-pressed', String(Number(button.dataset.phase) === state.phase));
+            const phase = phases[state.phase];
+            text(app, '[data-phase-title]', phase.name);
+            text(app, '[data-phase-caption]', state.phase === 1 && state.status !== 'completed' ? '当前阶段' : '阶段内容');
+            text(app, '[data-phase-description]', state.phase === 1 && state.status === 'running' ? '正在编写场景对白。可以查看已完成的角色设计。' : state.phase === 1 && state.status === 'failed' ? '对白创作需要处理。已完成的角色设计仍可查看。' : state.status === 'completed' ? '本阶段生成已完成，可以查看产物并继续编辑。' : phase.description);
+            text(app, '[data-result-heading]', phase.heading);
+            text(app, '[data-result-text]', state.status === 'completed' && state.phase === 2 ? '示例背景、角色立绘和语音已生成，可以检查绑定结果。' : phase.result);
+            text(app, '[data-output-label]', phase.action);
+            text(app, '[data-phase-status="0"]', state.downgrade ? '已完成 · 1 项降级' : '已完成 · 3 / 3');
+            text(app, '[data-phase-status="1"]', state.status === 'completed' ? '已完成 · 4 / 4' : `${states[state.status]} · 1 / 4`);
+            text(app, '[data-phase-status="2"]', state.status === 'completed' ? '已完成 · 1 / 1' : '待开始 · 0 / 1');
+            const list = app.querySelector('[data-phase-steps]');
+            list.replaceChildren(...phase.indices.map(index => stepRow(index, true)));
+            list.hidden = !stepsExpanded;
+            const toggle = app.querySelector('[data-action="steps"]');
+            toggle.setAttribute('aria-expanded', String(stepsExpanded));
+            toggle.textContent = `${stepsExpanded ? '收起' : '展开'} ${phase.indices.length} 个步骤`;
+          } else {
+            app.querySelector('[data-all-steps]').replaceChildren(...steps.map((step, index) => stepRow(index, false)));
+          }
+        }
+        app.addEventListener('click', event => {
+          const button = event.target.closest('button');
+          if (!button || !app.contains(button)) return;
+          if (button.dataset.phase != null) { state.phase = Number(button.dataset.phase); stepsExpanded = false; app.querySelector('[data-step-detail]').hidden = true; render(); persist(); return; }
+          if (button.dataset.step != null) { openDetail(Number(button.dataset.step)); return; }
+          const action = button.dataset.action;
+          if (action === 'primary') {
+            if (state.status === 'completed') { openDetail(6, '示例生成内容：故事梗概、章节大纲、角色、对白、场景文件与素材。正式界面会从这里进入现有编辑器。'); return; }
+            if (state.status === 'stopped') { state.status = 'paused'; text(app, '[data-menu-notice]', '新流程会先展示生产计划，确认后再开始执行。'); app.querySelector('[data-menu-notice]').hidden = false; app.querySelector('[data-more-menu]').hidden = false; }
+            else state.status = state.status === 'running' ? 'paused' : 'running';
+            render(); persist();
+          }
+          if (action === 'more') { const menu = app.querySelector('[data-more-menu]'); menu.hidden = !menu.hidden; button.setAttribute('aria-expanded', String(!menu.hidden)); }
+          if (action === 'steps') { stepsExpanded = !stepsExpanded; render(); }
+          if (action === 'output') openDetail(phases[state.phase].outputStep);
+          if (action === 'close-detail') app.querySelector('[data-step-detail]').hidden = true;
+          if (action === 'requirements') app.querySelector('[data-requirements]').hidden = !app.querySelector('[data-requirements]').hidden;
+          if (action === 'skip') text(app, '[data-detail-text]', '正式界面会跳过这个待运行步骤，并按真实依赖处理后续执行。');
+          if (action === 'retry' || action === 'apply-requirements') { state.status = 'running'; text(app, '[data-detail-text]', `${steps[selectedStep].name}已开始重跑；相关后续步骤会按实际依赖更新。`); app.querySelector('[data-requirements]').hidden = true; render(); persist(); }
+          if (action === 'records') { const panel = app.querySelector('[data-records]'); panel.hidden = !panel.hidden; panel.open = !panel.hidden; app.querySelectorAll('[data-action="records"]').forEach(item => item.setAttribute('aria-expanded', String(!panel.hidden))); }
+          if (action === 'brief') { const panel = app.querySelector('[data-brief-editor]'); panel.hidden = !panel.hidden; button.setAttribute('aria-expanded', String(!panel.hidden)); }
+          if (action === 'save-brief') { text(app, '[data-brief-summary]', app.querySelector('[data-brief-editor] textarea').value); app.querySelector('[data-brief-editor]').hidden = true; app.querySelector('[data-action="brief"]').setAttribute('aria-expanded', 'false'); }
+          if (action === 'once' || action === 'graph') { text(app, '[data-menu-notice]', action === 'once' ? '正式界面会执行下一个可运行步骤，完成后自动暂停。' : '正式界面会打开现有依赖图，暂停时可连接、删除依赖或整理布局。'); app.querySelector('[data-menu-notice]').hidden = false; }
+          if (action === 'stop') { state.status = 'stopped'; render(); persist(); }
+          if (action === 'pin') { button.textContent = button.textContent === '固定记录' ? '取消固定' : '固定记录'; }
+          if (action === 'export' || action === 'cleanup') { text(app, '[data-record-notice]', action === 'export' ? '正式界面会导出当前运行的记录。' : '正式界面会先确认清理范围，保留当前生成内容。'); app.querySelector('[data-record-notice]').hidden = false; }
+        });
+        render();
+        if (globalThis.Tweak) {
+          const tweak = new Tweak({ container: app, onChange: () => { render(); persist(); } });
+          tweak.addSelect(state, 'status', { label: '预览运行状态', options: [{label: '已暂停', value: 'paused'}, {label: '生产中', value: 'running'}, {label: '步骤失败', value: 'failed'}, {label: '生成完成', value: 'completed'}] });
+          tweak.addToggle(state, 'downgrade', { label: '出现降级结果' });
+          tweak.addToggle(state, 'showTime', { label: '在底部展示耗时' });
+        }
+      }
+      window.addEventListener('openai:set_globals', event => {
+        const next = event.detail?.globals?.widgetState?.privateContent?.designs;
+        if (!next) return;
+        for (const context of contexts) {
+          const incoming = next[context.design];
+          if (!incoming) continue;
+          if (states[incoming.status]) context.state.status = incoming.status;
+          if ([0, 1, 2].includes(incoming.phase)) context.state.phase = incoming.phase;
+          context.state.downgrade = Boolean(incoming.downgrade);
+          context.state.showTime = incoming.showTime !== false;
+          context.render();
+        }
+      });
+    })();
+  </script>
+  <script>
+    (() => {
+      const app = document.getElementById('flow-run-setup');
+      const definitions = [
+        { name: '故事规划', needs: [] },
+        { name: '世界观设定', needs: [0] },
+        { name: '章节大纲', needs: [0, 1] },
+        { name: '角色设计', needs: [0, 1, 2] },
+        { name: '对白创作', needs: [0, 1, 2, 3] },
+        { name: '素材规划', needs: [0, 1, 2, 3, 4] },
+        { name: '场景编排', needs: [2, 3, 4, 5] },
+        { name: '素材生成与绑定', needs: [3, 5, 6] },
+      ];
+      const restored = window.openai?.widgetState?.privateContent?.setup ?? {};
+      const state = {
+        chosen: Array.isArray(restored.chosen) && restored.chosen.length === 8 ? restored.chosen.map(Boolean) : [true, true, true, true, true, true, true, false],
+        sources: Array.isArray(restored.sources) && restored.sources.length === 8 ? restored.sources.map(source => source === 'existing' ? 'existing' : 'omit') : Array(8).fill('omit'),
+        media: { image: true, voice: true, music: true, ...restored.media },
+        textConfigured: restored.textConfigured !== false,
+        imageConfigured: Boolean(restored.imageConfigured),
+        voiceConfigured: Boolean(restored.voiceConfigured),
+        musicConfigured: Boolean(restored.musicConfigured),
+        existingInputs: Boolean(restored.existingInputs),
+        localFallback: Boolean(restored.localFallback),
+      };
+      let confirmed = false;
+      const query = selector => app.querySelector(selector);
+      function persist() {
+        window.openai?.setWidgetState?.({
+          modelContent: { ...window.openai?.widgetState?.modelContent, runSelection: { execute: definitions.filter((step, index) => state.chosen[index]).map(step => step.name), reuse: definitions.filter((step, index) => !state.chosen[index] && state.sources[index] === 'existing').map(step => step.name), omitted: definitions.filter((step, index) => !state.chosen[index] && state.sources[index] !== 'existing').map(step => step.name), media: state.chosen[7] ? Object.keys(state.media).filter(type => state.media[type]) : [], confirmed } },
+          privateContent: { ...window.openai?.widgetState?.privateContent, setup: state },
+        }).catch(() => {});
+      }
+      function regeneratesAncestor(index) {
+        return definitions[index].needs.some(dependency => state.chosen[dependency] || regeneratesAncestor(dependency));
+      }
+      function available(index) {
+        if (!state.chosen[index]) return state.sources[index] === 'existing' && state.existingInputs && !regeneratesAncestor(index);
+        return definitions[index].needs.every(available);
+      }
+      function inspect() {
+        const dependencyIssues = [];
+        definitions.forEach((step, index) => {
+          if (!state.chosen[index]) return;
+          const missing = step.needs.filter(dependency => !available(dependency));
+          if (missing.length) dependencyIssues.push({ index, missing });
+        });
+        const messages = [];
+        if (!state.chosen.some(Boolean)) messages.push('请选择至少一个要执行的步骤。');
+        if (state.chosen.some((enabled, index) => enabled && index < 6) && !state.textConfigured && !state.localFallback) messages.push('选中的内容生成步骤需要对话接口，请先配置，或明确允许本地内容降级。');
+        if (state.chosen[7]) {
+          if (!Object.values(state.media).some(Boolean)) messages.push('请选择至少一种素材类型，或取消素材生成。');
+          const labels = { image: '图片', voice: '语音', music: '音乐' };
+          const missingTypes = Object.keys(state.media).filter(type => state.media[type] && !state[`${type}Configured`]);
+          if (missingTypes.length) messages.push(`${missingTypes.map(type => labels[type]).join('、')}接口未配置。可配置接口，或取消对应制作类型。`);
+        }
+        if (dependencyIssues.length) {
+          const first = dependencyIssues[0];
+          messages.push(`${definitions[first.index].name}需要${first.missing.map(index => definitions[index].name).join('、')}的有效结果。请执行前置步骤、复用相符的已有结果，或取消受影响的后续步骤。`);
+        }
+        return { messages, dependencyIssues };
+      }
+      function render() {
+        definitions.forEach((step, index) => {
+          const checkbox = query(`[data-run-step="${index}"]`);
+          checkbox.checked = state.chosen[index];
+          checkbox.disabled = confirmed;
+          const source = query(`[data-step-source="${index}"]`);
+          if (!source) return;
+          source.hidden = state.chosen[index];
+          const select = query(`[data-source-select="${index}"]`);
+          select.value = state.sources[index];
+          select.disabled = confirmed;
+          select.querySelector('[value="existing"]').disabled = !state.existingInputs;
+          query(`[data-source-status="${index}"]`).textContent = !state.existingInputs ? '没有可复用结果' : state.sources[index] === 'existing' && regeneratesAncestor(index) ? '上游将重做，已有结果需重新验证' : state.sources[index] === 'existing' ? '使用匹配的已有结果' : '已有结果可选';
+        });
+        const labels = { image: '图片', voice: '语音', music: '音乐' };
+        const missingMedia = Object.keys(labels).filter(type => !state[`${type}Configured`]);
+        query('[data-text-capability]').textContent = state.textConfigured ? '对话接口已配置' : '对话接口未配置';
+        query('[data-media-capability]').textContent = missingMedia.length ? `${missingMedia.map(type => labels[type]).join('、')}接口未配置` : '素材接口已配置';
+        query('[data-media-hint]').textContent = missingMedia.length === 3 ? '未配置素材接口，本次建议不执行' : '只制作本次选择的素材类型';
+        query('[data-asset-selection]').textContent = state.chosen[7] ? '执行所选类型' : '本次不执行';
+        query('[data-media-options]').hidden = !state.chosen[7];
+        for (const type of Object.keys(labels)) {
+          query(`[data-media-type="${type}"]`).checked = state.media[type];
+          query(`[data-media-type="${type}"]`).disabled = confirmed;
+          query(`[data-media-type-status="${type}"]`).textContent = state[`${type}Configured`] ? '已配置' : '未配置';
+        }
+        query('[data-local-fallback]').checked = state.localFallback;
+        query('[data-local-fallback]').disabled = confirmed;
+        const { messages, dependencyIssues } = inspect();
+        query('[data-setup-validation]').hidden = !messages.length;
+        query('[data-setup-issues]').replaceChildren(...messages.map(message => { const li = document.createElement('li'); li.textContent = message; return li; }));
+        query('[data-setup-action="restore"]').hidden = !dependencyIssues.length;
+        query('[data-setup-action="remove"]').hidden = !dependencyIssues.length;
+        query('[data-setup-action="start"]').disabled = Boolean(messages.length) || confirmed;
+        query('[data-setup-count]').textContent = `将执行 ${state.chosen.filter(Boolean).length} 个步骤`;
+        const reused = state.chosen.filter((enabled, index) => !enabled && state.sources[index] === 'existing').length;
+        query('[data-setup-result]').textContent = `${reused ? `复用 ${reused} 项已有结果。` : ''}${state.chosen[7] ? '仅制作选中的素材类型。' : '本次不生成素材；保留已有素材，缺失部分稍后补充。'}`;
+        query('[data-setup-fallback-warning]').hidden = state.textConfigured || !state.localFallback || !state.chosen.some((enabled, index) => enabled && index < 6);
+        query('[data-setup-confirmed]').hidden = !confirmed;
+        query('[data-setup-start-label]').textContent = confirmed ? '范围已确认' : '开始生产';
+      }
+      app.addEventListener('change', event => {
+        const element = event.target;
+        if (element.dataset.runStep != null) state.chosen[Number(element.dataset.runStep)] = element.checked;
+        if (element.dataset.sourceSelect != null) state.sources[Number(element.dataset.sourceSelect)] = element.value;
+        if (element.dataset.mediaType) state.media[element.dataset.mediaType] = element.checked;
+        if (element.hasAttribute('data-local-fallback')) state.localFallback = element.checked;
+        render(); persist();
+      });
+      app.addEventListener('click', event => {
+        const button = event.target.closest('[data-setup-action]');
+        if (!button) return;
+        const action = button.dataset.setupAction;
+        if (action === 'settings') query('[data-settings-notice]').hidden = !query('[data-settings-notice]').hidden;
+        if (action === 'restore') {
+          function restore(index) { if (available(index)) return; state.chosen[index] = true; definitions[index].needs.forEach(restore); }
+          state.chosen.forEach((enabled, index) => { if (enabled) definitions[index].needs.forEach(restore); });
+        }
+        if (action === 'remove') {
+          let issues = inspect().dependencyIssues;
+          while (issues.length) { issues.forEach(issue => { state.chosen[issue.index] = false; state.sources[issue.index] = 'omit'; }); issues = inspect().dependencyIssues; }
+        }
+        if (action === 'start' && !inspect().messages.length) {
+          confirmed = true;
+          query('[data-setup-snapshot]').textContent = `本次执行：${definitions.filter((step, index) => state.chosen[index]).map(step => step.name).join('、')}。未选步骤不计入生产进度。`;
+        }
+        if (action === 'back') confirmed = false;
+        render(); persist();
+      });
+      render();
+      if (globalThis.Tweak) {
+        const tweak = new Tweak({ container: app, onChange: () => { confirmed = false; render(); persist(); } });
+        tweak.addToggle(state, 'textConfigured', { label: '对话接口可用' });
+        tweak.addToggle(state, 'imageConfigured', { label: '图片接口可用' });
+        tweak.addToggle(state, 'voiceConfigured', { label: '语音接口可用' });
+        tweak.addToggle(state, 'musicConfigured', { label: '音乐接口可用' });
+        tweak.addToggle(state, 'existingInputs', { label: '存在相符的已有生产结果' });
+      }
+      window.addEventListener('openai:set_globals', event => {
+        const next = event.detail?.globals?.widgetState?.privateContent?.setup;
+        if (!next) return;
+        if (Array.isArray(next.chosen) && next.chosen.length === 8) state.chosen = next.chosen.map(Boolean);
+        if (Array.isArray(next.sources) && next.sources.length === 8) state.sources = next.sources.map(source => source === 'existing' ? 'existing' : 'omit');
+        for (const key of ['textConfigured', 'imageConfigured', 'voiceConfigured', 'musicConfigured', 'existingInputs', 'localFallback']) if (typeof next[key] === 'boolean') state[key] = next[key];
+        if (next.media) for (const type of ['image', 'voice', 'music']) if (typeof next.media[type] === 'boolean') state.media[type] = next.media[type];
+        render();
+      });
+    })();
+  </script>
+</div>

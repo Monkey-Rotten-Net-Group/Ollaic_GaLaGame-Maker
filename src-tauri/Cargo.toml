@@ -19,7 +19,7 @@ path = "src/main.rs"
 # normal `cargo build` / `tauri build` never pulls clap or sha2 into the app.
 [[bin]]
 name = "agent-harness"
-path = "src/bin/agent-harness.rs"
+path = "src/agent_harness_bin.rs"
 required-features = ["agent-harness"]
 
 [features]

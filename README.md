@@ -62,3 +62,27 @@ Linux Fedora 依赖示例：
 ```bash
 sudo dnf install -y webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel librsvg2-devel openssl-devel pkgconf-pkg-config curl wget file
 ```
+
+### 发布桌面安装包
+
+根目录 `VERSION` 是发布版本的唯一入口，格式为 `主版本.次版本.修订号`。
+
+1. 把 `VERSION` 升到更大的版本，例如 `0.1.1`。
+2. 提交修改并推送或合并到 `master`。
+3. 等待 `release` 工作流完成。
+
+工作流会自动同步前端、Tauri、Cargo 和锁文件中的应用版本。
+Windows、Linux、macOS 全部构建成功后，工作流会公开对应的 `v版本号` Release。
+无需手动创建标签。普通代码提交、其他分支提交和仅修改版本空白不会发布。
+首次添加 `VERSION` 时，沿用现有应用版本也不会发布。
+
+版本号必须递增，且不能使用其他提交已有的标签。
+构建失败时，Release 保持草稿状态；修复构建后，重新运行失败的工作流。
+如果修复需要新的代码提交，请再次升高 `VERSION`。
+
+本地可以检查发布脚本，或同步应用版本：
+
+```bash
+node --test scripts/version.test.mjs
+node scripts/version.mjs sync
+```

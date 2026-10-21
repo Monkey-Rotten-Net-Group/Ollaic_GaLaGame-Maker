@@ -2,15 +2,89 @@ name: release
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    branches:
+      - master
+    paths:
+      - VERSION
+      - scripts/version.mjs
+      - src-tauri/Cargo.toml
+      - .github/workflows/release.yml
 
 permissions:
   contents: write
 
+# Serialize reruns of the same commit without dropping releases of other versions.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    name: Check release version
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.draft.outputs.build }}
+      tag: ${{ steps.version.outputs.tag }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - name: Checkout release commit and history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check VERSION against the previous push
+        id: version
+        env:
+          RELEASE_BEFORE: ${{ github.event.before }}
+        run: node scripts/version.mjs check
+
+      - name: Create or reuse release draft
+        if: steps.version.outputs.release == 'true'
+        id: draft
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            let release;
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ owner, repo, tag }));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              ({ data: release } = await github.rest.repos.createRelease({
+                owner, repo, tag_name: tag, target_commitish: context.sha,
+                name: `Ollaic GaLaGame Maker ${tag}`, draft: true,
+                generate_release_notes: true,
+              }));
+            }
+            if (release.draft && release.target_commitish !== context.sha) {
+              await github.rest.git.updateRef({
+                ...context.repo,
+                ref: `refs/tags/${tag}`,
+                sha: context.sha,
+                force: true,
+              });
+              await github.rest.repos.updateRelease({
+                ...context.repo,
+                release_id: release.id,
+                target_commitish: context.sha,
+              });
+              release.target_commitish = context.sha;
+            }
+            core.setOutput('build', String(release.draft));
+            core.setOutput('release_id', String(release.id));
+
   build:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -28,11 +102,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Synchronize app version from VERSION
+        run: node scripts/version.mjs sync
 
       - name: Enable pnpm
         shell: bash
@@ -65,35 +144,36 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri bundle for release
-        if: github.ref_type == 'tag'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: pnpm tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: Ollaic GaLaGame Maker ${{ github.ref_name }}
-          releaseBody: |
-            Ollaic GaLaGame Maker desktop build.
-
-            See the uploaded assets for Windows, Linux, and macOS packages.
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseName: Ollaic GaLaGame Maker ${{ needs.prepare.outputs.tag }}
           releaseDraft: true
           prerelease: false
-          releaseAssetNamePattern: '[name]-[version]-[platform]-[arch]-[bundle][setup].[ext]'
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: '${{ matrix.label }}-[bundle]'
-
-      - name: Build Tauri bundle artifact
-        if: github.ref_type != 'tag'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tauriScript: pnpm tauri
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: '${{ matrix.label }}-[bundle]'
 
       - name: Verify macOS app signature
         if: startsWith(matrix.label, 'macos-')
         shell: bash
         run: codesign --verify --deep --strict --verbose=4 target/release/bundle/macos/Ollaic.app
+
+  publish:
+    name: Publish completed release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release after every platform succeeds
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false,
+            });

@@ -10,6 +10,24 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    name: Version and release checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Test release decisions and version synchronization
+        run: node --test scripts/version.test.mjs
+
+      - name: Validate VERSION and synchronize app metadata
+        run: node scripts/version.mjs sync
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest
