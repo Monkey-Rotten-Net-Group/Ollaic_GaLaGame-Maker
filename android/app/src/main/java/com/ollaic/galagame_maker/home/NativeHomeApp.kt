@@ -8,9 +8,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ollaic.galagame_maker.R
+import com.ollaic.galagame_maker.workspace.ProjectWorkspace
+import com.ollaic.galagame_maker.workspace.WorkspaceDraftStore
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
@@ -19,11 +20,11 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NativeHomeApp(store: HomeDraftStore) {
+fun NativeHomeApp(store: HomeDraftStore, workspaces: WorkspaceDraftStore) {
   var snapshot by remember { mutableStateOf(HomeSnapshot()) }
   var creating by rememberSaveable { mutableStateOf(false) }
   var editingId by rememberSaveable { mutableStateOf<String?>(null) }
-  var detailsId by rememberSaveable { mutableStateOf<String?>(null) }
+  var workspaceId by rememberSaveable { mutableStateOf<String?>(null) }
   var confirmId by rememberSaveable { mutableStateOf<String?>(null) }
   var permanent by rememberSaveable { mutableStateOf(false) }
   var saving by remember { mutableStateOf(false) }
@@ -38,7 +39,7 @@ fun NativeHomeApp(store: HomeDraftStore) {
     }
   }
 
-  fun update(transform: (List<HomeProject>) -> List<HomeProject>, complete: () -> Unit = {}) {
+  fun update(transform: suspend (List<HomeProject>) -> List<HomeProject>, complete: () -> Unit = {}) {
     if (saving) return
     saving = true
     scope.launch {
@@ -55,10 +56,18 @@ fun NativeHomeApp(store: HomeDraftStore) {
   }
 
   LaunchedEffect(store) { load() }
-  NativeHomeScreen(snapshot) { action, id ->
+  val opened = snapshot.projects.firstOrNull { it.id == workspaceId && !it.deleted }
+  if (workspaceId != null && !snapshot.ready && snapshot.error.isBlank()) {
+    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }
+  } else if (opened != null) {
+    ProjectWorkspace(opened, workspaces, store,
+      onClose = { workspaceId = null; scope.launch { load() } },
+      onEditProject = { editingId = opened.id },
+    )
+  } else NativeHomeScreen(snapshot) { action, id ->
     when (action) {
       "create" -> creating = true
-      "open" -> detailsId = id
+      "open" -> workspaceId = id
       "edit" -> editingId = id
       "favorite" -> update({ projects -> projects.map { if (it.id == id) it.copy(favorite = !it.favorite) else it } })
       "delete", "remove" -> { confirmId = id; permanent = action == "remove" }
@@ -80,30 +89,24 @@ fun NativeHomeApp(store: HomeDraftStore) {
           name = name,
           description = description,
           lastModified = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date()),
-          sceneCount = 0,
+          sceneCount = project?.sceneCount ?: 0,
           favorite = project?.favorite ?: false,
           deleted = false,
         )
         update(
-          transform = { projects -> listOf(draft) + projects.filter { it.id != draft.id } },
-          complete = { creating = false; editingId = null },
+          transform = { projects ->
+            val current = projects.firstOrNull { it.id == draft.id }
+            val updated = current?.copy(name = draft.name, description = draft.description, lastModified = draft.lastModified) ?: draft
+            listOf(updated) + projects.filter { it.id != draft.id }
+          },
+          complete = {
+            creating = false
+            editingId = null
+            if (project == null) workspaceId = draft.id
+          },
         )
       },
     )
-  }
-
-  snapshot.projects.find { it.id == detailsId }?.let { project ->
-    ModalBottomSheet(onDismissRequest = { detailsId = null }) {
-      Column(Modifier.fillMaxWidth().padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(project.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Text(stringResource(R.string.home_draft), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-        if (project.description.isNotBlank()) Text(project.description, style = MaterialTheme.typography.bodyLarge)
-        HorizontalDivider()
-        Text(project.lastModified, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = { detailsId = null; editingId = project.id }) { Text(stringResource(R.string.home_edit)) }
-        Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
-      }
-    }
   }
 
   if (confirmId != null) AlertDialog(
@@ -112,11 +115,15 @@ fun NativeHomeApp(store: HomeDraftStore) {
     text = { Text(snapshot.projects.find { it.id == confirmId }?.name.orEmpty()) },
     confirmButton = {
       TextButton(enabled = !saving, onClick = {
-        val id = confirmId
+        val id = confirmId ?: return@TextButton
+        val removePermanently = permanent
         update(
           transform = { projects ->
-            if (permanent) projects.filter { it.id != id }
-            else projects.map { if (it.id == id) it.copy(deleted = true) else it }
+            if (removePermanently) {
+              check(projects.any { it.id == id && it.deleted }) { "Project is unavailable" }
+              workspaces.delete(id)
+              projects.filter { it.id != id }
+            } else projects.map { if (it.id == id) it.copy(deleted = true) else it }
           },
           complete = { confirmId = null },
         )

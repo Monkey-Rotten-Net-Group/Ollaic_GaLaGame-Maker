@@ -19,7 +19,7 @@ class HomeDraftStore(directory: File) {
     lock.withLock { read() }
   }
 
-  suspend fun update(transform: (List<HomeProject>) -> List<HomeProject>): List<HomeProject> =
+  suspend fun update(transform: suspend (List<HomeProject>) -> List<HomeProject>): List<HomeProject> =
     withContext(Dispatchers.IO) {
       lock.withLock {
         val projects = transform(read())

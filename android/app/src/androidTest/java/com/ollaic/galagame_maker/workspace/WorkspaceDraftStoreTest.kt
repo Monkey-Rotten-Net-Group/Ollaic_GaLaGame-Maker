@@ -63,4 +63,28 @@ class WorkspaceDraftStoreTest {
       assertEquals(3, HomeDraftStore(directory).load().single().sceneCount)
     } finally { directory.deleteRecursively() }
   }
+
+  @Test fun deletionRemovesWorkspaceAndAtomicFilesWithoutAffectingOtherProjects() = runBlocking {
+    val directory = temporaryDirectory()
+    try {
+      val store = WorkspaceDraftStore(directory)
+      val first = UUID.randomUUID().toString()
+      val second = UUID.randomUUID().toString()
+      val document = WorkspaceDraft(listOf(DraftScene(name = "Start")), notes = "Private notes")
+      store.save(first, document)
+      store.save(second, document)
+      val target = File(directory, "workspaces/$first")
+      File(target, "workspace.json.bak").writeText("Old content")
+      File(target, "workspace.json.new").writeText("Pending content")
+
+      store.delete(first)
+
+      assertFalse(target.exists())
+      assertNull(store.load(first))
+      assertEquals(document, store.load(second))
+      store.delete(first)
+      assertTrue(runCatching { store.delete("../outside") }.isFailure)
+      assertEquals(document, store.load(second))
+    } finally { directory.deleteRecursively() }
+  }
 }

@@ -315,7 +315,7 @@ private fun ProjectItem(project: HomeProject, grid: Boolean, onAction: (String, 
 }
 
 @Composable
-private fun projectStatus(project: HomeProject): String = if (project.draft) {
+private fun projectStatus(project: HomeProject): String = if (project.draft && project.sceneCount == 0) {
   stringResource(R.string.home_draft)
 } else {
   stringResource(R.string.home_scene_count, project.sceneCount)

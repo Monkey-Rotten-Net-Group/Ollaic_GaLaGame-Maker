@@ -84,7 +84,9 @@ APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。也可以直
 3. 在 Build Variants 中选择 `debug`。
 4. 在 Device Manager 中启动虚拟设备，顶部运行配置选择 `app`、目标选择虚拟设备，然后点击 Run。
 
-原生首页支持系统深色模式、搜索、筛选、列表/网格切换，以及本地草稿的创建、编辑、收藏和回收站。这些草稿只保存首页元数据，不是已经初始化的 WebGAL 工程；ZIP 导入暂时禁用。后续通过共享 Rust 核心和原生绑定接入完整项目功能。
+原生首页支持系统深色模式、搜索、筛选、列表/网格切换，以及本地草稿的创建、编辑、收藏和回收站。草稿元数据与工作区内容保存在应用私有目录，尚未初始化成 WebGAL 工程；ZIP 导入暂时禁用。后续通过共享 Rust 核心和原生绑定接入完整项目功能。
+
+点击项目卡片可进入独立原生工作区，支持场景管理、对白/旁白/备注草稿、撤销重做和创作笔记。手机使用底部导航，宽屏展开场景侧栏；草稿自动保存，返回项目库前会完成保存。当前保存的是 Android 本地工作区 JSON，运行预览、素材导入和 Agent 尚未接入 WebGAL/Rust 后端。
 
 旧 Tauri Android 测试工程仍在 `src-tauri/gen/android/`，对应命令为 `pnpm android:tauri:dev`、`pnpm android:tauri:build --debug` 和 `pnpm android:tauri:open`，需要额外的 NDK 和 Android Rust 目标。它不参与独立原生应用的构建。
 

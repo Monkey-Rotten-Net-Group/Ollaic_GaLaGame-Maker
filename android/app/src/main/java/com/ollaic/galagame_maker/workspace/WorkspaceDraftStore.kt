@@ -54,6 +54,13 @@ class WorkspaceDraftStore(private val directory: File) {
     }
   }
 
+  suspend fun delete(projectId: String) = withContext(Dispatchers.IO) {
+    lock.withLock {
+      val target = checkNotNull(file(projectId).baseFile.parentFile)
+      check(!target.exists() || target.deleteRecursively()) { "Cannot delete workspace directory" }
+    }
+  }
+
   suspend fun save(projectId: String, document: WorkspaceDraft) = withContext(Dispatchers.IO) {
     lock.withLock {
       document.validate()
