@@ -30,6 +30,7 @@ class HomeDraftStore(directory: File) {
             .put("name", project.name)
             .put("description", project.description)
             .put("lastModified", project.lastModified)
+            .put("sceneCount", project.sceneCount)
             .put("favorite", project.favorite)
             .put("deleted", project.deleted))
         }
@@ -67,7 +68,7 @@ class HomeDraftStore(directory: File) {
           name = name,
           description = record.optString("description"),
           lastModified = record.optString("lastModified"),
-          sceneCount = 0,
+          sceneCount = record.optInt("sceneCount").coerceAtLeast(0),
           favorite = record.optBoolean("favorite"),
           deleted = record.optBoolean("deleted"),
         ))
