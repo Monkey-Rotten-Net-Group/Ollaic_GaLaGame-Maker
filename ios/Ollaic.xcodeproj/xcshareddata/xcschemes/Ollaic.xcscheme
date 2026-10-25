@@ -8,10 +8,16 @@
          <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B50000000000000000000001" BuildableName="OllaicUITests.xctest" BlueprintName="OllaicUITests" ReferencedContainer="container:Ollaic.xcodeproj"/>
          </BuildActionEntry>
+         <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="C50000000000000000000001" BuildableName="OllaicTests.xctest" BlueprintName="OllaicTests" ReferencedContainer="container:Ollaic.xcodeproj"/>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
       <Testables>
+         <TestableReference skipped="NO" parallelizable="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="C50000000000000000000001" BuildableName="OllaicTests.xctest" BlueprintName="OllaicTests" ReferencedContainer="container:Ollaic.xcodeproj"/>
+         </TestableReference>
          <TestableReference skipped="NO" parallelizable="NO">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B50000000000000000000001" BuildableName="OllaicUITests.xctest" BlueprintName="OllaicUITests" ReferencedContainer="container:Ollaic.xcodeproj"/>
          </TestableReference>

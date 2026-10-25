@@ -12,10 +12,21 @@
 		A10000000000000000000004 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* Localizable.xcstrings */; };
 		A10000000000000000000005 /* ProjectLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* ProjectLibrary.swift */; };
 		A10000000000000000000006 /* ProjectViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* ProjectViews.swift */; };
+		A10000000000000000000007 /* WorkspaceDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* WorkspaceDraft.swift */; };
+		A10000000000000000000008 /* ProjectWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* ProjectWorkspaceView.swift */; };
+		A10000000000000000000009 /* WorkspaceSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* WorkspaceSheets.swift */; };
 		B10000000000000000000001 /* ProjectHomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* ProjectHomeTests.swift */; };
+		C10000000000000000000001 /* ProjectLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* ProjectLibraryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		C60000000000000000000001 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A60000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A50000000000000000000001;
+			remoteInfo = Ollaic;
+		};
 		B60000000000000000000001 = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A60000000000000000000001 /* Project object */;
@@ -33,11 +44,22 @@
 		A20000000000000000000005 /* Ollaic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Ollaic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000006 /* ProjectLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLibrary.swift; sourceTree = "<group>"; };
 		A20000000000000000000007 /* ProjectViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectViews.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* WorkspaceDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceDraft.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* ProjectWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWorkspaceView.swift; sourceTree = "<group>"; };
+		A2000000000000000000000A /* WorkspaceSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSheets.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* ProjectHomeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectHomeTests.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* OllaicUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OllaicUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20000000000000000000001 /* ProjectLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLibraryTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* OllaicTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OllaicTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		C30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -58,6 +80,7 @@
 			children = (
 				A40000000000000000000002 /* Ollaic */,
 				B40000000000000000000001 /* OllaicUITests */,
+				C40000000000000000000001 /* OllaicTests */,
 				A40000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -69,6 +92,9 @@
 				A20000000000000000000002 /* ProjectHomeView.swift */,
 				A20000000000000000000006 /* ProjectLibrary.swift */,
 				A20000000000000000000007 /* ProjectViews.swift */,
+				A20000000000000000000008 /* WorkspaceDraft.swift */,
+				A20000000000000000000009 /* ProjectWorkspaceView.swift */,
+				A2000000000000000000000A /* WorkspaceSheets.swift */,
 				A20000000000000000000003 /* Assets.xcassets */,
 				A20000000000000000000004 /* Localizable.xcstrings */,
 			);
@@ -77,7 +103,7 @@
 		};
 		A40000000000000000000003 /* Products */ = {
 			isa = PBXGroup;
-			children = (A20000000000000000000005 /* Ollaic.app */, B20000000000000000000002 /* OllaicUITests.xctest */);
+			children = (A20000000000000000000005 /* Ollaic.app */, B20000000000000000000002 /* OllaicUITests.xctest */, C20000000000000000000002 /* OllaicTests.xctest */);
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -87,9 +113,26 @@
 			path = OllaicUITests;
 			sourceTree = "<group>";
 		};
+		C40000000000000000000001 /* OllaicTests */ = {
+			isa = PBXGroup;
+			children = (C20000000000000000000001 /* ProjectLibraryTests.swift */);
+			path = OllaicTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		C50000000000000000000001 /* OllaicTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C90000000000000000000001;
+			buildPhases = (C70000000000000000000001 /* Sources */, C30000000000000000000001 /* Frameworks */);
+			buildRules = ();
+			dependencies = (C60000000000000000000002);
+			name = OllaicTests;
+			productName = OllaicTests;
+			productReference = C20000000000000000000002 /* OllaicTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		A50000000000000000000001 /* Ollaic */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A90000000000000000000002 /* Build configuration list for PBXNativeTarget "Ollaic" */;
@@ -128,6 +171,7 @@
 				TargetAttributes = {
 					A50000000000000000000001 = {CreatedOnToolsVersion = 16.0; };
 					B50000000000000000000001 = {CreatedOnToolsVersion = 16.0; TestTargetID = A50000000000000000000001; };
+					C50000000000000000000001 = {CreatedOnToolsVersion = 16.0; TestTargetID = A50000000000000000000001; };
 				};
 			};
 			buildConfigurationList = A90000000000000000000001 /* Build configuration list for PBXProject "Ollaic" */;
@@ -139,7 +183,7 @@
 			productRefGroup = A40000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A50000000000000000000001 /* Ollaic */, B50000000000000000000001 /* OllaicUITests */);
+			targets = (A50000000000000000000001 /* Ollaic */, B50000000000000000000001 /* OllaicUITests */, C50000000000000000000001 /* OllaicTests */);
 		};
 /* End PBXProject section */
 
@@ -156,6 +200,12 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		C70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (C10000000000000000000001 /* ProjectLibraryTests.swift in Sources */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A70000000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -164,6 +214,9 @@
 				A10000000000000000000002 /* ProjectHomeView.swift in Sources */,
 				A10000000000000000000005 /* ProjectLibrary.swift in Sources */,
 				A10000000000000000000006 /* ProjectViews.swift in Sources */,
+				A10000000000000000000007 /* WorkspaceDraft.swift in Sources */,
+				A10000000000000000000008 /* ProjectWorkspaceView.swift in Sources */,
+				A10000000000000000000009 /* WorkspaceSheets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -176,6 +229,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		C60000000000000000000002 = {
+			isa = PBXTargetDependency;
+			target = A50000000000000000000001 /* Ollaic */;
+			targetProxy = C60000000000000000000001;
+		};
 		B60000000000000000000002 = {
 			isa = PBXTargetDependency;
 			target = A50000000000000000000001 /* Ollaic */;
@@ -184,6 +242,38 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		CA0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ollaic.galagame-maker.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Ollaic.app/Ollaic";
+			};
+			name = Debug;
+		};
+		CA0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ollaic.galagame-maker.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Ollaic.app/Ollaic";
+			};
+			name = Release;
+		};
 		AA0000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -307,6 +397,12 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C90000000000000000000001 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (CA0000000000000000000001 /* Debug */, CA0000000000000000000002 /* Release */);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A90000000000000000000001 /* Build configuration list for PBXProject "Ollaic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (AA0000000000000000000001 /* Debug */, AA0000000000000000000002 /* Release */);

@@ -154,6 +154,9 @@ struct ProjectHomeView: View {
             Button("OK", role: .cancel) { actionError = nil }
         } message: { Text(actionError ?? "") }
         .onChange(of: filter) { _, _ in path.removeAll() }
+        .onChange(of: path) { _, value in
+            if sizeClass == .regular { columnVisibility = value.isEmpty ? .all : .detailOnly }
+        }
     }
 
     private var navigation: some View {
@@ -163,7 +166,13 @@ struct ProjectHomeView: View {
                 .navigationTitle(sizeClass == .regular ? filter.title : "Ollaic")
                 .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Projects")
                 .scrollDismissesKeyboard(.interactively)
-                .navigationDestination(for: UUID.self) { ProjectDetailView(projectID: $0) }
+                .navigationDestination(for: UUID.self) { id in
+                    if library.project(id)?.isDeleted == false {
+                        ProjectWorkspaceView(projectID: id)
+                    } else {
+                        ProjectDetailView(projectID: id)
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button("New Project", systemImage: "plus") { editor = .create }

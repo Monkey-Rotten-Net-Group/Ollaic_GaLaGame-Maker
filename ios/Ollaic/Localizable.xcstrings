@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld entries": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld entry"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld entries"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 段内容"
+          }
+        }
+      }
+    },
     "%lld projects": {
       "localizations": {
         "en": {
@@ -29,12 +57,52 @@
         }
       }
     },
+    "A scene with this name already exists.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已有同名场景。"
+          }
+        }
+      }
+    },
+    "AI Assistant": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 助手"
+          }
+        }
+      }
+    },
     "Actions for %@": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "%@的操作"
+          }
+        }
+      }
+    },
+    "Add Dialogue": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加对白"
+          }
+        }
+      }
+    },
+    "Add Entry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加内容"
           }
         }
       }
@@ -79,6 +147,16 @@
         }
       }
     },
+    "Assets": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "素材"
+          }
+        }
+      }
+    },
     "Blue": {
       "localizations": {
         "zh-Hans": {
@@ -99,6 +177,16 @@
         }
       }
     },
+    "Characters": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字数"
+          }
+        }
+      }
+    },
     "Clear Search": {
       "localizations": {
         "zh-Hans": {
@@ -115,6 +203,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "珊瑚"
+          }
+        }
+      }
+    },
+    "Couldn't Load Editor": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法载入编辑器"
           }
         }
       }
@@ -199,6 +297,16 @@
         }
       }
     },
+    "Delete Entry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除内容"
+          }
+        }
+      }
+    },
     "Delete Permanently": {
       "localizations": {
         "zh-Hans": {
@@ -219,12 +327,52 @@
         }
       }
     },
+    "Delete Scene": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除场景"
+          }
+        }
+      }
+    },
+    "Delete Scene?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除场景？"
+          }
+        }
+      }
+    },
+    "Dialogue": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对白"
+          }
+        }
+      }
+    },
     "Draft": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "草稿"
+          }
+        }
+      }
+    },
+    "Duplicate": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制副本"
           }
         }
       }
@@ -239,12 +387,42 @@
         }
       }
     },
+    "Edit Entry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑内容"
+          }
+        }
+      }
+    },
+    "Edit Notes": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑笔记"
+          }
+        }
+      }
+    },
     "Edit Project": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "编辑项目"
+          }
+        }
+      }
+    },
+    "Editor": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑器"
           }
         }
       }
@@ -275,6 +453,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "请输入项目名称。"
+          }
+        }
+      }
+    },
+    "Enter a scene name.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入场景名称。"
+          }
+        }
+      }
+    },
+    "Entries": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容条目"
+          }
+        }
+      }
+    },
+    "Entry Actions": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容操作"
+          }
+        }
+      }
+    },
+    "Export": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导出"
           }
         }
       }
@@ -369,6 +587,16 @@
         }
       }
     },
+    "Import Assets": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入素材"
+          }
+        }
+      }
+    },
     "In Trash": {
       "localizations": {
         "zh-Hans": {
@@ -409,6 +637,26 @@
         }
       }
     },
+    "Move Down": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下移"
+          }
+        }
+      }
+    },
+    "Move Up": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上移"
+          }
+        }
+      }
+    },
     "Move to Trash": {
       "localizations": {
         "zh-Hans": {
@@ -439,12 +687,52 @@
         }
       }
     },
+    "Narration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "旁白"
+          }
+        }
+      }
+    },
+    "New Entry": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加内容"
+          }
+        }
+      }
+    },
     "New Project": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "新建项目"
+          }
+        }
+      }
+    },
+    "New Scene": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建场景"
+          }
+        }
+      }
+    },
+    "No Assets": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无素材"
           }
         }
       }
@@ -489,12 +777,42 @@
         }
       }
     },
+    "No Script Entries": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无剧本内容"
+          }
+        }
+      }
+    },
     "No Synopsis": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "暂无简介"
+          }
+        }
+      }
+    },
+    "No Writing Notes": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无创作笔记"
+          }
+        }
+      }
+    },
+    "Note": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "备注"
           }
         }
       }
@@ -511,6 +829,36 @@
     },
     "Ollaic": {
       "shouldTranslate": false
+    },
+    "Opening Scene": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "序章"
+          }
+        }
+      }
+    },
+    "Overview": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "概览"
+          }
+        }
+      }
+    },
+    "Preview": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预览"
+          }
+        }
+      }
     },
     "Project": {
       "localizations": {
@@ -552,6 +900,16 @@
         }
       }
     },
+    "Project Settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项目设置"
+          }
+        }
+      }
+    },
     "Project Unavailable": {
       "localizations": {
         "zh-Hans": {
@@ -578,6 +936,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "最近编辑"
+          }
+        }
+      }
+    },
+    "Redo": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重做"
+          }
+        }
+      }
+    },
+    "Rename Scene": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重命名场景"
           }
         }
       }
@@ -622,6 +1000,56 @@
         }
       }
     },
+    "Saved": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存"
+          }
+        }
+      }
+    },
+    "Saving": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在保存"
+          }
+        }
+      }
+    },
+    "Scene Name": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "场景名称"
+          }
+        }
+      }
+    },
+    "Scenes": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "场景"
+          }
+        }
+      }
+    },
+    "Script": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剧本"
+          }
+        }
+      }
+    },
     "Search Projects": {
       "localizations": {
         "zh-Hans": {
@@ -638,6 +1066,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "排序"
+          }
+        }
+      }
+    },
+    "Speaker": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "角色"
           }
         }
       }
@@ -662,6 +1100,36 @@
         }
       }
     },
+    "Text": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容"
+          }
+        }
+      }
+    },
+    "The editor draft could not be read.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法读取编辑器草稿。"
+          }
+        }
+      }
+    },
+    "The editor is not ready.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑器尚未就绪。"
+          }
+        }
+      }
+    },
     "The project library could not be read.": {
       "localizations": {
         "zh-Hans": {
@@ -678,6 +1146,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "项目库尚未就绪。"
+          }
+        }
+      }
+    },
+    "This entry is no longer available.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此条内容已不可用。"
           }
         }
       }
@@ -702,6 +1180,16 @@
         }
       }
     },
+    "This scene is no longer available.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此场景已不可用。"
+          }
+        }
+      }
+    },
     "Trash": {
       "localizations": {
         "zh-Hans": {
@@ -718,6 +1206,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "回收站为空"
+          }
+        }
+      }
+    },
+    "Type": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "类型"
+          }
+        }
+      }
+    },
+    "Undo": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销"
           }
         }
       }
@@ -748,6 +1256,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "显示选项"
+          }
+        }
+      }
+    },
+    "Workspace": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区"
+          }
+        }
+      }
+    },
+    "Writing Notes": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "创作笔记"
           }
         }
       }

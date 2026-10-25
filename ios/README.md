@@ -101,24 +101,49 @@ light/dark appearance, Dynamic Type, English, and Simplified Chinese are support
 - Browse all projects, five recent projects, favorites, or Trash; search by name
   and synopsis and sort by activity, name, or creation date.
 - Move drafts to Trash, restore them, delete them permanently, or empty Trash.
-- Open draft details and keep the project library across application launches.
+- Open the native editor and keep the project library across application launches.
 
 Draft metadata is stored in a versioned JSON document at
 `Library/Application Support/ProjectLibrary/projects.json` inside the app sandbox.
 Writes run on a repository actor and replace the document atomically; failed
 loads do not overwrite existing data, and failed saves do not update the UI state.
 
-These drafts are not initialized WebGAL projects. ZIP import, the editor, preview,
-AI, and shared Rust bindings remain future integration work. The app icon catalog
+## Initial Native Editor
+
+Opening a project enters the editor. iPhone uses native Script, Scenes, Assets,
+and Project tabs; iPad expands the scene list alongside the script. The homepage
+sidebar collapses while editing so the workspace has the available width.
+
+- Create, select, rename, and delete scenes, keeping at least one scene.
+- Add or edit dialogue, narration, and notes using native forms.
+- Duplicate, reorder, or delete entries through their context menus.
+- Undo and redo up to 50 changes per project during the current app session,
+  with one shared history across editor windows.
+- Save project writing notes and edit project metadata.
+
+Each confirmed form edit and workspace action is written atomically before it
+appears as saved. Script content lives with the project in `projects.json`.
+Opening an existing version-1 project initializes one empty scene and upgrades
+the library to version 2. This prevents older builds from saving the library
+without the new editor content. Both library versions can be read by this build.
+
+These are native drafts, not initialized WebGAL projects. Assets have an empty
+library view; import, runtime preview, AI, and export remain disabled. ZIP import
+and shared Rust bindings remain future integration work. The app icon catalog
 is a placeholder for the final product artwork. This target does not build React,
 Tauri, Rust, or the matting model.
 
 ## UI Verification
 
+The `OllaicTests` target verifies shared project undo/redo, persistence, project
+isolation, history bounds, and write-failure recovery against the real repository.
+
 The shared scheme includes a native simulator UI workflow covering creation, editing,
 favorites, search, list/grid presentation, Trash/restore/permanent deletion, and
 relaunch persistence. Tests exercise the production repository using an isolated
 draft directory and preferences, and retain screenshots as test attachments.
+The editor workflow additionally covers script entry editing, scenes, undo/redo,
+writing notes, and restoring the workspace after restarting the app.
 
 ```sh
 xcodebuild test -project ios/Ollaic.xcodeproj -scheme Ollaic \
