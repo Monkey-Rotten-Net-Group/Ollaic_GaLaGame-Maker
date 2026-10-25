@@ -19,7 +19,7 @@ esac
 
 destination="generic/platform=iOS Simulator"
 if [[ "$mode" == "dev" ]]; then
-  device="${IOS_SIMULATOR_UDID:-}"
+  device="${IOS_SIMULATOR_UDID:-$(git -C "$project_root" config --local --get ollaic.iosSimulatorUDID 2>/dev/null || true)}"
   if [[ -z "$device" ]]; then
     device="$(xcrun simctl list --json | /usr/bin/ruby -rjson -ropen3 -e '
       inventory = JSON.parse(STDIN.read)

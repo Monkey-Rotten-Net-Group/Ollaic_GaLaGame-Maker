@@ -41,8 +41,10 @@ an iPhone or iPad simulator, then click Run.
 `ios:build` produces an unsigned Debug simulator app at
 `ios/.build/Build/Products/Debug-iphonesimulator/Ollaic.app`.
 
-`ios:dev` reuses a booted regular iPhone or selects and boots an available regular
-iPhone. If none exists, it creates one using the newest installed runtime that
+`ios:dev` first uses `IOS_SIMULATOR_UDID`, then the repository-local Git setting
+`ollaic.iosSimulatorUDID`. Without either setting, it reuses a booted regular
+iPhone or selects and boots an available regular iPhone. If none exists, it creates
+one using the newest installed runtime that
 supports a regular iPhone. Duo-only runtimes are skipped for default selection.
 It then builds, installs, and launches the app, restarting it if it is already
 running. Runtime downloads remain a separate setup step.
@@ -56,6 +58,20 @@ To select a particular existing simulator, including an iPad or iPhone Duo, set
 ```sh
 xcrun simctl list devices available
 IOS_SIMULATOR_UDID=YOUR_SIMULATOR_UDID pnpm ios:dev
+```
+
+To remember a default device for this checkout:
+
+```sh
+git config --local ollaic.iosSimulatorUDID YOUR_SIMULATOR_UDID
+pnpm ios:dev
+```
+
+This preference stays in `.git/config`. An explicit `IOS_SIMULATOR_UDID` overrides
+it. Restore automatic device selection with:
+
+```sh
+git config --local --unset ollaic.iosSimulatorUDID
 ```
 
 Set `IOS_DERIVED_DATA_PATH` to an absolute path to change the build output directory.
