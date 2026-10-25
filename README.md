@@ -104,7 +104,7 @@ pnpm ios:dev
 
 `ios:open` 打开 Xcode 工程；`ios:build` 构建无需签名的 Debug 模拟器应用；`ios:dev` 默认选择并启动普通 iPhone，没有对应设备时自动创建，随后构建、安装并启动应用。通过 `IOS_SIMULATOR_UDID` 可指定已有模拟器，包括 iPad 或 iPhone Duo。runtime 的安装和删除在 Xcode → Settings → Components 中管理；Xcode 27 的 Apple Silicon Mac 可运行 `xcodebuild -downloadPlatform iOS -buildVersion 27.0 -architectureVariant arm64` 安装普通 iPhone 所需的系统。
 
-当前仅初始化原生应用骨架和项目库空状态，尚未接入项目存储、编辑器或共享 Rust 核心。构建不依赖 React、Tauri、Rust 或抠图模型。
+原生首页支持本地草稿的新建和编辑、简介与封面颜色、收藏、搜索、排序、列表/网格、最近项目和回收站。iPhone 使用紧凑筛选栏，iPad 使用原生侧栏；项目元数据在应用私有目录中原子保存。当前草稿尚未初始化为 WebGAL 工程，ZIP 导入、编辑器、预览、AI 和共享 Rust 核心尚未接入。构建不依赖 React、Tauri、Rust 或抠图模型。详见 [`ios/README.md`](ios/README.md)。
 
 ### 验证
 

@@ -90,13 +90,39 @@ xcrun simctl list devices available
 
 See Apple's [Xcode component management documentation](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components).
 
-## Initial Scope
+## Native Project Library
 
-This is an application skeleton with a native navigation stack, an empty project
-library, system light/dark appearance, English and Simplified Chinese strings,
-and the same accent colors as the native Android application. The app icon catalog
-is a placeholder for the final product artwork.
+The homepage follows the desktop project library with native SwiftUI navigation,
+search, menus, forms, context menus, and list swipe actions. iPhone uses a compact
+filter picker; iPad uses a sidebar. The grid and list layouts, sorting, system
+light/dark appearance, Dynamic Type, English, and Simplified Chinese are supported.
 
-Project creation, storage, the editor, and Rust bindings are not connected yet.
-The shared Rust core and Swift/Kotlin bindings are a future integration step.
-This target does not build React, Tauri, Rust, or the matting model.
+- Create and edit local drafts, their synopsis, cover color, and favorite status.
+- Browse all projects, five recent projects, favorites, or Trash; search by name
+  and synopsis and sort by activity, name, or creation date.
+- Move drafts to Trash, restore them, delete them permanently, or empty Trash.
+- Open draft details and keep the project library across application launches.
+
+Draft metadata is stored in a versioned JSON document at
+`Library/Application Support/ProjectLibrary/projects.json` inside the app sandbox.
+Writes run on a repository actor and replace the document atomically; failed
+loads do not overwrite existing data, and failed saves do not update the UI state.
+
+These drafts are not initialized WebGAL projects. ZIP import, the editor, preview,
+AI, and shared Rust bindings remain future integration work. The app icon catalog
+is a placeholder for the final product artwork. This target does not build React,
+Tauri, Rust, or the matting model.
+
+## UI Verification
+
+The shared scheme includes a native simulator UI workflow covering creation, editing,
+favorites, search, list/grid presentation, Trash/restore/permanent deletion, and
+relaunch persistence. Tests exercise the production repository using an isolated
+draft directory and preferences, and retain screenshots as test attachments.
+
+```sh
+xcodebuild test -project ios/Ollaic.xcodeproj -scheme Ollaic \
+  -destination 'platform=iOS Simulator,id=YOUR_SIMULATOR_UDID' \
+  -collect-test-diagnostics never -parallel-testing-enabled NO \
+  -derivedDataPath ios/.build CODE_SIGNING_ALLOWED=NO
+```
