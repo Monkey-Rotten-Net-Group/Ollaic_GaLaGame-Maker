@@ -21,6 +21,9 @@
     "android:dev": "bash scripts/android-native.sh dev",
     "android:build": "bash scripts/android-native.sh build",
     "android:open": "bash scripts/android-native.sh open",
+    "ios:dev": "bash scripts/ios-native.sh dev",
+    "ios:build": "bash scripts/ios-native.sh build",
+    "ios:open": "bash scripts/ios-native.sh open",
     "android:tauri:dev": "tauri android dev",
     "android:tauri:build": "tauri android build --apk --target aarch64",
     "android:tauri:open": "tauri android dev --open"

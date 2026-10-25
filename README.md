@@ -92,6 +92,20 @@ APK 输出到 `android/app/build/outputs/apk/debug/app-debug.apk`。也可以直
 
 旧 Web 首页保留了移动端私有目录和 ZIP 导入适配，ZIP 最大 512 MiB、解压后最大 2 GiB。独立原生应用不会读取旧 Web 项目列表。两种 Android 构建沿用同一应用 ID，覆盖安装保留私有文件，卸载会删除私有数据。
 
+### iOS 开发
+
+独立的 SwiftUI 工程位于 [`ios/`](ios/README.md)，支持 iOS 17+ 的 iPhone 和 iPad。构建需要 macOS、Xcode 15+ 和 iOS SDK；运行还需要在 Xcode 中安装 iOS 17+ Simulator 系统。
+
+```bash
+pnpm ios:open
+pnpm ios:build
+pnpm ios:dev
+```
+
+`ios:open` 打开 Xcode 工程；`ios:build` 构建无需签名的 Debug 模拟器应用；`ios:dev` 默认选择并启动普通 iPhone，没有对应设备时自动创建，随后构建、安装并启动应用。通过 `IOS_SIMULATOR_UDID` 可指定已有模拟器，包括 iPad 或 iPhone Duo。runtime 的安装和删除在 Xcode → Settings → Components 中管理；Xcode 27 的 Apple Silicon Mac 可运行 `xcodebuild -downloadPlatform iOS -buildVersion 27.0 -architectureVariant arm64` 安装普通 iPhone 所需的系统。
+
+当前仅初始化原生应用骨架和项目库空状态，尚未接入项目存储、编辑器或共享 Rust 核心。构建不依赖 React、Tauri、Rust 或抠图模型。
+
 ### 验证
 
 ```bash
