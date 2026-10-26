@@ -122,6 +122,22 @@ export interface ProjectInfo {
   scenes: string[];
 }
 
+export interface ProjectStorage {
+  managed: boolean;
+}
+
+export async function getProjectStorage(): Promise<ProjectStorage> {
+  return invoke<ProjectStorage>('get_project_storage');
+}
+
+export async function createManagedProject(name: string): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>('create_managed_project', { name });
+}
+
+export async function importProjectArchive(path: string): Promise<ProjectInfo> {
+  return invoke<ProjectInfo>('import_project_archive', { path });
+}
+
 /** Initialize a new WebGAL project at baseDir/name/. */
 export async function initProject(baseDir: string, name: string): Promise<ProjectInfo> {
   return invoke<ProjectInfo>('init_project', { baseDir, name });
