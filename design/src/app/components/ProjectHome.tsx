@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type * as React from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowRight,
-  AlertCircle,
   BookOpen,
   Clock,
   Edit,
@@ -23,12 +22,8 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { isTauri } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import {
-  createManagedProject, getProjectStorage, importProjectArchive, initProject, openProject,
-  type ProjectInfo, type ProjectStorage,
-} from '../lib/webgal-ipc';
+import { initProject, openProject, type ProjectInfo } from '../lib/webgal-ipc';
 import { saveProjectMemory } from '../lib/project-memory';
 import { OllaicPanel } from './OllaicChrome';
 
@@ -64,12 +59,7 @@ export function ProjectHome() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [projects, setProjects] = useState<Project[]>(loadProjects);
-  const projectsRef = useRef(projects);
   const [sidebarFilter, setSidebarFilter] = useState<'all' | 'favorites' | 'recent' | 'trash'>('all');
-  const [storage, setStorage] = useState<ProjectStorage | null>(() => isTauri() ? null : { managed: false });
-  const [homeError, setHomeError] = useState('');
-  const [isOpening, setIsOpening] = useState(false);
-  const managedStorage = storage?.managed ?? false;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
@@ -82,31 +72,9 @@ export function ProjectHome() {
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
 
-  const updateProjects = useCallback((update: (current: Project[]) => Project[]) => {
-    const updated = update(projectsRef.current);
-    // Persist before navigation can unmount the homepage.
-    persistProjects(updated);
-    projectsRef.current = updated;
-    setProjects(updated);
-  }, []);
-
-  const rememberProject = useCallback((project: Project) => {
-    localStorage.setItem(`project-path-${project.id}`, project.path);
-    updateProjects((current) => [project, ...current.filter((p) => p.id !== project.id)]);
-  }, [updateProjects]);
-
-  const loadStorage = useCallback(async () => {
-    setHomeError('');
-    try {
-      setStorage(await getProjectStorage());
-    } catch (e) {
-      setHomeError(`无法初始化项目存储: ${e}`);
-    }
-  }, []);
-
   useEffect(() => {
-    if (isTauri()) void loadStorage();
-  }, [loadStorage]);
+    persistProjects(projects);
+  }, [projects]);
 
   useEffect(() => {
     for (const p of projects) localStorage.setItem(`project-path-${p.id}`, p.path);
@@ -180,7 +148,7 @@ export function ProjectHome() {
 
   const handleSaveEdit = () => {
     if (!editingProject) return;
-    updateProjects((prev) => prev.map((p) =>
+    setProjects((prev) => prev.map((p) =>
       p.id === editingProject.id
         ? { ...p, name: editName.trim() || p.name, description: editDesc.trim() }
         : p,
@@ -189,28 +157,21 @@ export function ProjectHome() {
   };
 
   const handlePickDir = useCallback(async () => {
-    setCreateError('');
-    try {
-      const dir = await openDialog({
-        title: '选择项目存放位置',
-        directory: true,
-      });
-      if (dir) setSelectedDir(dir);
-    } catch (e) {
-      setCreateError(`无法选择文件夹: ${e}`);
-    }
+    const dir = await openDialog({
+      title: '选择项目存放位置',
+      directory: true,
+    });
+    if (dir) setSelectedDir(dir);
   }, []);
 
   const handleCreateProject = useCallback(async () => {
     const name = projectName.trim();
-    if (!name || !storage || (!managedStorage && !selectedDir) || isCreating) return;
+    if (!name || !selectedDir) return;
 
     setIsCreating(true);
     setCreateError('');
     try {
-      const info: ProjectInfo = managedStorage
-        ? await createManagedProject(name)
-        : await initProject(selectedDir!, name);
+      const info: ProjectInfo = await initProject(selectedDir, name);
       const desc = projectDesc.trim();
       if (desc) {
         await saveProjectMemory(info.path, {
@@ -229,7 +190,8 @@ export function ProjectHome() {
         isFavorite: false,
         sceneCount: info.scenes.length,
       };
-      rememberProject(newProject);
+      setProjects((prev) => [newProject, ...prev]);
+      localStorage.setItem(`project-path-${newProject.id}`, newProject.path);
       setIsModalOpen(false);
       navigate(`/editor/${newProject.id}?agent=workflow`);
     } catch (e) {
@@ -237,97 +199,61 @@ export function ProjectHome() {
     } finally {
       setIsCreating(false);
     }
-  }, [navigate, projectDesc, projectName, selectedDir, managedStorage, storage, isCreating, rememberProject]);
+  }, [navigate, projectDesc, projectName, selectedDir]);
 
   const handleOpenProject = useCallback(async () => {
-    if (!storage || isOpening) return;
-    const projectsBeforeOpen = projectsRef.current;
-    setIsOpening(true);
-    setHomeError('');
+    const dir = await openDialog({
+      title: '打开 WebGAL 项目文件夹',
+      directory: true,
+    });
+    if (!dir) return;
+
     try {
-      const selected = await openDialog(managedStorage ? {
-        title: '导入 WebGAL 项目 ZIP',
-        filters: [{ name: 'WebGAL 项目 ZIP', extensions: ['zip'] }],
-      } : {
-        title: '打开 WebGAL 项目文件夹',
-        directory: true,
-      });
-      if (!selected) return;
-      const info = managedStorage
-        ? await importProjectArchive(selected)
-        : await openProject(selected);
-      const existing = projectsRef.current.find((p) => p.path === info.path);
-      const previous = projectsBeforeOpen.find((p) => p.path === info.path);
-      // Opening a trashed project is intentional; a later deletion cancels the open.
-      if (previous && (!existing || (existing.deleted && existing !== previous))) return;
+      const info: ProjectInfo = await openProject(dir);
+      const existing = projects.find((p) => p.path === dir);
       if (existing) {
-        rememberProject({
-          ...existing, deleted: false, sceneCount: info.scenes.length, lastModified: new Date().toLocaleString(),
-        });
+        localStorage.setItem(`project-path-${existing.id}`, existing.path);
         navigate(`/editor/${existing.id}`);
         return;
       }
       const newProject: Project = {
         id: Date.now().toString(),
-        name: info.config.Game_name || info.path.split('/').pop() || '未命名项目',
+        name: info.config.Game_name || dir.split('/').pop() || '未命名项目',
         description: `${info.scenes.length} 个场景`,
         lastModified: new Date().toLocaleString(),
-        path: info.path,
+        path: dir,
         isFavorite: false,
         sceneCount: info.scenes.length,
       };
-      rememberProject(newProject);
+      setProjects((prev) => [newProject, ...prev]);
+      localStorage.setItem(`project-path-${newProject.id}`, newProject.path);
       navigate(`/editor/${newProject.id}?agent=workflow`);
     } catch (e) {
-      setHomeError(`无法${managedStorage ? '导入' : '打开'}项目: ${e}`);
-    } finally {
-      setIsOpening(false);
+      alert(`无法打开项目: ${e}`);
     }
-  }, [navigate, storage, managedStorage, isOpening, rememberProject]);
-
-  const handleOpenSavedProject = useCallback(async (project: Project) => {
-    if (project.deleted || isOpening) return;
-    setIsOpening(true);
-    setHomeError('');
-    try {
-      const info = await openProject(project.path);
-      const current = projectsRef.current.find((p) => p.id === project.id);
-      if (!current || current.deleted) return;
-      const updated = {
-        ...current,
-        sceneCount: info.scenes.length,
-        lastModified: new Date().toLocaleString(),
-      };
-      rememberProject(updated);
-      navigate(`/editor/${project.id}`);
-    } catch (e) {
-      setHomeError(`无法打开「${project.name}」: ${e}`);
-    } finally {
-      setIsOpening(false);
-    }
-  }, [isOpening, navigate, rememberProject]);
+  }, [navigate, projects]);
 
   const toggleFavorite = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    updateProjects((prev) => prev.map((p) => p.id === id ? { ...p, isFavorite: !p.isFavorite } : p));
+    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, isFavorite: !p.isFavorite } : p));
   };
 
   const deleteProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm('移入回收站？（不会删除磁盘上的文件）')) {
-      updateProjects((prev) => prev.map((p) => p.id === id ? { ...p, deleted: true } : p));
+      setProjects((prev) => prev.map((p) => p.id === id ? { ...p, deleted: true } : p));
     }
   };
 
   const restoreProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    updateProjects((prev) => prev.map((p) => p.id === id ? { ...p, deleted: false } : p));
+    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, deleted: false } : p));
   };
 
   const permanentlyDeleteProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (confirm('确定永久移除此项目？不会删除磁盘上的文件。')) {
-      updateProjects((prev) => prev.filter((p) => p.id !== id));
+      setProjects((prev) => prev.filter((p) => p.id !== id));
       localStorage.removeItem(`project-path-${id}`);
     }
   };
@@ -354,7 +280,7 @@ export function ProjectHome() {
   );
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-surface-container-lowest text-foreground">
+    <div className="h-full flex flex-col bg-surface-container-lowest text-foreground">
       {/* Home header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface-bright px-4">
         <div className="flex items-center gap-3">
@@ -367,13 +293,13 @@ export function ProjectHome() {
           <span className="hidden font-mono-family text-[10px] font-semibold uppercase tracking-widest text-muted-foreground sm:inline">工作台</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative">
+          <div className="relative hidden sm:block">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-40 rounded border border-border bg-input-background py-1.5 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 sm:w-64"
+              className="w-64 rounded border border-border bg-input-background py-1.5 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
               placeholder="搜索项目..."
               aria-label="搜索项目"
             />
@@ -381,61 +307,49 @@ export function ProjectHome() {
         </div>
       </header>
 
-      <main className="ollaic-blueprint min-h-0 flex-1 overflow-y-auto bg-surface-container-low p-3 sm:overflow-hidden sm:p-4">
-        <div className="mx-auto flex min-h-full max-w-7xl flex-col gap-4 pt-2 sm:h-full sm:min-h-0 sm:gap-5">
+      <main className="ollaic-blueprint min-h-0 flex-1 overflow-hidden bg-surface-container-low p-4">
+        <div className="mx-auto flex h-full max-w-7xl flex-col gap-5 pt-2">
           {/* Greeting */}
           <div className="relative shrink-0">
             <div className="mb-2 inline-flex items-center gap-2 rounded border border-border/60 bg-surface-container-lowest/80 px-2.5 py-1 font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant backdrop-blur">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-tertiary animate-pulse" />
               {greeting.tag}
             </div>
-            <h1 className="font-display-family text-2xl font-semibold text-foreground sm:text-3xl">{greeting.title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">今天想创造怎样的世界？</p>
+            <h1 className="font-display-family text-3xl font-semibold tracking-tight text-foreground">{greeting.title}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Ollaic 2.0 准备就绪，今天想创造怎样的世界？</p>
           </div>
 
-          {homeError && (
-            <div role="alert" className="flex shrink-0 items-start gap-2 rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span className="min-w-0 flex-1 break-words">{homeError}</span>
-              {!storage && <button type="button" onClick={loadStorage} className="shrink-0 underline">重试</button>}
-              <button type="button" onClick={() => setHomeError('')} aria-label="关闭错误提示" className="shrink-0 p-1"><X className="h-4 w-4" /></button>
-            </div>
-          )}
-
           {/* Quick actions */}
-          <div className="grid shrink-0 grid-cols-2 gap-3 sm:gap-4">
+          <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
             <button
               type="button"
               onClick={openCreateDialog}
-              disabled={!storage || isOpening}
-              className="ollaic-hard-shadow ollaic-chamfer-tr group relative flex min-w-0 flex-col items-start gap-3 overflow-hidden border border-l-4 border-border border-l-primary bg-surface-container-lowest p-4 text-left transition-all hover:bg-surface-container disabled:opacity-50 sm:flex-row sm:items-center sm:gap-4 sm:p-5"
+              className="ollaic-hard-shadow ollaic-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-primary bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
             >
               <div className="ollaic-dot-grid pointer-events-none absolute inset-0 opacity-40" />
               <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary transition-transform group-hover:scale-110">
                 <Plus className="h-6 w-6" />
               </div>
               <div className="relative min-w-0">
-                <div className="text-base font-semibold sm:text-lg">新建项目</div>
-                <div className="text-xs text-muted-foreground sm:text-sm">从零开始构建剧本</div>
+                <div className="text-lg font-semibold">新建项目</div>
+                <div className="text-sm text-muted-foreground">从零开始构建剧本</div>
               </div>
-              <ArrowRight className="relative ml-auto hidden h-5 w-5 shrink-0 text-muted-foreground transition-all group-hover:translate-x-1 sm:block" />
+              <ArrowRight className="relative ml-auto h-5 w-5 shrink-0 text-muted-foreground opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100" />
             </button>
             <button
               type="button"
               onClick={handleOpenProject}
-              disabled={!storage || isOpening}
-              aria-busy={isOpening}
-              className="ollaic-hard-shadow ollaic-chamfer-tr group relative flex min-w-0 flex-col items-start gap-3 overflow-hidden border border-l-4 border-border border-l-accent bg-surface-container-lowest p-4 text-left transition-all hover:bg-surface-container disabled:opacity-50 sm:flex-row sm:items-center sm:gap-4 sm:p-5"
+              className="ollaic-hard-shadow ollaic-chamfer-tr group relative flex items-center gap-4 overflow-hidden border border-l-4 border-border border-l-accent bg-surface-container-lowest p-5 text-left transition-all hover:-translate-y-0.5 hover:bg-surface-container"
             >
               <div className="ollaic-dot-grid pointer-events-none absolute inset-0 opacity-40" />
               <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-secondary/10 text-secondary transition-transform group-hover:scale-110">
-                {isOpening ? <Loader2 className="h-6 w-6 animate-spin" /> : <FileDown className="h-6 w-6" />}
+                <FileDown className="h-6 w-6" />
               </div>
               <div className="relative min-w-0">
-                <div className="text-base font-semibold sm:text-lg">{isOpening ? '正在打开...' : managedStorage ? '导入项目' : '打开已有项目'}</div>
-                <div className="text-xs text-muted-foreground sm:text-sm">{managedStorage ? 'WebGAL 项目 ZIP' : '导入已有 WebGAL 工程'}</div>
+                <div className="text-lg font-semibold">打开已有项目</div>
+                <div className="text-sm text-muted-foreground">导入已有 WebGAL 工程</div>
               </div>
-              <ArrowRight className="relative ml-auto hidden h-5 w-5 shrink-0 text-muted-foreground transition-all group-hover:translate-x-1 sm:block" />
+              <ArrowRight className="relative ml-auto h-5 w-5 shrink-0 text-muted-foreground opacity-0 transition-all group-hover:translate-x-1 group-hover:opacity-100" />
             </button>
           </div>
 
@@ -443,7 +357,7 @@ export function ProjectHome() {
           <OllaicPanel
             title="项目库"
             icon={Folder}
-            className="flex min-h-[320px] flex-1 flex-col sm:min-h-0"
+            className="flex min-h-0 flex-1 flex-col"
             action={(
               <div className="flex items-center gap-1 rounded border border-border bg-surface-container px-1 py-0.5">
                 <button
@@ -557,11 +471,11 @@ export function ProjectHome() {
                           <p className="text-sm font-medium">还没有项目</p>
                           <p className="mt-1 text-xs text-muted-foreground/60">创建新项目或打开已有的 WebGAL 项目开始</p>
                           <div className="mt-4 flex gap-2">
-                            <button type="button" onClick={handleOpenProject} disabled={!storage || isOpening} className="rounded border border-border bg-surface-container px-3 py-2.5 text-xs hover:bg-surface-container-high disabled:opacity-50">
+                            <button type="button" onClick={handleOpenProject} className="rounded border border-border bg-surface-container px-3 py-1.5 text-xs hover:bg-surface-container-high">
                               <FolderOpen className="mr-1 inline h-3 w-3" />
-                              {managedStorage ? '导入项目' : '打开项目'}
+                              打开项目
                             </button>
-                            <button type="button" onClick={openCreateDialog} disabled={!storage || isOpening} className="rounded bg-primary px-3 py-2.5 text-xs text-primary-foreground disabled:opacity-50">
+                            <button type="button" onClick={openCreateDialog} className="rounded bg-primary px-3 py-1.5 text-xs text-primary-foreground">
                               <Plus className="mr-1 inline h-3 w-3" />
                               创建新项目
                             </button>
@@ -576,9 +490,8 @@ export function ProjectHome() {
                       <ProjectRecord
                         key={project.id}
                         project={project}
-                        managedStorage={managedStorage}
                         deletedView={sidebarFilter === 'trash'}
-                        onOpen={() => void handleOpenSavedProject(project)}
+                        onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
                         onFavorite={toggleFavorite}
                         onEdit={openEditDialog}
                         onDelete={deleteProject}
@@ -593,9 +506,8 @@ export function ProjectHome() {
                       <ProjectRow
                         key={project.id}
                         project={project}
-                        managedStorage={managedStorage}
                         deletedView={sidebarFilter === 'trash'}
-                        onOpen={() => void handleOpenSavedProject(project)}
+                        onOpen={() => !project.deleted && navigate(`/editor/${project.id}`)}
                         onFavorite={toggleFavorite}
                         onEdit={openEditDialog}
                         onDelete={deleteProject}
@@ -617,7 +529,6 @@ export function ProjectHome() {
           projectName={projectName}
           projectDesc={projectDesc}
           selectedDir={selectedDir}
-          managedStorage={managedStorage}
           isCreating={isCreating}
           createError={createError}
           onClose={() => !isCreating && setIsModalOpen(false)}
@@ -631,7 +542,6 @@ export function ProjectHome() {
       {editingProject && (
         <EditProjectDialog
           project={editingProject}
-          managedStorage={managedStorage}
           editName={editName}
           editDesc={editDesc}
           onClose={() => setEditingProject(null)}
@@ -646,7 +556,6 @@ export function ProjectHome() {
 
 interface ProjectRecordProps {
   project: Project;
-  managedStorage: boolean;
   deletedView: boolean;
   onOpen: () => void;
   onFavorite: (id: string, e: React.MouseEvent) => void;
@@ -658,7 +567,6 @@ interface ProjectRecordProps {
 
 function ProjectRecord({
   project,
-  managedStorage,
   deletedView,
   onOpen,
   onFavorite,
@@ -673,7 +581,6 @@ function ProjectRecord({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen();
@@ -696,7 +603,7 @@ function ProjectRecord({
             {project.sceneCount} 场景
           </div>
         </div>
-        <div className="absolute right-3 top-3 flex gap-1 opacity-100 transition-opacity group-focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 [@media(hover:none)]:opacity-100 [&_button]:flex [&_button]:min-h-10 [&_button]:min-w-10 [&_button]:items-center [&_button]:justify-center">
+        <div className="absolute right-3 top-3 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           {deletedView ? (
             <>
               <button type="button" onClick={(e) => onRestore(project.id, e)} className="rounded bg-background/80 p-1.5 text-tertiary" aria-label="还原项目">
@@ -726,7 +633,7 @@ function ProjectRecord({
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{project.description}</p>
         <div className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-2 font-mono-family text-[10px] text-muted-foreground">
           <MapPin className="h-3 w-3 shrink-0 opacity-60" />
-          <span className="truncate">{managedStorage ? '应用内项目' : project.path}</span>
+          <span className="truncate">{project.path}</span>
         </div>
       </div>
     </div>
@@ -734,20 +641,19 @@ function ProjectRecord({
 }
 
 function ProjectRow(props: ProjectRecordProps) {
-  const { project, managedStorage, deletedView, onOpen, onFavorite, onEdit, onDelete, onRestore, onPermanentDelete } = props;
+  const { project, deletedView, onOpen, onFavorite, onEdit, onDelete, onRestore, onPermanentDelete } = props;
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onOpen();
         }
       }}
-      className={`ollaic-interactive group flex w-full cursor-pointer flex-wrap items-center gap-3 rounded border border-border bg-surface-container-lowest p-3 text-left hover:border-primary/40 sm:flex-nowrap sm:gap-4 ${project.deleted ? 'opacity-70' : ''}`}
+      className={`ollaic-interactive group flex w-full cursor-pointer items-center gap-4 rounded border border-border bg-surface-container-lowest p-3 text-left hover:border-primary/40 ${project.deleted ? 'opacity-70' : ''}`}
     >
       <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-secondary/30 to-surface-container">
         <BookOpen className="h-5 w-5 text-muted-foreground opacity-20" />
@@ -758,13 +664,13 @@ function ProjectRow(props: ProjectRecordProps) {
           {project.isFavorite && <Star className="h-4 w-4 fill-current text-primary" />}
         </div>
         <div className="truncate text-sm text-muted-foreground">{project.description}</div>
-        <div className="truncate text-[10px] text-muted-foreground">{managedStorage ? '应用内项目' : project.path}</div>
+        <div className="truncate text-[10px] text-muted-foreground">{project.path}</div>
       </div>
       <div className="hidden text-right text-xs text-muted-foreground md:block">
         <div>{project.sceneCount} 场景</div>
         <div>{project.lastModified}</div>
       </div>
-      <div className="flex basis-full justify-end gap-1 opacity-100 transition-opacity group-focus-within:opacity-100 sm:basis-auto sm:opacity-0 sm:group-hover:opacity-100 [@media(hover:none)]:opacity-100 [&_button]:flex [&_button]:min-h-10 [&_button]:min-w-10 [&_button]:items-center [&_button]:justify-center">
+      <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         {deletedView ? (
           <>
             <button type="button" onClick={(e) => onRestore(project.id, e)} className="rounded p-1.5 text-tertiary hover:bg-tertiary/10" aria-label="还原项目"><Edit className="h-4 w-4" /></button>
@@ -786,7 +692,6 @@ interface ProjectModalProps {
   projectName: string;
   projectDesc: string;
   selectedDir: string | null;
-  managedStorage: boolean;
   isCreating: boolean;
   createError: string;
   onClose: () => void;
@@ -801,7 +706,6 @@ function ProjectModal(props: ProjectModalProps) {
     projectName,
     projectDesc,
     selectedDir,
-    managedStorage,
     isCreating,
     createError,
     onClose,
@@ -812,15 +716,16 @@ function ProjectModal(props: ProjectModalProps) {
   } = props;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 p-3 backdrop-blur-md sm:p-4" role="dialog" aria-modal="true" aria-labelledby="create-project-title">
-      <div className="ollaic-panel max-h-full w-full max-w-lg overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md">
+      <div className="ollaic-panel w-full max-w-lg">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="ollaic-chamfer-tr rounded bg-primary/15 p-2 text-primary">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <h2 id="create-project-title" className="text-xl font-semibold">创建新项目</h2>
+              <h2 className="text-xl font-semibold">创建新项目</h2>
+              <p className="text-sm text-muted-foreground">创建标准 WebGAL 项目目录结构</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high" aria-label="关闭">
@@ -830,9 +735,8 @@ function ProjectModal(props: ProjectModalProps) {
 
         <div className="space-y-4 p-6">
           <div>
-            <label htmlFor="project-name" className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">项目名称</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">项目名称</label>
             <input
-              id="project-name"
               type="text"
               autoFocus
               value={projectName}
@@ -842,21 +746,15 @@ function ProjectModal(props: ProjectModalProps) {
             />
           </div>
           <div>
-            <label htmlFor="project-description" className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">故事简介</label>
+            <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">故事简介</label>
             <textarea
-              id="project-description"
               value={projectDesc}
               onChange={(e) => onDescChange(e.target.value)}
               className="h-20 w-full resize-none rounded border border-border bg-input-background px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
               placeholder="描述故事背景、世界观或主要人物关系..."
             />
           </div>
-          {managedStorage ? (
-            <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
-              <span className="text-muted-foreground">存储位置</span>
-              <span className="flex items-center gap-2"><Folder className="h-4 w-4 text-primary" />应用内项目库</span>
-            </div>
-          ) : <div>
+          <div>
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">存放位置</label>
             <div className="flex gap-2">
               <div className="min-w-0 flex-1 truncate rounded border border-border bg-surface-container-low px-3 py-2 text-sm text-muted-foreground">
@@ -871,12 +769,12 @@ function ProjectModal(props: ProjectModalProps) {
                 将创建: {selectedDir}/{projectName || '...'}/game/
               </p>
             )}
-          </div>}
-          {createError && <div role="alert" className="break-words rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{createError}</div>}
+          </div>
+          {createError && <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{createError}</div>}
           <button
             type="button"
             onClick={onCreate}
-            disabled={!projectName.trim() || (!managedStorage && !selectedDir) || isCreating}
+            disabled={!projectName.trim() || !selectedDir || isCreating}
             className="ollaic-chamfer-tr flex w-full items-center justify-center gap-2 rounded bg-primary py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -890,7 +788,6 @@ function ProjectModal(props: ProjectModalProps) {
 
 interface EditProjectDialogProps {
   project: Project;
-  managedStorage: boolean;
   editName: string;
   editDesc: string;
   onClose: () => void;
@@ -901,7 +798,6 @@ interface EditProjectDialogProps {
 
 function EditProjectDialog({
   project,
-  managedStorage,
   editName,
   editDesc,
   onClose,
@@ -910,8 +806,8 @@ function EditProjectDialog({
   onSave,
 }: EditProjectDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur-md" onClick={onClose}>
-      <div className="ollaic-panel max-h-full w-full max-w-md overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-md" onClick={onClose}>
+      <div className="ollaic-panel w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-base font-semibold">编辑项目信息</h2>
           <button type="button" onClick={onClose} className="rounded p-1.5 text-muted-foreground hover:bg-surface-container-high" aria-label="关闭">
@@ -943,7 +839,7 @@ function EditProjectDialog({
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-muted-foreground">存放位置</label>
             <div className="flex items-center gap-2 rounded border border-border/60 bg-surface-container-low px-3 py-2">
               <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate text-xs text-muted-foreground">{managedStorage ? '应用内项目库' : project.path}</span>
+              <span className="truncate text-xs text-muted-foreground">{project.path}</span>
             </div>
           </div>
         </div>
