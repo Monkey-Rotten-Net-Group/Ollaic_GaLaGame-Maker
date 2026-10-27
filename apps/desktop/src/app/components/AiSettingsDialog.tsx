@@ -55,7 +55,7 @@ function configFromOption(option: ProviderOption): AiProviderConfig {
  * A provider that the backend dropped falls back to the first option rather
  * than leaving the picker showing a value that is not in its list.
  */
-function normalizeConfig(
+export function normalizeConfig(
   config: AiProviderConfig,
   options: ProviderOption[],
   singleModel = false,
@@ -440,7 +440,7 @@ function TabButton({
   );
 }
 
-function ProviderConfigPanel({
+export function ProviderConfigPanel({
   title,
   config,
   options,
@@ -552,7 +552,7 @@ function ModelSelectField({
   );
 }
 
-function ConfigFields({
+export function ConfigFields({
   config,
   options,
   multiModel = false,
@@ -779,7 +779,7 @@ function ModelTagPicker({
   );
 }
 
-function ConnectionPanel({
+export function ConnectionPanel({
   verifying,
   validation,
   verifiedSaved,
@@ -829,7 +829,7 @@ function ConnectionPanel({
   );
 }
 
-function LogsPanel({
+export function LogsPanel({
   logs,
   logPath,
   logsLoading,

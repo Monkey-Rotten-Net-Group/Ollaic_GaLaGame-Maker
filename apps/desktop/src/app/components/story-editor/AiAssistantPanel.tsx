@@ -1,8 +1,16 @@
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowUp, Brain, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
+  Bot, Check, ChevronDown, Sliders,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
+import {
+  getAiConfig,
+  setAiConfig,
+  listAiProviders,
+  type AiConfig,
+  type ProviderCatalog,
+} from '../../lib/ai-ipc';
 import { useAiAgent } from '../../hooks/useAiAgent';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
@@ -105,6 +113,46 @@ export function AiAssistantPanel({
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [chatConfig, setChatConfig] = useState<AiConfig | null>(null);
+  const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getAiConfig(), listAiProviders()])
+      .then(([config, providers]) => {
+        if (active) {
+          setChatConfig(config);
+          setCatalog(providers);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currentProvider = chatConfig?.provider ?? '';
+  const currentModel = chatConfig?.model ?? '';
+  const activeProviderOption = catalog?.chat.find((p) => p.value === currentProvider);
+  const availableModels = activeProviderOption?.models?.length
+    ? activeProviderOption.models
+    : activeProviderOption?.defaultModel
+      ? [activeProviderOption.defaultModel]
+      : currentModel
+        ? [currentModel]
+        : [];
+
+  const handleSwitchModel = async (model: string) => {
+    if (!chatConfig) return;
+    const updated = { ...chatConfig, model };
+    setChatConfig(updated);
+    try {
+      await setAiConfig(updated);
+    } catch (e) {
+      console.error('Failed to update AI model:', e);
+    }
+  };
+
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
   const statusText = aiAgent.busy
     ? '生成中'
@@ -134,6 +182,52 @@ export function AiAssistantPanel({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {/* Quick Model Selector in Chat Header */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={aiAgent.busy || aiAgent.committing}
+                className="flex items-center gap-1 rounded-full border border-border bg-surface-container-low px-2 py-0.5 text-[10.5px] font-mono-family text-muted-foreground hover:bg-surface-container hover:text-foreground transition-colors disabled:opacity-40"
+                title={`当前对话模型: ${currentModel || '默认'}`}
+                aria-label="切换对话模型"
+              >
+                <Bot className="h-3 w-3 text-primary" />
+                <span className="max-w-[75px] truncate">{currentModel || '模型'}</span>
+                <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-xs">
+                当前供应商: {activeProviderOption?.label || currentProvider || '默认'}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {availableModels.length > 0 ? (
+                availableModels.map((m) => (
+                  <DropdownMenuItem
+                    key={m}
+                    onClick={() => handleSwitchModel(m)}
+                    className={`flex items-center justify-between text-xs cursor-pointer ${
+                      m === currentModel ? 'font-bold text-primary bg-primary/10' : ''
+                    }`}
+                  >
+                    <span className="truncate">{m}</span>
+                    {m === currentModel && <Check className="h-3.5 w-3.5 ml-1 text-primary shrink-0" />}
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <div className="px-2 py-1 text-xs text-muted-foreground">暂无可切换的预设模型</div>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={onOpenSettings}
+                className="text-xs text-primary cursor-pointer"
+              >
+                <Sliders className="h-3.5 w-3.5 mr-1.5" />
+                <span>配置更多服务商与模型…</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button type="button" onClick={onOpenMemory} disabled={!projectPath || aiAgent.committing} className="ollaic-icon-button h-7 w-7 disabled:opacity-40" aria-label="管理项目记忆" title="项目记忆"><Brain className="h-4 w-4" /></button>
           <button
             type="button"
