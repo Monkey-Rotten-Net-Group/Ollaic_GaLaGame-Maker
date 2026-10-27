@@ -122,8 +122,11 @@ export async function getAiConfig(): Promise<AiConfig> {
   return invoke<AiConfig>('get_ai_config');
 }
 
+export const AI_CHAT_CONFIG_CHANGED_EVENT = 'ollaic:chat-config-changed';
+
 export async function setAiConfig(config: AiConfig): Promise<void> {
-  return invoke<void>('set_ai_config', { config });
+  await invoke<void>('set_ai_config', { config });
+  window.dispatchEvent(new Event(AI_CHAT_CONFIG_CHANGED_EVENT));
 }
 
 /// Resolved Provider capability for the saved (or supplied) AI config. Single

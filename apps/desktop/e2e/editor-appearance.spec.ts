@@ -197,7 +197,9 @@ test('settings stay inside narrow and short windows', async ({ page }, testInfo)
     };
   });
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  const appSettings = page.getByRole('heading', { name: '编辑器设置' }).locator('..').locator('..');
+  const appSettings = page.locator('div.bg-card').filter({
+    has: page.getByRole('heading', { name: '编辑器设置', exact: true }),
+  });
   const expectFits = async (panel: typeof appSettings) => {
     const bounds = await panel.boundingBox();
     if (!bounds) throw new Error('Settings panel is not visible');
@@ -212,8 +214,11 @@ test('settings stay inside narrow and short windows', async ({ page }, testInfo)
   await expectFits(appSettings);
   await expect(appSettings.getByRole('button', { name: '保存', exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('app-settings-narrow.png') });
-  await page.getByRole('button', { name: '打开 AI 设置' }).click();
-  const aiSettings = page.getByRole('heading', { name: 'AI 设置' }).locator('..').locator('..');
+  await appSettings.getByRole('button', { name: '常规工程', exact: true }).click();
+  await appSettings.getByRole('button', { name: '打开 AI 设置' }).click();
+  const aiSettings = page.locator('div.bg-card').filter({
+    has: page.getByRole('heading', { name: 'AI 设置', exact: true }),
+  });
   await expect(aiSettings.getByRole('button', { name: '测试连接' })).toBeVisible();
   await expectFits(aiSettings);
   await expect(aiSettings.getByRole('button', { name: '保存 AI 配置' })).toBeInViewport();

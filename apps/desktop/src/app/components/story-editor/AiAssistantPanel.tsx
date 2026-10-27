@@ -4,13 +4,7 @@ import {
   Bot, Check, ChevronDown, Sliders,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
-import {
-  getAiConfig,
-  setAiConfig,
-  listAiProviders,
-  type AiConfig,
-  type ProviderCatalog,
-} from '../../lib/ai-ipc';
+import { useChatModelSelection } from '../../hooks/useChatModelSelection';
 import { useAiAgent } from '../../hooks/useAiAgent';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
@@ -119,23 +113,8 @@ export function AiAssistantPanel({
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
-  const [chatConfig, setChatConfig] = useState<AiConfig | null>(null);
-  const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    Promise.all([getAiConfig(), listAiProviders()])
-      .then(([config, providers]) => {
-        if (active) {
-          setChatConfig(config);
-          setCatalog(providers);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
+  const modelSelection = useChatModelSelection();
+  const { config: chatConfig, catalog } = modelSelection;
 
   const currentProvider = chatConfig?.provider ?? '';
   const currentModel = chatConfig?.model ?? '';
@@ -147,17 +126,6 @@ export function AiAssistantPanel({
       : currentModel
         ? [currentModel]
         : [];
-
-  const handleSwitchModel = async (model: string) => {
-    if (!chatConfig) return;
-    const updated = { ...chatConfig, model };
-    setChatConfig(updated);
-    try {
-      await setAiConfig(updated);
-    } catch (e) {
-      console.error('Failed to update AI model:', e);
-    }
-  };
 
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
 
@@ -336,17 +304,23 @@ export function AiAssistantPanel({
             />
           )}
           modelSlot={(
-            <DropdownMenu>
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (open) void modelSelection.refresh();
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  disabled={aiAgent.busy || aiAgent.committing}
+                  disabled={aiAgent.busy || aiAgent.committing || modelSelection.switching}
                   className="flex h-6 items-center gap-1 rounded-full border border-border bg-surface-container-low px-2 text-[11px] font-mono-family text-muted-foreground hover:bg-secondary-container/60 hover:text-foreground transition-colors disabled:opacity-40"
                   title={`当前对话模型: ${currentModel || '默认'}`}
                   aria-label="切换对话模型"
                 >
                   <Bot className="h-3 w-3 text-primary" />
-                  <span className="max-w-[110px] truncate">{currentModel || '选择模型'}</span>
+                  <span className="max-w-[110px] truncate">
+                    {modelSelection.switching ? '切换中…' : currentModel || '选择模型'}
+                  </span>
                   <ChevronDown className="h-2.5 w-2.5 opacity-60" />
                 </button>
               </DropdownMenuTrigger>
@@ -359,7 +333,10 @@ export function AiAssistantPanel({
                   availableModels.map((m) => (
                     <DropdownMenuItem
                       key={m}
-                      onClick={() => handleSwitchModel(m)}
+                      disabled={modelSelection.loading || modelSelection.switching}
+                      onSelect={() => {
+                        void modelSelection.switchModel(m);
+                      }}
                       className={`flex items-center justify-between text-xs cursor-pointer ${
                         m === currentModel ? 'font-bold text-primary bg-primary/10' : ''
                       }`}
@@ -390,6 +367,14 @@ export function AiAssistantPanel({
             />
           )}
         />
+        {modelSelection.error && (
+          <div role="alert" className="mt-2 flex items-center gap-2 text-xs text-destructive">
+            <span>{modelSelection.error}</span>
+            <button type="button" onClick={onOpenSettings} className="shrink-0 underline">
+              打开 AI 设置
+            </button>
+          </div>
+        )}
       </div>
 
       <Dialog open={renameTarget !== null} onOpenChange={(open) => { if (!open) setRenameTarget(null); }}>

@@ -1376,6 +1376,10 @@ export function ProjectHome() {
         open={appSettingsOpen}
         mode="home"
         onClose={() => setAppSettingsOpen(false)}
+        onSaved={(settings) => {
+          setSeedColor(settings.seedColor);
+          setIsDark(settings.theme === 'dark');
+        }}
         onOpenAiSettings={() => {
           setAppSettingsOpen(false);
           setAiSettingsOpen(true);
