@@ -33,6 +33,7 @@ sha2 = "0.10"
 
 [dependencies]
 ollaic-core = { path = "../../../crates/ollaic-core" }
+ollaic-runtime = { path = "../../../crates/ollaic-runtime" }
 clap = { version = "4", features = ["derive"], optional = true }
 sha2 = { version = "0.10", optional = true }
 tauri = { version = "2", features = ["protocol-asset"] }

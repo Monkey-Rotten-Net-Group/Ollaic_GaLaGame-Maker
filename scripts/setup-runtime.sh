@@ -9,9 +9,9 @@
 
 set -euo pipefail
 
-VERSION="${WEBGAL_VERSION:-4.6.0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VERSION="${WEBGAL_VERSION:-$(tr -d '\r\n' < "$REPO_ROOT/crates/ollaic-runtime/webgal-version.txt")}"
 TARGET="$REPO_ROOT/apps/desktop/src-tauri/runtime/WebGAL_Template"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

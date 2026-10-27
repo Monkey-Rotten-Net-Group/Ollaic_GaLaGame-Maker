@@ -2,8 +2,10 @@ use ollaic_core::{archive, assets, document, project};
 use std::path::Path;
 mod catalog;
 mod editor;
+mod preview;
 pub use catalog::*;
 pub use editor::*;
+pub use preview::*;
 
 uniffi::setup_scaffolding!();
 
