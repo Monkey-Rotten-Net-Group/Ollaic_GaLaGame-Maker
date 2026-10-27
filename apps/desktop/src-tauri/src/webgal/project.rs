@@ -1,4 +1,8 @@
 use super::references;
+use ollaic_core::project::serialize_config;
+#[cfg(test)]
+use ollaic_core::project::{default_project_config, ensure_appreciation_enabled, parse_config};
+pub use ollaic_core::project::{ProjectInfo, ProjectMetadata};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -6,30 +10,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use zip::write::SimpleFileOptions;
-
-/// WebGAL game/ subdirectory structure.
-const GAME_DIRS: &[&str] = &[
-    "animation",
-    "background",
-    "figure",
-    "scene",
-    "bgm",
-    "vocal",
-    "video",
-    "tex",
-];
-
-/// Metadata about a WebGAL project on disk.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectInfo {
-    /// Absolute path to the project root (parent of game/).
-    pub path: String,
-    /// Config values from game/config.txt.
-    pub config: HashMap<String, String>,
-    /// Scene file names found in game/scene/.
-    pub scenes: Vec<String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,18 +20,6 @@ pub struct ProjectMemory {
     pub updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entries: Option<Vec<super::memory::MemoryEntry>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectMetadata {
-    pub synopsis: String,
-    pub description: String,
-    pub cover_path: String,
-    pub tags: Vec<String>,
-    pub version: String,
-    pub release_notes: String,
-    pub last_export_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,58 +47,6 @@ pub struct SnapshotInfo {
 // config.txt helpers
 // ---------------------------------------------------------------------------
 
-fn parse_config(text: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with(';') {
-            continue;
-        }
-        // Format: Key:Value;
-        if let Some(colon) = line.find(':') {
-            let key = line[..colon].trim().to_string();
-            let mut val = line[colon + 1..].trim().to_string();
-            // Strip trailing semicolon
-            if val.ends_with(';') {
-                val.pop();
-            }
-            map.insert(key, val);
-        }
-    }
-    map
-}
-
-fn serialize_config(config: &HashMap<String, String>) -> String {
-    let mut lines: Vec<String> = config
-        .iter()
-        .map(|(k, v)| format!("{}:{};", k, v))
-        .collect();
-    lines.sort(); // deterministic output
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-fn default_project_config(name: &str) -> HashMap<String, String> {
-    let mut config = HashMap::new();
-    config.insert("Game_name".to_string(), name.to_string());
-    config.insert("Game_key".to_string(), format!("{:x}", rand_u64()));
-    config.insert(
-        "Title_img".to_string(),
-        "WebGAL_New_Enter_Image.webp".to_string(),
-    );
-    config.insert("Title_bgm".to_string(), String::new());
-    config.insert("Enable_Appreciation".to_string(), "true".to_string());
-    config
-}
-
-fn ensure_appreciation_enabled(config: &mut HashMap<String, String>) -> bool {
-    if config.contains_key("Enable_Appreciation") {
-        return false;
-    }
-    config.insert("Enable_Appreciation".to_string(), "true".to_string());
-    true
-}
-
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -148,35 +64,15 @@ pub(super) fn init_project_at(
     root: &Path,
     name: &str,
 ) -> Result<ProjectInfo, String> {
+    let info =
+        ollaic_core::project::initialize_at(root, name).map_err(|error| error.to_string())?;
     let game = root.join("game");
-
-    // Create all subdirectories
-    for dir in GAME_DIRS {
-        fs::create_dir_all(game.join(dir))
-            .map_err(|e| format!("Failed to create {}: {}", dir, e))?;
-    }
-
-    // Write default config.txt
-    let config = default_project_config(name);
-
-    let config_path = game.join("config.txt");
-    fs::write(&config_path, serialize_config(&config))
-        .map_err(|e| format!("Failed to write config.txt: {}", e))?;
-
-    // Write default start.txt
-    let start_path = game.join("scene").join("start.txt");
-    fs::write(&start_path, "; 在这里开始你的故事\n")
-        .map_err(|e| format!("Failed to write start.txt: {}", e))?;
 
     app.asset_protocol_scope()
         .allow_directory(&game, true)
         .map_err(|e| format!("Failed to allow asset directory {}: {}", game.display(), e))?;
 
-    Ok(ProjectInfo {
-        path: root.to_string_lossy().to_string(),
-        config,
-        scenes: vec!["start.txt".to_string()],
-    })
+    Ok(info)
 }
 
 /// Open an existing WebGAL project by its root directory path.
@@ -185,41 +81,13 @@ pub(super) fn init_project_at(
 pub fn open_project(app: AppHandle, path: String) -> Result<ProjectInfo, String> {
     let root = PathBuf::from(&path);
     let game = root.join("game");
-
-    if !game.is_dir() {
-        return Err(format!(
-            "Not a valid WebGAL project: {}/game/ not found",
-            root.display()
-        ));
-    }
-
-    // Read config
-    let config_path = game.join("config.txt");
-    let config = if config_path.exists() {
-        let text = fs::read_to_string(&config_path)
-            .map_err(|e| format!("Failed to read config.txt: {}", e))?;
-        let mut config = parse_config(&text);
-        if ensure_appreciation_enabled(&mut config) {
-            fs::write(&config_path, serialize_config(&config))
-                .map_err(|e| format!("Failed to update config.txt: {}", e))?;
-        }
-        config
-    } else {
-        HashMap::new()
-    };
-
-    // List scenes
-    let scenes = list_txt_files(&game.join("scene"))?;
+    let info = ollaic_core::project::open_project(&root).map_err(|error| error.to_string())?;
 
     app.asset_protocol_scope()
         .allow_directory(&game, true)
         .map_err(|e| format!("Failed to allow asset directory {}: {}", game.display(), e))?;
 
-    Ok(ProjectInfo {
-        path: root.to_string_lossy().to_string(),
-        config,
-        scenes,
-    })
+    Ok(info)
 }
 
 /// Update config.txt for a project.
@@ -564,15 +432,6 @@ fn list_txt_files(dir: &Path) -> Result<Vec<String>, String> {
     }
     files.sort();
     Ok(files)
-}
-
-/// Simple deterministic-enough u64 for game keys.
-fn rand_u64() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    d.as_nanos() as u64
 }
 
 // ---------------------------------------------------------------------------
@@ -1689,6 +1548,39 @@ mod tests {
     use super::*;
     use crate::story_plan::{ChapterPlan, StoryPlan};
     use std::fs;
+
+    #[test]
+    fn native_metadata_is_readable_by_desktop_commands() {
+        let root = std::env::temp_dir().join(format!(
+            "ollaic-native-metadata-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        ollaic_core::project::create_project(&root, "Native project").unwrap();
+        ollaic_core::project::update_metadata(&root, "Native project", "Native synopsis").unwrap();
+        let metadata = read_project_metadata(root.to_string_lossy().into_owned())
+            .unwrap()
+            .unwrap();
+        assert_eq!(metadata.synopsis, "Native synopsis");
+        assert_eq!(metadata.description, "");
+        assert!(metadata.tags.is_empty());
+        assert_eq!(metadata.last_export_dir, "");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mobile_round_trip_fixture_uses_valid_desktop_editor_schemas() {
+        let metadata: ProjectMetadata = serde_json::from_str(include_str!(
+            "../../../../../crates/ollaic-core/tests/fixtures/desktop-project/project-metadata.json"
+        ))
+        .unwrap();
+        assert_eq!(metadata.version, "1.0");
+        let plan: StoryPlan = serde_json::from_str(include_str!(
+            "../../../../../crates/ollaic-core/tests/fixtures/desktop-project/story-plan.json"
+        ))
+        .unwrap();
+        crate::story_plan::validate(&plan).unwrap();
+    }
 
     fn save_test_plan(project: &Path, prompt: &str) {
         crate::story_plan::save_plan(project, &StoryPlan::new(prompt)).unwrap();

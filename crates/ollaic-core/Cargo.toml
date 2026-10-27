@@ -1,0 +1,13 @@
+[package]
+name = "ollaic-core"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-independent WebGAL project and script operations"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -1,7 +1,7 @@
 use super::project::{init_project_at, open_project, ProjectInfo};
 use serde::Serialize;
 use std::fs;
-use std::io::{Read, Seek};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,8 +9,6 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
 const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_EXTRACTED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const MAX_ARCHIVE_ENTRIES: usize = 20_000;
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Serialize)]
@@ -109,8 +107,8 @@ pub async fn import_project_archive(app: AppHandle, path: FilePath) -> Result<Pr
         }
         let archive = fs::File::open(&archive_path).map_err(|e| e.to_string())?;
         let extracted = staging.path.join("contents");
-        extract_archive(archive, &extracted)?;
-        let source_root = find_project_root(&extracted)?;
+        extract_archive(archive, &extracted).map_err(|error| error.to_string())?;
+        let source_root = find_project_root(&extracted).map_err(|error| error.to_string())?;
         let mut target = PendingDirectory::new(&parent, "project")?;
         for entry in fs::read_dir(&source_root).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
@@ -125,72 +123,7 @@ pub async fn import_project_archive(app: AppHandle, path: FilePath) -> Result<Pr
     .map_err(|e| format!("Project import failed: {e}"))?
 }
 
-fn extract_archive(reader: impl Read + Seek, destination: &Path) -> Result<(), String> {
-    let mut archive =
-        zip::ZipArchive::new(reader).map_err(|e| format!("Invalid project ZIP archive: {e}"))?;
-    if archive.len() > MAX_ARCHIVE_ENTRIES {
-        return Err("Project archive contains too many files".into());
-    }
-    fs::create_dir_all(destination).map_err(|e| e.to_string())?;
-    let mut total = 0_u64;
-    for index in 0..archive.len() {
-        let entry = archive.by_index(index).map_err(|e| e.to_string())?;
-        let relative = entry
-            .enclosed_name()
-            .ok_or("Project archive contains an unsafe path")?;
-        if entry.name().contains('\\')
-            || entry
-                .unix_mode()
-                .is_some_and(|mode| mode & 0o170000 == 0o120000)
-        {
-            return Err("Project archive contains an unsupported path or symbolic link".into());
-        }
-        if entry.size() > MAX_EXTRACTED_BYTES.saturating_sub(total) {
-            return Err("Extracted project exceeds the 2 GiB limit".into());
-        }
-        let output = destination.join(relative);
-        if entry.is_dir() {
-            fs::create_dir_all(&output).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = output.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&output)
-                .map_err(|e| format!("Failed to extract project file: {e}"))?;
-            total += std::io::copy(&mut entry.take(MAX_EXTRACTED_BYTES - total + 1), &mut file)
-                .map_err(|e| format!("Failed to extract project file: {e}"))?;
-            if total > MAX_EXTRACTED_BYTES {
-                return Err("Extracted project exceeds the 2 GiB limit".into());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn is_project_root(path: &Path) -> bool {
-    path.join("game/config.txt").is_file() && path.join("game/scene").is_dir()
-}
-
-fn find_project_root(extracted: &Path) -> Result<PathBuf, String> {
-    if is_project_root(extracted) {
-        return Ok(extracted.to_owned());
-    }
-    let mut candidates = Vec::new();
-    for entry in fs::read_dir(extracted).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        if is_project_root(&path) {
-            candidates.push(path);
-        }
-    }
-    if candidates.len() == 1 {
-        Ok(candidates.remove(0))
-    } else {
-        Err("ZIP must contain one WebGAL project with game/config.txt and game/scene/".into())
-    }
-}
+use ollaic_core::archive::{extract_archive, find_project_root};
 
 #[cfg(test)]
 mod tests {
