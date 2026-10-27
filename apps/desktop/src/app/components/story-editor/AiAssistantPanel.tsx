@@ -160,17 +160,6 @@ export function AiAssistantPanel({
   };
 
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
-  const statusText = aiAgent.busy
-    ? '生成中'
-    : aiAgent.committing
-      ? '提交中'
-    : aiAgent.status === 'pending'
-      ? '等待确认'
-      : aiAgent.status === 'missing_assets'
-        ? '缺少素材'
-      : aiAgent.status === 'error'
-        ? '需要处理'
-        : '等待输入';
 
   return (
     <aside className={`flex min-h-0 flex-1 flex-col bg-surface-container-lowest ${embedded ? 'w-full' : 'w-80 shrink-0 border-l border-border'}`}>
