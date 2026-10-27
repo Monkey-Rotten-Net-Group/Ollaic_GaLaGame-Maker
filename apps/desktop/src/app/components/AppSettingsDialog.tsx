@@ -50,7 +50,8 @@ import {
 } from './AiSettingsDialog';
 
 export type SeedColor = 'violet' | 'crimson' | 'teal' | 'amber';
-export type SettingsTab = 'appearance' | 'general' | 'ai-chat' | 'ai-image' | 'ai-tts' | 'ai-video';
+export type SettingsTab = 'appearance' | 'general' | 'ai';
+export type AiSubTab = 'chat' | 'image' | 'tts' | 'video';
 
 export interface AppSettings {
   defaultProjectDir: string;
@@ -120,7 +121,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   mode?: 'home' | 'editor';
-  initialTab?: SettingsTab;
+  initialTab?: string;
   onOpenAiSettings?: () => void;
   onApplyRuntimeTemplateDir?: (dir: string) => Promise<void> | void;
 }
@@ -129,11 +130,26 @@ export function AppSettingsDialog({
   open,
   onClose,
   mode = 'editor',
-  initialTab = 'appearance',
+  initialTab,
   onOpenAiSettings,
   onApplyRuntimeTemplateDir,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const resolveInitialTab = (tab?: string): SettingsTab => {
+    if (!tab) return 'appearance';
+    if (tab === 'ai' || tab.startsWith('ai')) return 'ai';
+    if (tab === 'general') return 'general';
+    return 'appearance';
+  };
+
+  const resolveInitialAiSubTab = (tab?: string): AiSubTab => {
+    if (tab === 'ai-image' || tab === 'image') return 'image';
+    if (tab === 'ai-tts' || tab === 'tts') return 'tts';
+    if (tab === 'ai-video' || tab === 'video') return 'video';
+    return 'chat';
+  };
+
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => resolveInitialTab(initialTab));
+  const [aiSubTab, setAiSubTab] = useState<AiSubTab>(() => resolveInitialAiSubTab(initialTab));
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +175,8 @@ export function AppSettingsDialog({
 
   useEffect(() => {
     if (!open) return;
-    setActiveTab(initialTab);
+    setActiveTab(resolveInitialTab(initialTab));
+    setAiSubTab(resolveInitialAiSubTab(initialTab));
     setSettings(loadAppSettings());
     setError(null);
     setRuntimeError(null);
@@ -356,11 +373,8 @@ export function AppSettingsDialog({
 
   const tabs: { id: SettingsTab; label: string; icon: typeof Palette }[] = [
     { id: 'appearance', label: '外观主题', icon: Palette },
-    { id: 'general', label: mode === 'home' ? '常规设置' : '工程目录', icon: Sliders },
-    { id: 'ai-chat', label: 'AI 剧本', icon: MessageSquareText },
-    { id: 'ai-image', label: 'AI 绘图', icon: Image },
-    { id: 'ai-tts', label: 'AI 音频', icon: Volume2 },
-    { id: 'ai-video', label: 'AI 视频', icon: Film },
+    { id: 'general', label: mode === 'home' ? '常规设置' : '常规工程', icon: Sliders },
+    { id: 'ai', label: 'AI 模型服务', icon: Bot },
   ];
 
   return (
@@ -381,9 +395,9 @@ export function AppSettingsDialog({
           </button>
         </div>
 
-        {/* Top Bar Tabs (分类顶栏) */}
-        <div className="border-b border-border bg-surface-container-low px-4 pt-2">
-          <nav className="flex items-center gap-1 overflow-x-auto" aria-label="设置分类">
+        {/* Top Bar Tabs (3 大分类顶栏) */}
+        <div className="border-b border-border bg-surface-container-low px-5 pt-2">
+          <nav className="flex items-center gap-2" aria-label="设置分类">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -392,14 +406,14 @@ export function AppSettingsDialog({
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-semibold tracking-wide transition-all whitespace-nowrap ${
+                  className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold tracking-wide transition-all ${
                     isActive
                       ? 'border-primary text-primary font-bold bg-primary/5 rounded-t-md'
                       : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-surface-container-high rounded-t-md'
                   }`}
                   aria-selected={isActive}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-4 h-4" />
                   <span>{tab.label}</span>
                 </button>
               );
@@ -553,13 +567,14 @@ export function AppSettingsDialog({
                   <button
                     type="button"
                     onClick={() => {
-                      setActiveTab('ai-chat');
+                      setActiveTab('ai');
+                      setAiSubTab('chat');
                       onOpenAiSettings?.();
                     }}
                     className="text-xs text-primary font-semibold hover:underline"
                     aria-label="打开 AI 设置"
                   >
-                    打开 AI 设置 →
+                    配置 AI 服务与模型 →
                   </button>
                 </div>
               </div>
@@ -616,105 +631,163 @@ export function AppSettingsDialog({
             </div>
           )}
 
-          {/* 3. AI 剧本对话 */}
-          {activeTab === 'ai-chat' && (
+          {/* 3. AI 模型服务（内部二级模态分段胶囊控制） */}
+          {activeTab === 'ai' && (
             <div className="space-y-4">
-              <div className="rounded-lg border border-border bg-secondary/20 p-3">
-                <div className="text-sm font-semibold">AI 剧本与对话模型配置</div>
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  用于故事创作、剧情编写、场景拆解及对白润色的主对话大模型。
-                </div>
+              {/* 二级模态分段胶囊 (Segmented Pills) */}
+              <div
+                className="flex items-center gap-1.5 p-1 rounded-lg border border-border bg-surface-container-low max-w-fit"
+                role="tablist"
+                aria-label="AI 模态分类"
+              >
+                <button
+                  type="button"
+                  onClick={() => setAiSubTab('chat')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    aiSubTab === 'chat'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <MessageSquareText className="w-3.5 h-3.5" />
+                  <span>剧本对话</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSubTab('image')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    aiSubTab === 'image'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Image className="w-3.5 h-3.5" />
+                  <span>画面插画</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSubTab('tts')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    aiSubTab === 'tts'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>角色配音</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSubTab('video')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                    aiSubTab === 'video'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Film className="w-3.5 h-3.5" />
+                  <span>视频生成</span>
+                </button>
               </div>
 
-              {catalog && chatConfig ? (
-                <>
-                  <fieldset disabled={verifying} className="disabled:opacity-70">
-                    <ConfigFields
-                      config={chatConfig}
-                      options={catalog.chat}
-                      multiModel={false}
+              {/* Subtab Panels */}
+              {aiSubTab === 'chat' && (
+                <div className="space-y-4 pt-1">
+                  <div className="rounded-lg border border-border bg-secondary/20 p-3">
+                    <div className="text-sm font-semibold">AI 剧本与对话模型配置</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      用于故事创作、剧情编写、场景拆解及对白润色的主对话大模型。
+                    </div>
+                  </div>
+
+                  {catalog && chatConfig ? (
+                    <>
+                      <fieldset disabled={verifying} className="disabled:opacity-70">
+                        <ConfigFields
+                          config={chatConfig}
+                          options={catalog.chat}
+                          multiModel={false}
+                          onProviderChange={(value) =>
+                            handleProviderChange(value, chatConfig, catalog.chat, updateChat)
+                          }
+                          onUpdate={updateChat}
+                        />
+                      </fieldset>
+
+                      <ConnectionPanel
+                        verifying={verifying}
+                        validation={validation}
+                        verifiedSaved={verifiedSaved}
+                        onVerify={handleVerify}
+                      />
+
+                      <LogsPanel
+                        logs={logs}
+                        logPath={logPath}
+                        logsLoading={logsLoading}
+                        onRefresh={refreshLogs}
+                        onClear={handleClearLogs}
+                      />
+                    </>
+                  ) : (
+                    <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+                  )}
+                </div>
+              )}
+
+              {aiSubTab === 'image' && (
+                <div className="space-y-4 pt-1">
+                  {catalog && imageConfig ? (
+                    <ProviderConfigPanel
+                      title="图片与立绘生成配置"
+                      config={imageConfig}
+                      options={catalog.image}
+                      onUpdate={updateImage}
                       onProviderChange={(value) =>
-                        handleProviderChange(value, chatConfig, catalog.chat, updateChat)
+                        handleProviderChange(value, imageConfig, catalog.image, updateImage)
                       }
-                      onUpdate={updateChat}
                     />
-                  </fieldset>
-
-                  <ConnectionPanel
-                    verifying={verifying}
-                    validation={validation}
-                    verifiedSaved={verifiedSaved}
-                    onVerify={handleVerify}
-                  />
-
-                  <LogsPanel
-                    logs={logs}
-                    logPath={logPath}
-                    logsLoading={logsLoading}
-                    onRefresh={refreshLogs}
-                    onClear={handleClearLogs}
-                  />
-                </>
-              ) : (
-                <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+                  )}
+                </div>
               )}
-            </div>
-          )}
 
-          {/* 4. AI 绘图 */}
-          {activeTab === 'ai-image' && (
-            <div className="space-y-4">
-              {catalog && imageConfig ? (
-                <ProviderConfigPanel
-                  title="图片与立绘生成配置"
-                  config={imageConfig}
-                  options={catalog.image}
-                  onUpdate={updateImage}
-                  onProviderChange={(value) =>
-                    handleProviderChange(value, imageConfig, catalog.image, updateImage)
-                  }
-                />
-              ) : (
-                <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+              {aiSubTab === 'tts' && (
+                <div className="space-y-4 pt-1">
+                  {catalog && ttsConfig ? (
+                    <ProviderConfigPanel
+                      title="音频与语音合成 (TTS) 配置"
+                      config={ttsConfig}
+                      options={catalog.tts}
+                      multiModel={false}
+                      onUpdate={updateTts}
+                      onProviderChange={(value) =>
+                        handleProviderChange(value, ttsConfig, catalog.tts, updateTts)
+                      }
+                    />
+                  ) : (
+                    <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+                  )}
+                </div>
               )}
-            </div>
-          )}
 
-          {/* 5. AI 音频 */}
-          {activeTab === 'ai-tts' && (
-            <div className="space-y-4">
-              {catalog && ttsConfig ? (
-                <ProviderConfigPanel
-                  title="音频与语音合成 (TTS) 配置"
-                  config={ttsConfig}
-                  options={catalog.tts}
-                  multiModel={false}
-                  onUpdate={updateTts}
-                  onProviderChange={(value) =>
-                    handleProviderChange(value, ttsConfig, catalog.tts, updateTts)
-                  }
-                />
-              ) : (
-                <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
-              )}
-            </div>
-          )}
-
-          {/* 6. AI 视频 */}
-          {activeTab === 'ai-video' && (
-            <div className="space-y-4">
-              {catalog && videoConfig ? (
-                <ProviderConfigPanel
-                  title="动态视频生成配置"
-                  config={videoConfig}
-                  options={catalog.video}
-                  onUpdate={updateVideo}
-                  onProviderChange={(value) =>
-                    handleProviderChange(value, videoConfig, catalog.video, updateVideo)
-                  }
-                />
-              ) : (
-                <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+              {aiSubTab === 'video' && (
+                <div className="space-y-4 pt-1">
+                  {catalog && videoConfig ? (
+                    <ProviderConfigPanel
+                      title="动态视频生成配置"
+                      config={videoConfig}
+                      options={catalog.video}
+                      onUpdate={updateVideo}
+                      onProviderChange={(value) =>
+                        handleProviderChange(value, videoConfig, catalog.video, updateVideo)
+                      }
+                    />
+                  ) : (
+                    <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
+                  )}
+                </div>
               )}
             </div>
           )}

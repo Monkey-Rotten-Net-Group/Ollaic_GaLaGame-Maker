@@ -45,13 +45,14 @@ interface AiInputBoxProps {
   onStop: () => void;
   /** Rendered at the bottom-right corner inside the textarea. */
   attachSlot?: ReactNode;
+  modelSlot?: ReactNode;
   /** Rendered above the textarea for files queued with the next message. */
   traySlot?: ReactNode;
 }
 
 // Keeps the draft in local state so typing only re-renders this small box,
 // not the whole StoryEditor tree (script list, worldline, timeline, ...).
-const AiInputBox = memo(function AiInputBox({ value, busy, locked, pending, onSubmit, onStop, attachSlot, traySlot }: AiInputBoxProps) {
+const AiInputBox = memo(function AiInputBox({ value, busy, locked, pending, onSubmit, onStop, attachSlot, modelSlot, traySlot }: AiInputBoxProps) {
   const [draft, setDraft] = useState(value);
   // Sync when the agent changes input externally (regenerate prefills, send clears).
   useEffect(() => { setDraft(value); }, [value]);
@@ -83,7 +84,12 @@ const AiInputBox = memo(function AiInputBox({ value, busy, locked, pending, onSu
           placeholder={busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'}
           aria-label="AI 创作输入"
         />
-        {attachSlot && <div className="absolute bottom-3 left-2.5">{attachSlot}</div>}
+        {(attachSlot || modelSlot) && (
+          <div className="absolute bottom-3 left-2.5 flex items-center gap-1.5">
+            {attachSlot}
+            {modelSlot}
+          </div>
+        )}
         <button
           type="button"
           onClick={submit}
@@ -176,58 +182,8 @@ export function AiAssistantPanel({
           <span className="truncate text-sm font-semibold text-on-surface" title={activeSession?.title}>
             {activeSession?.title ?? 'AI 创作助手'}
           </span>
-          <span className="flex items-center gap-1 font-mono-family text-[10px] text-muted-foreground">
-            <span className={`block h-1.5 w-1.5 rounded-full ${aiAgent.busy ? 'bg-primary' : 'bg-tertiary-container'}`} />
-            {statusText}
-          </span>
         </div>
         <div className="flex items-center gap-1">
-          {/* Quick Model Selector in Chat Header */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                disabled={aiAgent.busy || aiAgent.committing}
-                className="flex items-center gap-1 rounded-full border border-border bg-surface-container-low px-2 py-0.5 text-[10.5px] font-mono-family text-muted-foreground hover:bg-surface-container hover:text-foreground transition-colors disabled:opacity-40"
-                title={`当前对话模型: ${currentModel || '默认'}`}
-                aria-label="切换对话模型"
-              >
-                <Bot className="h-3 w-3 text-primary" />
-                <span className="max-w-[75px] truncate">{currentModel || '模型'}</span>
-                <ChevronDown className="h-2.5 w-2.5 opacity-60" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="text-xs">
-                当前供应商: {activeProviderOption?.label || currentProvider || '默认'}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {availableModels.length > 0 ? (
-                availableModels.map((m) => (
-                  <DropdownMenuItem
-                    key={m}
-                    onClick={() => handleSwitchModel(m)}
-                    className={`flex items-center justify-between text-xs cursor-pointer ${
-                      m === currentModel ? 'font-bold text-primary bg-primary/10' : ''
-                    }`}
-                  >
-                    <span className="truncate">{m}</span>
-                    {m === currentModel && <Check className="h-3.5 w-3.5 ml-1 text-primary shrink-0" />}
-                  </DropdownMenuItem>
-                ))
-              ) : (
-                <div className="px-2 py-1 text-xs text-muted-foreground">暂无可切换的预设模型</div>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={onOpenSettings}
-                className="text-xs text-primary cursor-pointer"
-              >
-                <Sliders className="h-3.5 w-3.5 mr-1.5" />
-                <span>配置更多服务商与模型…</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
           <button type="button" onClick={onOpenMemory} disabled={!projectPath || aiAgent.committing} className="ollaic-icon-button h-7 w-7 disabled:opacity-40" aria-label="管理项目记忆" title="项目记忆"><Brain className="h-4 w-4" /></button>
           <button
             type="button"
@@ -389,6 +345,53 @@ export function AiAssistantPanel({
               onPreview={aiAgent.previewUpload}
               onDismissError={aiAgent.clearUploadError}
             />
+          )}
+          modelSlot={(
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  disabled={aiAgent.busy || aiAgent.committing}
+                  className="flex h-6 items-center gap-1 rounded-full border border-border bg-surface-container-low px-2 text-[11px] font-mono-family text-muted-foreground hover:bg-secondary-container/60 hover:text-foreground transition-colors disabled:opacity-40"
+                  title={`当前对话模型: ${currentModel || '默认'}`}
+                  aria-label="切换对话模型"
+                >
+                  <Bot className="h-3 w-3 text-primary" />
+                  <span className="max-w-[110px] truncate">{currentModel || '选择模型'}</span>
+                  <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" className="w-56">
+                <DropdownMenuLabel className="text-xs">
+                  当前供应商: {activeProviderOption?.label || currentProvider || '默认'}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {availableModels.length > 0 ? (
+                  availableModels.map((m) => (
+                    <DropdownMenuItem
+                      key={m}
+                      onClick={() => handleSwitchModel(m)}
+                      className={`flex items-center justify-between text-xs cursor-pointer ${
+                        m === currentModel ? 'font-bold text-primary bg-primary/10' : ''
+                      }`}
+                    >
+                      <span className="truncate">{m}</span>
+                      {m === currentModel && <Check className="h-3.5 w-3.5 ml-1 text-primary shrink-0" />}
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">暂无可切换的预设模型</div>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={onOpenSettings}
+                  className="text-xs text-primary cursor-pointer"
+                >
+                  <Sliders className="h-3.5 w-3.5 mr-1.5" />
+                  <span>配置更多服务商与模型…</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           traySlot={(
             <AiAttachmentTray
