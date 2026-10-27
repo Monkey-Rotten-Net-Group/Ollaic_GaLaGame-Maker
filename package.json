@@ -12,6 +12,7 @@
     "test:ui": "pnpm --dir apps/desktop test",
     "test:rust": "cargo test --locked --workspace",
     "test:core": "cargo test --locked -p ollaic-core",
+    "bindings:test:swift": "bash scripts/test-swift-bindings.sh",
     "test:harness": "cargo test --features agent-harness --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "agent-harness": "cargo run --quiet --features agent-harness --bin agent-harness --manifest-path apps/desktop/src-tauri/Cargo.toml --",
     "e2e:web": "pnpm --dir apps/desktop e2e:web",
