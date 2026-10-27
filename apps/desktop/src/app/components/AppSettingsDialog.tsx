@@ -65,8 +65,7 @@ export function AppSettingsDialog({
 
   if (!open) return null;
 
-  const update = (patch: Partial<AppSettings>) =>
-    setSettings((s) => ({ ...s, ...patch }));
+  const update = (patch: Partial<AppSettings>) => setSettings((s) => ({ ...s, ...patch }));
 
   const handleInstallRuntime = async () => {
     setRuntimeBusy(true);
@@ -115,11 +114,9 @@ export function AppSettingsDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-[520px] max-h-[85vh] flex flex-col bg-card border border-border rounded-lg shadow-2xl">
+      <div className="w-[520px] max-w-[calc(100vw-2rem)] max-h-[85dvh] flex flex-col bg-card border border-border rounded-lg shadow-2xl">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-display-family">
-            编辑器设置
-          </h2>
+          <h2 className="text-lg font-display-family">编辑器设置</h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
@@ -129,27 +126,25 @@ export function AppSettingsDialog({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
           {/* Default project directory */}
           <div>
             <label className="block text-xs uppercase tracking-widest text-muted-foreground mb-1.5 font-mono-family">
               默认项目目录
             </label>
             <div className="flex gap-2">
-              <div className="flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family">
+              <div className="min-w-0 flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family">
                 {settings.defaultProjectDir || '（未设置）'}
               </div>
               <button
                 onClick={handlePickDir}
-                className="px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors border border-border"
+                className="shrink-0 px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors border border-border"
                 aria-label="选择目录"
               >
                 <FolderOpen className="w-4 h-4" />
               </button>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              创建新项目时默认选择此目录
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">创建新项目时默认选择此目录</p>
           </div>
 
           <div>
@@ -158,15 +153,15 @@ export function AppSettingsDialog({
             </label>
             <div className="flex gap-2">
               <div
-                className="flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family"
+                className="min-w-0 flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm truncate font-mono-family"
                 title={settings.runtimeTemplateDir || runtime?.path || ''}
               >
-                {settings.runtimeTemplateDir
-                  || (runtime?.path ? `${runtime.path}（自动检测）` : '（未设置）')}
+                {settings.runtimeTemplateDir ||
+                  (runtime?.path ? `${runtime.path}（自动检测）` : '（未设置）')}
               </div>
               <button
                 onClick={handlePickTemplateDir}
-                className="px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors border border-border"
+                className="shrink-0 px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors border border-border"
                 aria-label="选择预览模板目录"
               >
                 <FolderOpen className="w-4 h-4" />
@@ -215,10 +210,7 @@ export function AppSettingsDialog({
           {/* Link to AI settings */}
           {onOpenAiSettings && (
             <div className="pt-2 border-t border-border">
-              <button
-                onClick={onOpenAiSettings}
-                className="text-sm text-primary hover:underline"
-              >
+              <button onClick={onOpenAiSettings} className="text-sm text-primary hover:underline">
                 打开 AI 设置 →
               </button>
             </div>
@@ -238,9 +230,7 @@ export function AppSettingsDialog({
               )}
               <div className="flex-1 min-w-0 text-sm">
                 <div className="font-mono-family">
-                  {runtime?.installed
-                    ? `已安装 v${runtime.version ?? '(未知)'}`
-                    : '未安装'}
+                  {runtime?.installed ? `已安装 v${runtime.version ?? '(未知)'}` : '未安装'}
                 </div>
                 <div
                   className="text-xs text-muted-foreground font-mono-family truncate"
@@ -254,7 +244,7 @@ export function AppSettingsDialog({
             <button
               onClick={handleInstallRuntime}
               disabled={runtimeBusy}
-              className="w-full px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full shrink-0 px-3 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors text-sm flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {runtimeBusy ? (
                 <>

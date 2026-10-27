@@ -367,7 +367,7 @@ export const SceneGraph = memo(function SceneGraph({
                   {status}
                 </span>
                 {incoming > 0 && (
-                  <span className="ml-auto shrink-0 rounded bg-secondary-container/30 px-1 font-mono text-[8px] text-secondary">
+                  <span className="ml-auto shrink-0 rounded bg-secondary-container/30 px-1 font-mono text-[8px] text-primary">
                     ←{incoming}
                   </span>
                 )}

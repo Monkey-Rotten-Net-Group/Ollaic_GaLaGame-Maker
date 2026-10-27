@@ -100,9 +100,9 @@ export function FullScreenWorldline({
           </button>
           <div className="h-5 w-px bg-border/60" />
           <span className="flex items-center gap-2 font-mono-family text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
-            <GitBranch className="h-4 w-4 text-secondary" /> 场景关系图
+            <GitBranch className="h-4 w-4 text-primary" /> 场景关系图
           </span>
-          <span className="rounded bg-secondary/10 px-2 py-0.5 font-mono text-[10px] text-secondary">
+          <span className="rounded bg-secondary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
             {scenes.length} 场景
           </span>
           {onNewScene && (
@@ -245,7 +245,7 @@ export function FullScreenWorldline({
                 <div
                   key={node.id}
                   className="group flex items-start border-l-2 transition-colors hover:bg-surface-container-low"
-                  style={{ borderColor: sel ? 'var(--color-secondary)' : 'transparent' }}
+                  style={{ borderColor: sel ? 'var(--color-primary)' : 'transparent' }}
                 >
                   <button
                     type="button"
@@ -315,7 +315,7 @@ export function SceneWorldlinePanel({
     <aside className="flex w-80 shrink-0 flex-col border-r border-border bg-surface-container-lowest">
       <div className="flex h-10 items-center justify-between border-b border-border px-3">
         <span className="flex items-center gap-1.5 font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
-          <GitBranch className="h-3 w-3 text-secondary" /> 场景关系图
+          <GitBranch className="h-3 w-3 text-primary" /> 场景关系图
         </span>
         {onOpenSceneManager && (
           <button
@@ -356,7 +356,7 @@ export function SceneWorldlinePanel({
             <div
               key={node.id}
               className="group flex items-start border-l-2 transition-colors hover:bg-surface-container-low"
-              style={{ borderColor: selected ? 'var(--color-secondary)' : 'transparent' }}
+              style={{ borderColor: selected ? 'var(--color-primary)' : 'transparent' }}
             >
               <button
                 type="button"

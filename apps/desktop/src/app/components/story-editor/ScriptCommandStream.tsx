@@ -68,7 +68,7 @@ function InsertZone({ atIndex, onInsert, compact = false }: { atIndex: number; o
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full border border-outline-variant/30 bg-surface-bright text-[9px] text-muted-foreground opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100 hover:border-secondary hover:text-secondary data-[state=open]:opacity-100"
+            className="relative z-10 flex h-4 w-4 items-center justify-center rounded-full border border-outline-variant/30 bg-surface-bright text-[9px] text-muted-foreground opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100 hover:border-primary hover:text-primary data-[state=open]:opacity-100"
             title="插入指令"
             aria-label="插入指令"
           >
@@ -94,7 +94,7 @@ function InsertZone({ atIndex, onInsert, compact = false }: { atIndex: number; o
                     key={type}
                     type="button"
                     onClick={() => insertCommand(type)}
-                    className="rounded-sm border border-outline-variant/30 px-2 py-1 text-[10px] text-on-surface-variant hover:border-secondary hover:text-secondary transition-colors"
+                    className="rounded-sm border border-outline-variant/30 px-2 py-1 text-[10px] text-on-surface-variant hover:border-primary hover:text-primary transition-colors"
                   >
                     {commandLabels[type]}
                   </button>
@@ -559,15 +559,15 @@ function ScriptCommandCompactRow({
 
   const rowBgClass = isBackground
     ? selected
-      ? 'border-emerald-500 bg-emerald-500/15'
-      : 'border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10'
+      ? 'border-emerald-500 bg-emerald-500/15 shadow-sm'
+      : 'border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10'
     : isBranch
       ? selected
-        ? 'border-amber-500 bg-amber-500/15'
-        : 'border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10'
+        ? 'border-amber-500 bg-amber-500/15 shadow-sm'
+        : 'border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10'
       : selected
         ? 'border-primary bg-primary/10 shadow-sm'
-        : 'border-outline-variant/25 bg-surface-bright/70 hover:bg-surface-container-low hover:border-outline-variant/50';
+        : 'border-border bg-card hover:bg-surface-container-low hover:border-primary/30 shadow-[0_2px_8px_-2px_rgba(29,27,34,0.04)]';
 
   return (
     <div
@@ -587,10 +587,10 @@ function ScriptCommandCompactRow({
               // Menu portals bubble through React but are outside the row.
               if (event.currentTarget.contains(event.target as Node)) onSelectNode(node);
             }}
-            className={`flex min-h-9 w-full items-center gap-2.5 rounded border px-3 py-1.5 text-xs transition-colors cursor-pointer ${rowBgClass}`}
+            className={`flex min-h-10 w-full items-center gap-3 rounded-2xl border px-3.5 py-2 text-xs transition-all cursor-pointer ${rowBgClass}`}
           >
             {/* Index & hover Play button */}
-            <div className="relative flex h-5 w-7 shrink-0 items-center justify-center font-mono text-[11px] text-muted-foreground">
+            <div className="relative flex h-5 w-7 shrink-0 items-center justify-center font-mono text-[11px] font-bold text-muted-foreground">
               {onJumpToIndex ? (
                 <>
                   <span className="transition-opacity duration-150 group-hover:opacity-0">{String(displayIndex + 1).padStart(2, '0')}</span>
@@ -600,7 +600,7 @@ function ScriptCommandCompactRow({
                       e.stopPropagation();
                       onJumpToIndex(index);
                     }}
-                    className="absolute inset-0 m-auto flex h-5 w-5 items-center justify-center rounded bg-primary/20 text-primary opacity-0 transition-opacity duration-150 hover:bg-primary hover:text-primary-foreground group-hover:opacity-100 group-focus-within:opacity-100"
+                    className="absolute inset-0 m-auto flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-primary opacity-0 transition-opacity duration-150 hover:bg-primary hover:text-primary-foreground group-hover:opacity-100 group-focus-within:opacity-100"
                     title="跳到此处运行"
                     aria-label={`运行到此处第 ${displayIndex + 1} 行`}
                   >
@@ -615,36 +615,36 @@ function ScriptCommandCompactRow({
             {/* Tag / Category Badge */}
             {isDialogue ? (
               <span
-                className={`shrink-0 max-w-28 truncate rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                className={`shrink-0 max-w-28 truncate rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                   characterInherited ? 'opacity-65' : ''
                 }`}
                 style={
                   charColor
                     ? { backgroundColor: `${charColor}20`, color: charColor }
-                    : { backgroundColor: 'var(--color-primary-container, rgba(56,189,248,0.15))', color: 'var(--color-primary)' }
+                    : { backgroundColor: 'var(--color-primary-container, rgba(101,85,143,0.16))', color: 'var(--color-primary)' }
                 }
                 title={characterInherited ? '继承自上一句角色' : undefined}
               >
                 {displayCharacter || '旁白'}
               </span>
             ) : isBackground ? (
-              <span className="flex shrink-0 items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-500">
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold text-emerald-600">
                 <Image className="h-3 w-3" /> 背景
               </span>
             ) : isBranch ? (
-              <span className="flex shrink-0 items-center gap-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-500">
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-bold text-amber-600">
                 <GitBranch className="h-3 w-3" /> 分支
               </span>
             ) : node.type === 'bgm' || node.type === 'playEffect' || node.type === 'playVideo' ? (
-              <span className="flex shrink-0 items-center gap-1 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-500">
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-sky-500/15 px-2.5 py-0.5 text-[10px] font-bold text-sky-600">
                 <Music className="h-3 w-3" /> {node.type === 'bgm' ? 'BGM' : node.type === 'playEffect' ? '音效' : '视频'}
               </span>
             ) : node.type === 'changeFigure' ? (
-              <span className="flex shrink-0 items-center gap-1 rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-bold text-purple-400">
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-purple-500/15 px-2.5 py-0.5 text-[10px] font-bold text-purple-600">
                 <Users className="h-3 w-3" /> 立绘
               </span>
             ) : (
-              <span className="flex shrink-0 items-center gap-1 rounded bg-surface-container-high px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-surface-container-high px-2.5 py-0.5 text-[10px] font-bold text-muted-foreground">
                 <Icon className="h-3 w-3" /> {tag}
               </span>
             )}
@@ -1086,11 +1086,11 @@ export function ScriptCommandStream({
   }, [currentSceneName, selectedNodeId, selectedSectionId]);
 
   return (
-    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
       <div className="pointer-events-none absolute inset-0 opacity-[0.03] ollaic-dot-grid" />
-      <div className="relative z-10 flex h-10 shrink-0 items-center justify-between border-b border-outline-variant/20 bg-surface-bright/50 px-4">
-        <div className="flex min-w-0 items-center gap-4">
-          <span className="shrink-0 text-xs font-bold tracking-widest text-on-surface-variant">
+      <div className="relative z-10 flex h-11 shrink-0 items-center justify-between border-b border-border bg-card/80 px-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-xs font-extrabold tracking-wide text-on-surface-variant">
             {isCompact ? '剧本视图' : '指令卡片'}
           </span>
           <div className="flex gap-2">
@@ -1099,34 +1099,34 @@ export function ScriptCommandStream({
               const chapter = header?.chapter?.trim() || '';
               if (chapter) {
                 return (
-                  <span className="rounded bg-secondary/10 px-2 py-0.5 text-[10px] font-bold uppercase text-secondary">
+                  <span className="rounded-full bg-secondary/12 px-2.5 py-0.5 text-[10.5px] font-bold text-primary">
                     {chapter}
                   </span>
                 );
               }
               return null;
             })()}
-            <span className="rounded bg-outline-variant/20 px-2 py-0.5 text-[10px] font-bold uppercase text-on-surface-variant">
+            <span className="rounded-full bg-surface-container px-2.5 py-0.5 text-[10.5px] font-bold text-on-surface-variant">
               {currentSceneName.replace(/\.txt$/, '')}
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-3 text-on-surface-variant/50">
+        <div className="flex items-center gap-3 text-on-surface-variant/60">
           {hasMultipleSections && !query && (
             <button
               type="button"
               onClick={collapsedSectionIds.size > 0 ? expandAllSections : collapseAllSections}
-              className="rounded border border-outline-variant/30 bg-surface-container-high/50 px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-surface-container-high hover:text-foreground transition-colors"
+              className="rounded-full border border-border bg-surface-container-low px-3 py-0.5 text-[11px] font-bold text-muted-foreground hover:bg-surface-container hover:text-foreground transition-colors"
             >
               {collapsedSectionIds.size > 0 ? '全部展开' : '全部折叠'}
             </button>
           )}
           {query && (
-            <span className="rounded-full bg-primary-container/40 px-2 py-0.5 text-[10px] font-semibold text-primary">
+            <span className="rounded-full bg-primary-container/50 px-2.5 py-0.5 text-[10.5px] font-bold text-primary">
               {visibleNodes.length} / {nodes.length}
             </span>
           )}
-          <span className="font-mono-family text-[10px] text-muted-foreground">
+          <span className="font-mono-family text-[11px] font-bold text-muted-foreground">
             {nodes.length} 条指令
           </span>
         </div>
@@ -1134,7 +1134,7 @@ export function ScriptCommandStream({
 
       {previewEntries ? (
         <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 border-b border-primary/30 bg-primary/10 px-4 py-2 text-center text-xs font-semibold text-primary">
+          <div className="shrink-0 border-b border-primary/30 bg-primary/10 px-4 py-2 text-center text-xs font-bold text-primary">
             预览模式
           </div>
           <div className="flex-1 overflow-y-auto p-8">
@@ -1147,7 +1147,7 @@ export function ScriptCommandStream({
         </div>
       ) : (
       <div
-        className="relative z-10 flex-1 overflow-y-auto p-4 sm:p-6"
+        className="relative z-10 flex-1 overflow-y-auto p-5 sm:p-7"
         onContextMenu={(e) => {
           if (!clipboardNode || !onPasteNode) return;
           // A card right-click is handled by the card's own context menu.
@@ -1157,19 +1157,19 @@ export function ScriptCommandStream({
           setAreaMenu({ x: e.clientX, y: e.clientY, atIndex });
         }}
       >
-        <div className={`mx-auto max-w-4xl ${isCompact ? 'space-y-1 pb-32' : 'space-y-6 pb-48'}`}>
+        <div className={`mx-auto max-w-4xl ${isCompact ? 'space-y-1.5 pb-32' : 'space-y-6 pb-48'}`}>
         {nodes.length === 0 ? (
-          <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 border border-dashed border-outline-variant/50 bg-surface-bright p-8 text-center text-muted-foreground">
+          <div className="flex min-h-[360px] flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-card p-8 text-center text-muted-foreground shadow-sm">
             <FileText className="h-10 w-10 opacity-50" />
-            <div className="text-base text-foreground">当前场景还没有命令</div>
-            <button type="button" onClick={() => onInsertNode('dialogue', 0)} className="bg-primary px-4 py-2 text-sm font-semibold text-on-primary ollaic-chamfer-tr">
+            <div className="text-base font-bold text-foreground">当前场景还没有命令</div>
+            <button type="button" onClick={() => onInsertNode('dialogue', 0)} className="rounded-full bg-primary px-5 py-2 text-sm font-bold text-primary-foreground shadow-sm">
               添加第一句对白
             </button>
           </div>
         ) : visibleNodes.length === 0 ? (
-          <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 border border-dashed border-outline-variant/40 bg-surface-bright p-6 text-center text-muted-foreground">
+          <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-3xl border border-dashed border-border bg-card p-6 text-center text-muted-foreground">
             <Search className="h-6 w-6 opacity-50" />
-            <div className="text-sm">没有匹配 "{query}" 的指令</div>
+            <div className="text-sm font-bold">没有匹配 "{query}" 的指令</div>
           </div>
         ) : (
           sections.map((section) => {
@@ -1178,27 +1178,27 @@ export function ScriptCommandStream({
               <div key={section.id} className="section-block">
                 {hasMultipleSections && (
                   <div
-                    className="group mb-2 mt-4 first:mt-0 flex cursor-pointer select-none items-center justify-between rounded-md border border-outline-variant/30 bg-surface-container-low/70 px-3 py-1.5 text-xs transition-colors hover:border-primary/40 hover:bg-surface-container-low"
+                    className="group mb-2.5 mt-5 first:mt-0 flex cursor-pointer select-none items-center justify-between rounded-2xl border border-border bg-surface-container-low/80 px-4 py-2 text-xs transition-all hover:border-primary/40 hover:bg-surface-container-low"
                     onClick={() => toggleSection(section.id)}
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="flex h-4 w-4 items-center justify-center text-muted-foreground transition-transform group-hover:text-primary">
                         <ChevronDown className={`size-3.5 transition-transform duration-200 ${isSectionCollapsed ? '-rotate-90' : ''}`} />
                       </span>
-                      <span className="truncate font-semibold text-foreground">
+                      <span className="truncate font-bold text-foreground">
                         {section.title}
                       </span>
                       {section.bgAsset && (
-                        <span className="flex shrink-0 items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-500">
+                        <span className="flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-600">
                           <Image className="size-2.5" />
                           {section.bgAsset}
                         </span>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                    <div className="flex shrink-0 items-center gap-2 text-[11px] font-bold text-muted-foreground">
                       <span>{section.dialogueCount} 句对白 · {section.items.length} 条指令</span>
                       {isSectionCollapsed && (
-                        <span className="rounded bg-surface-container-high px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] text-muted-foreground">
                           已折叠
                         </span>
                       )}
@@ -1209,7 +1209,7 @@ export function ScriptCommandStream({
                             e.stopPropagation();
                             onJumpToIndex(section.firstIndex);
                           }}
-                          className="flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-primary/20 hover:text-primary group-hover:opacity-100"
+                          className="flex size-5 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-primary/20 hover:text-primary group-hover:opacity-100"
                           title="跳到本节开头运行"
                           aria-label={`跳到${section.title}开头运行`}
                         >
@@ -1221,7 +1221,7 @@ export function ScriptCommandStream({
                 )}
 
                 {!isSectionCollapsed && (
-                  <div className={isCompact ? 'space-y-1' : 'space-y-6'}>
+                  <div className={isCompact ? 'space-y-1.5' : 'space-y-6'}>
                     {section.items.map(({ node, index }) => {
                       if (absorbedIds.has(node.id)) return null;
                       const Icon = commandIconFor(node.type);

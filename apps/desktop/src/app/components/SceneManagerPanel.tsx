@@ -65,7 +65,7 @@ export function SceneManagerPanel({
     <div className="fixed bottom-0 right-0 top-12 z-40 flex w-80 flex-col border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
       <div className="flex h-10 items-center justify-between border-b border-border px-3">
         <span className="flex items-center gap-1.5 font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
-          <FolderOpen className="h-3 w-3 text-secondary" /> 场景管理
+          <FolderOpen className="h-3 w-3 text-primary" /> 场景管理
         </span>
         <button
           type="button"
@@ -115,7 +115,7 @@ export function SceneManagerPanel({
                           type="button"
                           onClick={() => { void handleSaveHeader(sceneName); }}
                           disabled={saving}
-                          className="flex items-center gap-1 rounded bg-secondary-container/60 px-3 py-1 text-[10px] font-semibold text-secondary hover:bg-secondary-container disabled:opacity-50"
+                          className="flex items-center gap-1 rounded bg-secondary-container/60 px-3 py-1 text-[10px] font-semibold text-primary hover:bg-secondary-container disabled:opacity-50"
                         >
                           <Check className="h-3 w-3" />
                           保存
@@ -180,7 +180,7 @@ export function SceneManagerPanel({
         <button
           type="button"
           onClick={() => { void onNewScene(); }}
-          className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-outline-variant/50 py-2 text-sm text-muted-foreground hover:border-secondary hover:text-secondary transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-outline-variant/50 py-2 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
         >
           <Plus className="h-4 w-4" />
           新建场景

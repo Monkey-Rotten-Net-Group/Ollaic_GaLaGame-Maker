@@ -185,11 +185,12 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     try {
       const result = await validateAiConfig(testedConfig);
       const currentConfig = configRef.current;
-      const unchanged = currentConfig
-        && currentConfig.provider === testedConfig.provider
-        && currentConfig.model === testedConfig.model
-        && currentConfig.api_key === testedConfig.api_key
-        && currentConfig.base_url === testedConfig.base_url;
+      const unchanged =
+        currentConfig &&
+        currentConfig.provider === testedConfig.provider &&
+        currentConfig.model === testedConfig.model &&
+        currentConfig.api_key === testedConfig.api_key &&
+        currentConfig.base_url === testedConfig.base_url;
       if (!unchanged) return;
       setValidation(result);
       // A successful trial connection is an unambiguous "use this config".
@@ -211,10 +212,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     setLogsLoading(true);
     setError(null);
     try {
-      const [nextLogs, path] = await Promise.all([
-        listAiLogs(80),
-        getAiLogPath(),
-      ]);
+      const [nextLogs, path] = await Promise.all([listAiLogs(80), getAiLogPath()]);
       setLogs(nextLogs);
       setLogPath(path);
     } catch (e) {
@@ -266,11 +264,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="w-[720px] max-h-[85vh] flex flex-col bg-card border border-border rounded-lg shadow-2xl">
+      <div className="w-[720px] max-w-[calc(100vw-2rem)] max-h-[85dvh] flex flex-col bg-card border border-border rounded-lg shadow-2xl">
         <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-display-family">
-            AI 设置
-          </h2>
+          <h2 className="text-lg font-display-family">AI 设置</h2>
           <button
             onClick={onClose}
             className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors"
@@ -282,14 +278,34 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
         <div className="border-b border-border px-4 pt-3">
           <div className="flex items-center gap-1">
-            <TabButton active={activeTab === 'chat'} icon={<MessageSquareText className="h-4 w-4" />} label="聊天" onClick={() => setActiveTab('chat')} />
-            <TabButton active={activeTab === 'image'} icon={<Image className="h-4 w-4" />} label="图片" onClick={() => setActiveTab('image')} />
-            <TabButton active={activeTab === 'tts'} icon={<Volume2 className="h-4 w-4" />} label="音频" onClick={() => setActiveTab('tts')} />
-            <TabButton active={activeTab === 'video'} icon={<Film className="h-4 w-4" />} label="视频" onClick={() => setActiveTab('video')} />
+            <TabButton
+              active={activeTab === 'chat'}
+              icon={<MessageSquareText className="h-4 w-4" />}
+              label="聊天"
+              onClick={() => setActiveTab('chat')}
+            />
+            <TabButton
+              active={activeTab === 'image'}
+              icon={<Image className="h-4 w-4" />}
+              label="图片"
+              onClick={() => setActiveTab('image')}
+            />
+            <TabButton
+              active={activeTab === 'tts'}
+              icon={<Volume2 className="h-4 w-4" />}
+              label="音频"
+              onClick={() => setActiveTab('tts')}
+            />
+            <TabButton
+              active={activeTab === 'video'}
+              icon={<Film className="h-4 w-4" />}
+              label="视频"
+              onClick={() => setActiveTab('video')}
+            />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
           {!loaded ? (
             <div className="text-sm text-muted-foreground">加载中…</div>
           ) : (
@@ -301,7 +317,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                       config={config}
                       options={catalog.chat}
                       multiModel={false}
-                      onProviderChange={(value) => handleProviderChange(value, config, catalog.chat, updateChat)}
+                      onProviderChange={(value) =>
+                        handleProviderChange(value, config, catalog.chat, updateChat)
+                      }
                       onUpdate={updateChat}
                     />
                   </fieldset>
@@ -329,7 +347,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   config={imageConfig}
                   options={catalog.image}
                   onUpdate={updateImage}
-                  onProviderChange={(value) => handleProviderChange(value, imageConfig, catalog.image, updateImage)}
+                  onProviderChange={(value) =>
+                    handleProviderChange(value, imageConfig, catalog.image, updateImage)
+                  }
                 />
               )}
 
@@ -340,7 +360,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   options={catalog.tts}
                   multiModel={false}
                   onUpdate={updateTts}
-                  onProviderChange={(value) => handleProviderChange(value, ttsConfig, catalog.tts, updateTts)}
+                  onProviderChange={(value) =>
+                    handleProviderChange(value, ttsConfig, catalog.tts, updateTts)
+                  }
                 />
               )}
 
@@ -350,7 +372,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   config={videoConfig}
                   options={catalog.video}
                   onUpdate={updateVideo}
-                  onProviderChange={(value) => handleProviderChange(value, videoConfig, catalog.video, updateVideo)}
+                  onProviderChange={(value) =>
+                    handleProviderChange(value, videoConfig, catalog.video, updateVideo)
+                  }
                 />
               )}
 
@@ -485,7 +509,9 @@ function ModelSelectField({
             aria-label="选择模型"
           >
             {options.map((model) => (
-              <option key={model} value={model}>{model}</option>
+              <option key={model} value={model}>
+                {model}
+              </option>
             ))}
             <option value={CUSTOM_MODEL_SENTINEL}>自定义…</option>
           </select>
@@ -517,7 +543,9 @@ function ModelSelectField({
       aria-label="选择模型"
     >
       {options.map((model) => (
-        <option key={model} value={model}>{model}</option>
+        <option key={model} value={model}>
+          {model}
+        </option>
       ))}
       <option value={CUSTOM_MODEL_SENTINEL}>自定义…</option>
     </select>
@@ -538,10 +566,15 @@ function ConfigFields({
   onUpdate: (patch: Partial<AiConfig>) => void;
 }) {
   const provider = options.find((p) => p.value === config.provider);
-  const modelOptions = provider?.models?.length ? provider.models : provider ? [provider.defaultModel] : [];
-  const apiKeyHint = provider && !provider.requiresApiKey
-    ? '该供应商通常不需要 Key，可留空'
-    : '存储在本地配置文件中';
+  const modelOptions = provider?.models?.length
+    ? provider.models
+    : provider
+      ? [provider.defaultModel]
+      : [];
+  const apiKeyHint =
+    provider && !provider.requiresApiKey
+      ? '该供应商通常不需要 Key，可留空'
+      : '存储在本地配置文件中';
   const baseUrlHint = provider?.needsBaseUrl
     ? '必填，该供应商没有内置地址'
     : '留空使用供应商默认地址';
@@ -567,7 +600,9 @@ function ConfigFields({
         hint={
           multiModel
             ? '从当前供应商的模型池选择，可批量填入，也可追加自定义模型名。'
-            : provider ? `可下拉选择常用模型，也可直接输入自定义模型名。推荐: ${provider.defaultModel}` : '可直接输入模型名'
+            : provider
+              ? `可下拉选择常用模型，也可直接输入自定义模型名。推荐: ${provider.defaultModel}`
+              : '可直接输入模型名'
         }
       >
         {multiModel ? (
@@ -700,7 +735,7 @@ function ModelTagPicker({
                 <button
                   key={model}
                   type="button"
-                  onClick={() => active ? removeModel(model) : addModels([model])}
+                  onClick={() => (active ? removeModel(model) : addModels([model]))}
                   className={`rounded-md px-2 py-1 text-xs transition-colors ${
                     active
                       ? 'bg-primary text-primary-foreground'
@@ -757,7 +792,7 @@ function ConnectionPanel({
 }) {
   return (
     <div className="rounded-lg border border-border bg-secondary/20 p-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-sm font-medium">连接验证</div>
           <div className="text-xs text-muted-foreground mt-1">
@@ -809,7 +844,7 @@ function LogsPanel({
 }) {
   return (
     <div className="rounded-lg border border-border bg-secondary/20 p-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-medium">
             <List className="h-4 w-4" />
@@ -857,7 +892,7 @@ function AiLogRow({ entry }: { entry: AiLogEntry }) {
   const time = new Date(Number(entry.timestampMs)).toLocaleString();
   return (
     <div className="border-b border-border px-3 py-2 last:border-b-0">
-      <div className="flex items-center justify-between gap-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="min-w-0 truncate font-mono-family">
           {time} · {entry.action} · {entry.provider}/{entry.model}
         </div>
@@ -872,14 +907,10 @@ function AiLogRow({ entry }: { entry: AiLogEntry }) {
         </span>
       </div>
       {entry.endpoint && (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">
-          {entry.endpoint}
-        </div>
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">{entry.endpoint}</div>
       )}
       {entry.message && (
-        <div className="mt-1 break-words text-xs text-muted-foreground">
-          {entry.message}
-        </div>
+        <div className="mt-1 break-words text-xs text-muted-foreground">{entry.message}</div>
       )}
     </div>
   );

@@ -69,7 +69,7 @@ export function commandToneFor(type: WebGalCommandType): string {
     case 'choose':
       return 'text-tertiary';
     case 'changeBg':
-      return 'text-secondary';
+      return 'text-primary';
     case 'bgm':
     case 'playEffect':
       return 'text-tertiary';

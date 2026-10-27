@@ -67,7 +67,7 @@ export function NewSceneDialog({
       <DialogContent className="max-w-md overflow-hidden border-border bg-surface-container-lowest p-0 shadow-2xl">
         <DialogHeader className="border-b border-border bg-surface-container px-5 py-4 text-left">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded border border-secondary/30 bg-secondary/10 text-secondary">
+            <div className="flex h-9 w-9 items-center justify-center rounded border border-secondary/30 bg-secondary/10 text-primary">
               <FolderOpen className="h-4 w-4" />
             </div>
             <div className="min-w-0">
