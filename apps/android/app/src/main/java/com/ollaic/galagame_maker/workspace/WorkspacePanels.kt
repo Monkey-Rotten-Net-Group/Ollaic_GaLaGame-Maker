@@ -160,7 +160,7 @@ fun SceneListPanel(
 }
 
 @Composable
-fun ProjectDraftPanel(project: HomeProject, document: WorkspaceDraft, enabled: Boolean, onEditProject: () -> Unit, onExport: () -> Unit, onFeature: (Int) -> Unit, onNotes: (String) -> Unit) {
+fun ProjectDraftPanel(project: HomeProject, document: WorkspaceDraft, enabled: Boolean, onEditProject: () -> Unit, onExport: () -> Unit, onFeature: (Int) -> Unit) {
   LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
     item {
       Text(project.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -183,16 +183,6 @@ fun ProjectDraftPanel(project: HomeProject, document: WorkspaceDraft, enabled: B
       }
     }
     item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
-    item {
-      OutlinedTextField(
-        value = document.notes,
-        onValueChange = onNotes,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text(stringResource(R.string.workspace_project_notes)) },
-        minLines = 6,
-        enabled = enabled,
-      )
-    }
     item {
       FilledTonalButton(onClick = onExport, enabled = enabled) {
         Icon(Icons.Outlined.FileUpload, null, Modifier.size(18.dp))
