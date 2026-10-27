@@ -27,6 +27,7 @@ data class DraftScene(
 
 data class WorkspaceDraft(
   val scenes: List<DraftScene>,
+  // Preserve notes from legacy drafts and existing projects without an editor UI.
   val notes: String = "",
 ) {
   fun validate() {

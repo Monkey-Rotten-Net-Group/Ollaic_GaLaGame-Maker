@@ -31,7 +31,7 @@
 | Asset rename/delete | Revision checked; rename updates scripts, characters and reference directories; deletion rejects known usages | Asset menu |
 | Character management | Profiles, aliases, sprites/emotions, reference images, voice defaults and relations | Project tools/figure editor |
 | Animation management | JSON create/edit, validation, revision checks and asset operations | Project tools/Assets |
-| Project name/synopsis and writing notes | Implemented | Project |
+| Project name/synopsis | Implemented | Project |
 | Runtime preview and playable publishing | Pending; project ZIP export remains available | Script/project tools |
 | Scene graph | Pending | Project tools |
 | Chapters/outlines, voice synthesis and matting | Pending | Project tools |
@@ -40,13 +40,14 @@
 | Advanced game/application settings | Pending | Project tools/home menu |
 
 Pending entries open an explicit availability message; they do not simulate successful actions.
-Writing notes are mobile editor data, distinct from the desktop AI project-memory feature.
 
 ## Compatibility And Persistence
 
 Projects use the desktop `game/config.txt`, `game/scene/*.txt` and asset layout. Existing
 project metadata and unfamiliar files are preserved rather than rewritten from a reduced model.
-Native visual identities/order and notes are stored separately in `.ollaic/mobile-editor.json`.
+Native visual identities/order are stored separately in `.ollaic/mobile-editor.json`.
+The Android writing-notes editor has been removed. Existing notes remain in mobile editor
+data and survive saves, legacy draft migration, and exports; they are separate from desktop AI memory.
 The shared editor keeps original source for unmodified entries. Engine continuations remain
 source entries, and unknown/custom syntax can be edited in the complete scene source view.
 

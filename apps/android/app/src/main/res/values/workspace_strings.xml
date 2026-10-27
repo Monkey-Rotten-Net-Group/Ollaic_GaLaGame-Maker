@@ -69,7 +69,6 @@
   <string name="workspace_audio">音频</string>
   <string name="workspace_import_asset">导入素材</string>
   <string name="workspace_empty_assets">还没有素材</string>
-  <string name="workspace_project_notes">创作笔记</string>
   <string name="workspace_discard">放弃更改并返回</string>
   <string name="workspace_stay">继续编辑</string>
   <string name="workspace_export_project">导出项目 ZIP</string>

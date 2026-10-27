@@ -275,7 +275,7 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
                     } catch (error: Exception) { assetError = error.message }
                   }, { asset, action -> assetSelection = "${asset.category}/${asset.name}"; assetAction = action },
                     { assetSelection = null; assetAction = "animation" })
-                  WorkspaceTab.Project -> ProjectDraftPanel(project, document, !blocked, onEditProject, files.exportProject, ::feature) { notes -> editor.edit { it.copy(notes = notes) } }
+                  WorkspaceTab.Project -> ProjectDraftPanel(project, document, !blocked, onEditProject, files.exportProject, ::feature)
                 }
               }
               if (!ime && current in listOf(WorkspaceTab.Script, WorkspaceTab.Scenes)) {
