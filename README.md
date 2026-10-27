@@ -34,7 +34,7 @@ See [Development Standards](DEVELOPMENT.md) for the English directory-level rule
 - `apps/desktop/src-tauri/`: Desktop Rust backend, native capabilities, and Tauri configuration.
 - `apps/android/`: Native Kotlin/Jetpack Compose application.
 - `apps/ios/`: Native SwiftUI application for iPhone and iPad.
-- `crates/`: Shared WebGAL project core and UniFFI interfaces for native applications.
+- `crates/`: Shared WebGAL project core, preview hosting, and UniFFI interfaces.
 - `bindings/swift/`: Host integration checks for generated Swift bindings.
 - `scripts/`: Shared development and release tooling.
 
@@ -66,8 +66,8 @@ Vite 默认使用 `127.0.0.1:1420`，Tauri 会打开桌面窗口。
 
 The native Kotlin / Jetpack Compose application lives in [`apps/android/`](apps/android/README.md).
 It calls the shared Rust project core through UniFFI and uses Material 3 with the Ollaic palette.
-It does not bundle the desktop frontend, Tauri, or the matting model. A network-disabled
-WebView is used only for SVG previews.
+It does not bundle the desktop frontend, Tauri, or the matting model.
+WebView hosts local WebGAL playtesting and isolated SVG previews.
 
 Requires JDK 21, Android SDK 36, an Android NDK, and Rust stable. The default ABI is ARM64:
 

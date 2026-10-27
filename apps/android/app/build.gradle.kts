@@ -42,7 +42,7 @@ val buildNativeCore by tasks.registering(Exec::class) {
   commandLine("bash", "scripts/build-native-core.sh", generated.get().asFile.absolutePath,
     providers.gradleProperty("ollaicAbis").orElse("arm64-v8a").get())
   inputs.files(project.fileTree(repository.resolve("crates")) {
-    include("*/src/**", "*/Cargo.toml", "*/uniffi.toml", "*/build.rs")
+    include("*/src/**", "*/Cargo.toml", "*/uniffi.toml", "*/build.rs", "*/webgal-version.txt")
   })
   inputs.files(repository.resolve("Cargo.toml"), repository.resolve("Cargo.lock"), repository.resolve("scripts/build-native-core.sh"))
   inputs.property("abis", providers.gradleProperty("ollaicAbis").orElse("arm64-v8a"))

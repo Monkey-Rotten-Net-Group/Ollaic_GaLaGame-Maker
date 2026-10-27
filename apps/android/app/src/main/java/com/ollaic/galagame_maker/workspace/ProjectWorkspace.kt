@@ -16,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,12 +33,15 @@ import com.ollaic.core.CharacterInfo
 import com.ollaic.core.AssetUsage
 import com.ollaic.galagame_maker.home.HomeDraftStore
 import com.ollaic.galagame_maker.home.HomeProject
+import com.ollaic.galagame_maker.preview.RuntimePreviewRepository
+import com.ollaic.galagame_maker.preview.RuntimePreviewViewModel
+import com.ollaic.galagame_maker.preview.RuntimePreviewScreen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, projects: HomeDraftStore, onClose: () -> Unit, onEditProject: () -> Unit) {
+fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, projects: HomeDraftStore, onClose: () -> Unit, onEditProject: () -> Unit, previewRepository: RuntimePreviewRepository? = null) {
   val factory = remember(workspaces, projects) { WorkspaceViewModel.Factory(workspaces, projects) }
   val editor: WorkspaceViewModel = viewModel(key = "native-workspace", factory = factory)
   val editorState by editor.state.collectAsStateWithLifecycle()
@@ -47,6 +51,8 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
   var tab by rememberSaveable(project.id) { mutableStateOf(WorkspaceTab.Script) }
   var scenePicker by rememberSaveable(project.id) { mutableStateOf(false) }
   var addingScene by rememberSaveable(project.id) { mutableStateOf(false) }
+  var previewing by rememberSaveable(project.id) { mutableStateOf(false) }
+  var preparingPreview by remember { mutableStateOf(false) }
   var renamingScene by rememberSaveable(project.id) { mutableStateOf<String?>(null) }
   var deletingScene by rememberSaveable(project.id) { mutableStateOf<String?>(null) }
   var addingBlock by rememberSaveable(project.id) { mutableStateOf(false) }
@@ -84,7 +90,7 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
     },
     onAssetsChanged = { assetRevision++; editor.resourcesChanged(project.id) },
   )
-  val blocked = leaving || files.busy || state.managingAssets
+  val blocked = leaving || files.busy || state.managingAssets || preparingPreview
   val lifecycle = LocalLifecycleOwner.current.lifecycle
 
   LaunchedEffect(project.id) { editor.open(project, initialScene) }
@@ -121,6 +127,13 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
     scenePicker = false
   }
   fun newScene() { scenePicker = false; addingScene = true }
+  fun preview() {
+    if (blocked) return
+    preparingPreview = true
+    scope.launch {
+      try { if (editor.persist()) previewing = true } finally { preparingPreview = false }
+    }
+  }
   fun rename(value: DraftScene) { scenePicker = false; renamingScene = value.id }
   fun delete(value: DraftScene) { scenePicker = false; deletingScene = value.id }
   fun editBlock(value: ScriptBlock?) {
@@ -130,6 +143,7 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
   }
   fun feature(title: Int) {
     when (title) {
+      R.string.workspace_preview -> preview()
       R.string.workspace_character_manager -> { characterInitialName = null; showingCharacters = true }
       R.string.workspace_animation_manager -> { assetFilter = "animation"; tab = WorkspaceTab.Assets }
       else -> unavailable = title
@@ -166,6 +180,15 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
         }
       })
     }
+  }
+
+  if (previewing) {
+    val context = LocalContext.current.applicationContext
+    val repository = remember(context, previewRepository) { previewRepository ?: RuntimePreviewRepository(context) }
+    val previewFactory = remember(repository, project.id) { RuntimePreviewViewModel.Factory(repository, workspaces.projectDirectory(project.id)) }
+    val previewModel: RuntimePreviewViewModel = viewModel(key = "runtime-preview-${project.id}", factory = previewFactory)
+    RuntimePreviewScreen(project.name, previewModel) { previewing = false }
+    return
   }
 
   BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -252,7 +275,7 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
                   IconButton(onClick = { editor.undo() }, enabled = state.history?.canUndo == true && !blocked) { Icon(Icons.AutoMirrored.Outlined.Undo, stringResource(R.string.workspace_undo)) }
                   IconButton(onClick = { editor.redo() }, enabled = state.history?.canRedo == true && !blocked) { Icon(Icons.AutoMirrored.Outlined.Redo, stringResource(R.string.workspace_redo)) }
                   IconButton(onClick = { sourceScene = scene?.id }, enabled = scene != null && !blocked) { Icon(Icons.Outlined.Code, stringResource(R.string.workspace_edit_source)) }
-                  IconButton(onClick = { unavailable = R.string.workspace_preview }, enabled = !blocked) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.workspace_preview), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                  IconButton(onClick = ::preview, enabled = !blocked) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.workspace_preview)) }
                 }
               }
               HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
