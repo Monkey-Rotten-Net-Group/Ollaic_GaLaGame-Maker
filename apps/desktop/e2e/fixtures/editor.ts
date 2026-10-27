@@ -116,6 +116,7 @@ export async function openFlowBoard(page: Page, viewport: { width: number; heigh
         if (command === 'get_runtime_info') return { installed: true, path: '/tmp/runtime', version: 'test' };
         if (command === 'get_runtime_url') return (window as unknown as { __runtimeTestUrl?: string }).__runtimeTestUrl ?? 'http://127.0.0.1:1420/__runtime-test';
         if (command === 'load_asset_metadata') return { version: 1, characters: {}, sceneCards: {}, voices: {} };
+        if (command === 'list_ai_providers') return { chat: [], image: [], tts: [], video: [] };
         if (command.startsWith('list_') || command === 'sync_scene_voice_cards') return [];
         if (command === 'read_project_memory') return null;
         if (command === 'pipeline_stop') { run.status = 'cancelled'; productionVersion++; }

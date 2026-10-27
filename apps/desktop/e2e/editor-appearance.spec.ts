@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('https://fonts.gstatic.com/**', (route) => route.abort());
 });
 
-for (const width of [390, 1100, 1440]) {
+for (const width of [390, 1100, 1280, 1440]) {
   test(`global navigation replaces the sidebar at ${width}px`, async ({ page }, testInfo) => {
     await openFlowBoard(page, { width, height: 900 }, 'draft');
     const navigation = page.getByRole('navigation', { name: '核心视图' });
@@ -59,7 +59,11 @@ test('global navigation preserves the unsaved-edit confirmation', async ({ page 
 
 test('editor toolbar labels stay on one line at desktop widths', async ({ page }, testInfo) => {
   await openFlowBoard(page, { width: 1280, height: 900 }, 'draft');
-  for (const width of [390, 768, 1024, 1100, 1280, 1440, 1600, 1920]) {
+  await expect(page.locator('.ollaic-topbar')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  for (const width of [
+    390, 768, 1024, 1099, 1100, 1101, 1279, 1280, 1440, 1599, 1600, 1799, 1800, 1920,
+  ]) {
     await page.setViewportSize({ width, height: 900 });
     const wrappedLabels = await page.locator('.ollaic-topbar').evaluate((header) =>
       [...header.querySelectorAll('button span, .font-display-family, label span')]
@@ -92,7 +96,12 @@ test('editor toolbar labels stay on one line at desktop widths', async ({ page }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '绯樱酒红主题' }).click();
-  await page.getByRole('button', { name: '保存', exact: true }).click();
+  const settings = page
+    .getByRole('heading', { name: '编辑器设置' })
+    .locator('..')
+    .locator('..')
+    .locator('..');
+  await settings.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('editor-crimson-1440.png') });
 });

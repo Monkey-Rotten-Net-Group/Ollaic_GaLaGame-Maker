@@ -559,14 +559,14 @@
   @media (min-width: 1100px) {
     .ollaic-topbar-start {
       flex: 1 1 0;
-      min-width: 0;
+      min-width: max-content;
     }
     .ollaic-topbar-center {
       flex-shrink: 0;
     }
     .ollaic-topbar-end {
       flex: 1 1 0;
-      min-width: 0;
+      min-width: max-content;
     }
   }
 
