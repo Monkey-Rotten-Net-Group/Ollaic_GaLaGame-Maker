@@ -17,6 +17,7 @@ required-features = ["bindgen"]
 
 [dependencies]
 ollaic-core = { path = "../ollaic-core" }
+ollaic-runtime = { path = "../ollaic-runtime" }
 serde_json = "1"
 thiserror = "2"
 uniffi = "=0.32.2"

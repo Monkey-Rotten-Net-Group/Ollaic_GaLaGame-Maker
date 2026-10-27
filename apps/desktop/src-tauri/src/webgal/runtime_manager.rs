@@ -1,35 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeInfo {
-    pub installed: bool,
-    pub path: String,
-    pub version: Option<String>,
-}
-
-pub fn read_info(dir: &Path) -> RuntimeInfo {
-    let installed = dir.join("index.html").is_file();
-    let version = if installed {
-        std::fs::read_to_string(dir.join("webgal-engine.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|v| {
-                v.get("webgalVersion")
-                    .and_then(|x| x.as_str())
-                    .map(String::from)
-            })
-    } else {
-        None
-    };
-    RuntimeInfo {
-        installed,
-        path: dir.to_string_lossy().to_string(),
-        version,
-    }
-}
+pub use ollaic_runtime::engine::{read_info, RuntimeInfo};
 
 /// Download and extract `WebGAL-<version>-web.zip` into `target_dir`.
 ///

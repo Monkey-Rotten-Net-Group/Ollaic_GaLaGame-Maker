@@ -31,8 +31,6 @@ use tauri_plugin_opener::OpenerExt;
 use webgal::runtime_manager::{self, RuntimeInfo};
 use webgal::runtime_server::RuntimeServer;
 
-const DEFAULT_WEBGAL_VERSION: &str = "4.6.0";
-
 #[tauri::command]
 async fn get_runtime_url(server: tauri::State<'_, RuntimeServer>) -> Result<String, String> {
     Ok(server.url())
@@ -99,7 +97,7 @@ async fn install_runtime(
     server: tauri::State<'_, RuntimeServer>,
     version: Option<String>,
 ) -> Result<RuntimeInfo, String> {
-    let version = version.unwrap_or_else(|| DEFAULT_WEBGAL_VERSION.to_string());
+    let version = version.unwrap_or_else(|| ollaic_runtime::engine_version().to_string());
     let target = user_install_target(&app)?;
     runtime_manager::install(&version, &target).await?;
     server.set_template_dir(target.clone()).await;

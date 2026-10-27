@@ -3025,6 +3025,7 @@ dependencies = [
  "mime_guess",
  "ndarray",
  "ollaic-core",
+ "ollaic-runtime",
  "ort",
  "percent-encoding",
  "reqwest 0.12.28",
@@ -3061,9 +3062,30 @@ name = "ollaic-ffi"
 version = "0.1.0"
 dependencies = [
  "ollaic-core",
+ "ollaic-runtime",
  "serde_json",
  "thiserror 2.0.18",
  "uniffi",
+]
+
+[[package]]
+name = "ollaic-runtime"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "ollaic-core",
+ "percent-encoding",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.21.0",
+ "tower-http 0.5.2",
+ "zip",
 ]
 
 [[package]]
@@ -3941,6 +3963,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
