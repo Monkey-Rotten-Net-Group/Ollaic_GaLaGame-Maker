@@ -16,6 +16,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ollaic.core.*
 import com.ollaic.galagame_maker.R
+import com.ollaic.galagame_maker.home.HomeDraftStore
+import com.ollaic.galagame_maker.home.HomeProject
 import com.ollaic.galagame_maker.home.OllaicTheme
 import com.ollaic.galagame_maker.workspace.*
 import java.io.File
@@ -56,6 +58,61 @@ class EditorInteractionTest {
   }
 
   private fun pressBack() = InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+
+  private fun workspace() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val project = HomeProject(UUID.randomUUID().toString(), "Scene navigation", "", "", 2, false, false)
+    val workspaces = WorkspaceDraftStore(directory)
+    val projects = HomeDraftStore(directory)
+    runBlocking {
+      projects.update { listOf(project) }
+      workspaces.save(project.id, WorkspaceDraft(listOf(
+        DraftScene(name = "Opening", fileName = "start.txt", blocks = listOf(ScriptBlock(kind = BlockKind.Narration, text = "Opening script"))),
+        DraftScene(name = "Current chapter", fileName = "chapter.txt", blocks = listOf(ScriptBlock(kind = BlockKind.Narration, text = "Keep editing this scene"))),
+      )))
+    }
+    mount { ProjectWorkspace(project, workspaces, projects, {}, {}) }
+    compose.waitUntil(5_000) { compose.onAllNodesWithText("Opening script").fetchSemanticsNodes().isNotEmpty() }
+    compose.onNodeWithText(context.getString(R.string.workspace_scenes)).performClick()
+    compose.onNodeWithText("Current chapter").performClick()
+    compose.onNodeWithText("Keep editing this scene").assertIsDisplayed()
+  }
+
+  private fun createScene(name: String) {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    compose.onNodeWithContentDescription(context.getString(R.string.workspace_new_scene)).performClick()
+    compose.onNodeWithTag("field-workspace_scene_name").performTextInput(name)
+    compose.onNodeWithTag("scene-name-save").performClick()
+    compose.onNodeWithTag("scene-name-save").assertDoesNotExist()
+    compose.waitUntil(5_000) { compose.onAllNodesWithText(context.getString(R.string.workspace_saved)).fetchSemanticsNodes().isNotEmpty() }
+  }
+
+  @Test fun creatingSceneFromSceneListKeepsCurrentSelectionAndTab() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    workspace()
+    compose.onNodeWithText(context.getString(R.string.workspace_scenes)).performClick()
+    createScene("New chapter")
+    compose.onNodeWithText(context.getString(R.string.workspace_scenes)).assertIsSelected()
+    compose.onNodeWithText("Current chapter").assertIsSelected()
+    compose.onNodeWithText("New chapter").assertIsNotSelected()
+    compose.onNodeWithText(context.getString(R.string.workspace_script)).performClick()
+    compose.onNodeWithText("Keep editing this scene").assertIsDisplayed()
+    compose.onNodeWithText(context.getString(R.string.workspace_scenes)).performClick()
+    compose.onNodeWithText("New chapter").performClick()
+    compose.onNodeWithText(context.getString(R.string.workspace_script)).assertIsSelected()
+  }
+
+  @Test fun creatingSceneFromScriptPickerKeepsCurrentScript() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    workspace()
+    compose.onNodeWithContentDescription(context.getString(R.string.workspace_select_scene)).performClick()
+    createScene("New chapter")
+    compose.onNodeWithText(context.getString(R.string.workspace_script)).assertIsSelected()
+    compose.onNodeWithText("Keep editing this scene").assertIsDisplayed()
+    compose.onNodeWithText(context.getString(R.string.workspace_scenes)).performClick()
+    compose.onNodeWithText("Current chapter").assertIsSelected()
+    compose.onNodeWithText("New chapter").assertIsNotSelected()
+  }
 
   private fun fields(initial: CommandEdit, assets: List<AssetInfo> = emptyList(), characters: List<CharacterInfo> = emptyList()) {
     mount {
