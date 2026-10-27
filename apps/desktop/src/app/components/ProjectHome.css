@@ -1,0 +1,1099 @@
+/* ProjectHome: project details, cover cards, filtering, and project actions. */
+
+.ph-root {
+  /* Default Seed: Soft Lavender-Violet (如截图般轻盈留白，不全面染红) */
+  --ph-bg-top: #fcfbfe;
+  --ph-bg-bottom: #f6effb;
+  --ph-glow-1: rgba(168, 130, 235, 0.12);
+  --ph-glow-2: rgba(244, 162, 194, 0.12);
+
+  --ph-surface: rgba(255, 255, 255, 0.9);
+  --ph-surface-solid: #ffffff;
+  --ph-surface-low: #f7f4fa;
+  --ph-surface-container: #f1ecf7;
+  --ph-surface-high: #eae3f2;
+
+  --ph-on-surface: #1d1b22;
+  --ph-on-surface-variant: #605a6b;
+  --ph-on-surface-muted: #8c8499;
+  --ph-outline: rgba(101, 85, 143, 0.2);
+  --ph-outline-variant: rgba(101, 85, 143, 0.11);
+
+  /* Accent used sparingly on active tab pill, eyebrow & subtle badges */
+  --ph-primary: #65558f;
+  --ph-primary-hover: #53447a;
+  --ph-on-primary: #ffffff;
+  --ph-primary-container: #eaddff;
+  --ph-on-primary-container: #21005d;
+
+  --ph-badge-bg: #f9d8e6;
+  --ph-badge-text: #5c1936;
+
+  /* Dark Ink CTA Button (matches reference screenshot's clean dark pill button) */
+  --ph-ink-btn: #1f1c24;
+  --ph-ink-btn-hover: #322d3a;
+  --ph-ink-btn-text: #ffffff;
+
+  --ph-danger: #cf222e;
+  --ph-danger-container: #ffebe9;
+  --ph-on-danger-container: #6e1119;
+
+  --ph-shadow-island: 0 4px 20px -4px rgba(29, 27, 34, 0.06), 0 1px 4px 0 rgba(29, 27, 34, 0.04);
+  --ph-shadow-hero: 0 20px 50px -16px rgba(29, 27, 34, 0.1), 0 4px 14px -2px rgba(29, 27, 34, 0.05);
+  --ph-shadow-card: 0 10px 28px -8px rgba(29, 27, 34, 0.08), 0 2px 6px -1px rgba(29, 27, 34, 0.04);
+
+  /* Cute Rounded Font Stack */
+  --ph-font-sans:
+    'Quicksand', 'M PLUS Rounded 1c', 'Zen Maru Gothic', 'Yuanti SC', 'STYuanti-SC-Regular',
+    'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --ph-font-display:
+    'Fredoka', 'Zen Maru Gothic', 'M PLUS Rounded 1c', 'Yuanti SC', 'STYuanti-SC-Bold',
+    'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', sans-serif;
+
+  --ph-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 12%, var(--ph-glow-1) 0%, transparent 48%),
+    radial-gradient(circle at 82% 85%, var(--ph-glow-2) 0%, transparent 52%),
+    linear-gradient(180deg, var(--ph-bg-top) 0%, var(--ph-bg-bottom) 100%);
+  color: var(--ph-on-surface);
+  font-family: var(--ph-font-sans);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================================
+   Subtle Seed Color Variants (Only accents & soft ambient glow change—cards stay white!)
+   ============================================================================ */
+.ph-root[data-seed='crimson'] {
+  --ph-bg-top: #fdfbfc;
+  --ph-bg-bottom: #fbf0f4;
+  --ph-glow-1: rgba(158, 42, 71, 0.09);
+  --ph-glow-2: rgba(245, 158, 11, 0.07);
+  --ph-surface-low: #faf3f5;
+  --ph-surface-container: #f5e9ed;
+  --ph-surface-high: #eedde3;
+  --ph-outline: rgba(158, 42, 71, 0.18);
+  --ph-outline-variant: rgba(158, 42, 71, 0.1);
+  --ph-primary: #9e2a47;
+  --ph-primary-hover: #822039;
+  --ph-primary-container: #fce4eb;
+  --ph-on-primary-container: #4a0e1f;
+  --ph-badge-bg: #fce4eb;
+  --ph-badge-text: #6e152d;
+}
+
+.ph-root[data-seed='teal'] {
+  --ph-bg-top: #fafdfe;
+  --ph-bg-bottom: #eef7f9;
+  --ph-glow-1: rgba(13, 122, 138, 0.1);
+  --ph-glow-2: rgba(56, 189, 248, 0.08);
+  --ph-surface-low: #f1f7f8;
+  --ph-surface-container: #e8f1f3;
+  --ph-surface-high: #dde9ec;
+  --ph-outline: rgba(13, 122, 138, 0.18);
+  --ph-outline-variant: rgba(13, 122, 138, 0.1);
+  --ph-primary: #0f7685;
+  --ph-primary-hover: #0b5f6b;
+  --ph-primary-container: #d3f3f7;
+  --ph-on-primary-container: #06343b;
+  --ph-badge-bg: #d9f3f6;
+  --ph-badge-text: #084c57;
+}
+
+.ph-root[data-seed='amber'] {
+  --ph-bg-top: #fefcf9;
+  --ph-bg-bottom: #faf2e6;
+  --ph-glow-1: rgba(180, 83, 9, 0.09);
+  --ph-glow-2: rgba(244, 114, 182, 0.07);
+  --ph-surface-low: #faf5ee;
+  --ph-surface-container: #f4ece0;
+  --ph-surface-high: #ebe0d0;
+  --ph-outline: rgba(180, 83, 9, 0.18);
+  --ph-outline-variant: rgba(180, 83, 9, 0.1);
+  --ph-primary: #8c5212;
+  --ph-primary-hover: #70400c;
+  --ph-primary-container: #ffedd5;
+  --ph-on-primary-container: #431407;
+  --ph-badge-bg: #fde8cd;
+  --ph-badge-text: #5c2c06;
+}
+
+/* Dark Theme */
+.ph-root.dark {
+  --ph-bg-top: #121017;
+  --ph-bg-bottom: #191522;
+  --ph-glow-1: rgba(168, 130, 235, 0.1);
+  --ph-glow-2: rgba(244, 114, 182, 0.07);
+  --ph-surface: rgba(28, 25, 36, 0.9);
+  --ph-surface-solid: #1e1b26;
+  --ph-surface-low: #252130;
+  --ph-surface-container: #2d283a;
+  --ph-surface-high: #373146;
+  --ph-on-surface: #f2edf7;
+  --ph-on-surface-variant: #b8b0c7;
+  --ph-on-surface-muted: #857c96;
+  --ph-outline: rgba(208, 188, 255, 0.22);
+  --ph-outline-variant: rgba(208, 188, 255, 0.12);
+  --ph-primary: #b69df8;
+  --ph-primary-hover: #c9b6fb;
+  --ph-on-primary: #261454;
+  --ph-primary-container: rgba(101, 85, 143, 0.4);
+  --ph-on-primary-container: #eaddff;
+  --ph-badge-bg: rgba(244, 114, 182, 0.2);
+  --ph-badge-text: #fbcfe8;
+  --ph-ink-btn: #f2edf7;
+  --ph-ink-btn-hover: #ffffff;
+  --ph-ink-btn-text: #1d1b22;
+  --ph-shadow-island: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+  --ph-shadow-hero: 0 24px 56px -14px rgba(0, 0, 0, 0.6);
+  --ph-shadow-card: 0 12px 30px -8px rgba(0, 0, 0, 0.45);
+}
+
+/* ============================================================================
+   1. Top Bar: 3 Separate Floating Pill Islands with Generous Breathing Room
+   ============================================================================ */
+.ph-topbar {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px 28px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+}
+
+/* Left Brand Pill Island */
+.ph-brand-island {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 14px 6px 8px;
+  border-radius: 999px;
+  background: var(--ph-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--ph-outline-variant);
+  box-shadow: var(--ph-shadow-island);
+}
+
+.ph-brand-island__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--ph-primary);
+  color: var(--ph-on-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ph-brand-island__name {
+  font-family: var(--ph-font-display);
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--ph-on-surface);
+}
+
+.ph-brand-island__tag {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ph-badge-bg);
+  color: var(--ph-badge-text);
+}
+
+/* Center Navigation + Search Pill Island */
+.ph-center-island {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--ph-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--ph-outline-variant);
+  box-shadow: var(--ph-shadow-island);
+  flex-wrap: wrap;
+}
+
+.ph-filter-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ph-filter-pill {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ph-on-surface-variant);
+  font-family: var(--ph-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 11px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.2s var(--ph-ease-spring);
+}
+
+.ph-filter-pill:hover {
+  background: var(--ph-surface-low);
+  color: var(--ph-on-surface);
+}
+
+.ph-filter-pill.is-active {
+  background: var(--ph-primary);
+  color: var(--ph-on-primary);
+}
+
+.ph-filter-pill__count {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.07);
+  color: inherit;
+}
+
+.ph-filter-pill.is-active .ph-filter-pill__count {
+  background: rgba(255, 255, 255, 0.24);
+  color: var(--ph-on-primary);
+}
+
+.ph-island-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--ph-outline-variant);
+  margin: 0 2px;
+}
+
+.ph-search-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 210px;
+}
+
+.ph-search-pill__icon {
+  position: absolute;
+  left: 10px;
+  color: var(--ph-on-surface-muted);
+  pointer-events: none;
+}
+
+.ph-search-pill__input {
+  width: 100%;
+  height: 30px;
+  padding: 0 26px 0 30px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--ph-surface-low);
+  color: var(--ph-on-surface);
+  font-family: var(--ph-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+  transition: all 0.18s ease;
+}
+
+.ph-search-pill__input:focus {
+  background: var(--ph-surface-solid);
+  border-color: var(--ph-primary);
+}
+
+.ph-search-pill__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.ph-search-pill__clear {
+  position: absolute;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: none;
+  background: var(--ph-surface-container);
+  color: var(--ph-on-surface-variant);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* Right Action Cluster Island */
+.ph-right-island {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ph-action-pill {
+  appearance: none;
+  height: 34px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--ph-outline-variant);
+  background: var(--ph-surface);
+  color: var(--ph-on-surface);
+  font-family: var(--ph-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: var(--ph-shadow-island);
+  transition: all 0.2s var(--ph-ease-spring);
+}
+
+.ph-action-pill:hover {
+  background: var(--ph-surface-solid);
+  border-color: var(--ph-outline);
+  transform: translateY(-1px);
+}
+
+.ph-seed-island {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-outline-variant);
+  box-shadow: var(--ph-shadow-island);
+}
+
+.ph-seed-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.2s var(--ph-ease-spring);
+}
+
+.ph-seed-dot:hover {
+  transform: scale(1.18);
+}
+
+.ph-seed-dot.is-active {
+  transform: scale(1.22);
+  border-color: var(--ph-on-surface);
+}
+
+.ph-seed-dot--violet {
+  background: #65558f;
+}
+
+.ph-seed-dot--crimson {
+  background: #9e2a47;
+}
+
+.ph-seed-dot--teal {
+  background: #0f7685;
+}
+
+.ph-seed-dot--amber {
+  background: #d97706;
+}
+
+.ph-theme-btn {
+  appearance: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--ph-outline-variant);
+  background: var(--ph-surface);
+  color: var(--ph-on-surface-variant);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--ph-shadow-island);
+  transition: all 0.2s ease;
+}
+
+.ph-theme-btn:hover {
+  color: var(--ph-on-surface);
+  background: var(--ph-surface-solid);
+}
+
+/* ============================================================================
+   2. Centered Breathable Main Stage (留白充足的居中主舞台，最大宽度 1060px)
+   ============================================================================ */
+.ph-stage-container {
+  width: 100%;
+  max-width: 1060px;
+  margin: 14px auto 56px;
+  padding: 0 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  box-sizing: border-box;
+}
+
+/* ============================================================================
+   3. Split White Hero Card (左图右白字，与参考截图一致)
+   ============================================================================ */
+.ph-hero-card {
+  width: 100%;
+  min-height: 296px;
+  border-radius: 26px;
+  background: var(--ph-surface-solid);
+  border: 1px solid var(--ph-outline-variant);
+  box-shadow: var(--ph-shadow-hero);
+  padding: 8px;
+  display: grid;
+  grid-template-columns: 1.08fr 1fr;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+/* Left Artwork Stage inside Hero Card */
+.ph-hero-visual {
+  position: relative;
+  border-radius: 20px;
+  overflow: hidden;
+  min-height: 278px;
+  background: #246a88;
+  box-sizing: border-box;
+}
+
+.ph-hero-visual__art {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.ph-hero-visual__art svg,
+.ph-hero-visual__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.6s var(--ph-ease-spring);
+}
+
+.ph-hero-card:hover .ph-hero-visual__art svg,
+.ph-hero-card:hover .ph-hero-visual__art img {
+  transform: scale(1.03);
+}
+
+/* Right Crisp White Info Panel inside Hero Card */
+.ph-hero-info {
+  position: relative;
+  padding: 24px 28px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.ph-hero-info__top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ph-hero-title {
+  margin: 2px 0 0;
+  font-family: var(--ph-font-display);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--ph-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-hero-desc {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ph-on-surface-variant);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ph-hero-meta-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ph-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--ph-surface-low);
+  color: var(--ph-on-surface-variant);
+  font-size: 11px;
+  font-weight: 700;
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-hero-info__footer {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ph-outline-variant);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ph-ink-cta {
+  appearance: none;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: none;
+  background: var(--ph-ink-btn);
+  color: var(--ph-ink-btn-text);
+  font-family: var(--ph-font-sans);
+  font-size: 12.5px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(29, 27, 34, 0.16);
+  transition: all 0.2s var(--ph-ease-spring);
+}
+
+.ph-ink-cta:hover {
+  background: var(--ph-ink-btn-hover);
+  transform: translateY(-1px);
+}
+
+.ph-soft-btn {
+  appearance: none;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ph-outline-variant);
+  background: var(--ph-surface-low);
+  color: var(--ph-on-surface-variant);
+  font-family: var(--ph-font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ph-soft-btn:hover {
+  background: var(--ph-surface-container);
+  color: var(--ph-on-surface);
+}
+
+/* ============================================================================
+   4. Bottom Gallery Shelf (下方作品卡片区：支持自定义封面背景 + 恢复 description)
+   ============================================================================ */
+.ph-shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ph-shelf-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ph-shelf-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ph-shelf-heading {
+  margin: 0;
+  font-family: var(--ph-font-display);
+  font-size: 16.5px;
+  font-weight: 800;
+  color: var(--ph-on-surface);
+}
+
+.ph-view-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--ph-surface);
+  border: 1px solid var(--ph-outline-variant);
+  box-shadow: var(--ph-shadow-island);
+}
+
+.ph-view-pill {
+  appearance: none;
+  height: 32px;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--ph-on-surface-variant);
+  font-family: var(--ph-font-sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ph-view-pill.is-active {
+  background: var(--ph-surface-container);
+  color: var(--ph-on-surface);
+}
+
+/* Status & Alert Banners */
+.ph-banner {
+  padding: 10px 16px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.ph-banner--opening {
+  background: var(--ph-primary-container);
+  color: var(--ph-on-primary-container);
+}
+
+.ph-banner--error {
+  background: var(--ph-danger-container);
+  color: var(--ph-on-danger-container);
+}
+
+.ph-spin {
+  animation: phSpin 1s linear infinite;
+}
+
+@keyframes phSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Accordion Horizontal Row (Grid Mode) & List Mode */
+.ph-cards-row {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+}
+
+.ph-cards-row--list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+/* Individual Project Card (Upper Visual + Lower White Description Box) */
+.ph-card {
+  position: relative;
+  flex: 1 1 230px;
+  min-width: 220px;
+  max-width: 360px;
+  border-radius: 22px;
+  background: var(--ph-surface-solid);
+  border: 1.5px solid var(--ph-outline-variant);
+  box-shadow: var(--ph-shadow-card);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  transition:
+    flex 0.36s var(--ph-ease-spring),
+    transform 0.24s var(--ph-ease-spring),
+    border-color 0.2s ease,
+    box-shadow 0.24s ease;
+}
+
+.ph-cards-row:not(.ph-cards-row--list) .ph-card:hover,
+.ph-cards-row:not(.ph-cards-row--list) .ph-card.is-selected {
+  flex: 1.42 1 290px;
+  transform: translateY(-3px);
+  border-color: var(--ph-primary);
+  box-shadow: var(--ph-shadow-hero);
+}
+
+.ph-cards-row--list .ph-card {
+  max-width: none;
+}
+
+.ph-card__open-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.ph-card__open-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* Upper Cover Area (Custom Image or Default SVG) */
+.ph-card__visual {
+  position: relative;
+  width: 100%;
+  height: 128px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #246a88;
+}
+
+.ph-card__visual > svg,
+.ph-card__visual > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.5s var(--ph-ease-spring);
+}
+
+.ph-card:hover .ph-card__visual > svg,
+.ph-card:hover .ph-card__visual > img {
+  transform: scale(1.05);
+}
+
+.ph-card__scene-pill {
+  position: absolute;
+  left: 10px;
+  bottom: 9px;
+  z-index: 2;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(18, 22, 32, 0.72);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+/* Top-Right Floating White Action Pill on Card */
+.ph-card__actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.ph-root.dark .ph-card__actions {
+  background: rgba(30, 27, 38, 0.92);
+}
+
+.ph-card__icon-btn {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--ph-on-surface-variant);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ph-card__icon-btn:hover {
+  background: var(--ph-surface-container);
+  color: var(--ph-on-surface);
+}
+
+.ph-card__icon-btn.is-starred {
+  color: #d97706;
+}
+
+.ph-card__icon-btn--danger:hover {
+  background: var(--ph-danger-container);
+  color: var(--ph-danger);
+}
+
+/* Lower White Content Box inside Card (Title + Description + Footer) */
+.ph-card__body {
+  padding: 12px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.ph-card__title {
+  margin: 0;
+  font-family: var(--ph-font-display);
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--ph-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-card__desc {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ph-on-surface-variant);
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-card__footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ph-outline-variant);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ph-on-surface-muted);
+}
+
+.ph-card__path {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-card__path > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-card__path > svg,
+.ph-meta-chip > svg,
+.ph-card__scene-pill > svg {
+  flex-shrink: 0;
+}
+
+.ph-card__time {
+  flex-shrink: 0;
+}
+
+/* Empty State */
+.ph-empty-state {
+  padding: 44px 24px;
+  border-radius: 24px;
+  background: var(--ph-surface);
+  border: 1.5px dashed var(--ph-outline);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.ph-empty-state__title {
+  margin: 0;
+  font-family: var(--ph-font-display);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.ph-empty-state__desc {
+  margin: 0;
+  max-width: 400px;
+  font-size: 12.5px;
+  color: var(--ph-on-surface-variant);
+}
+
+/* ============================================================================
+   5. Dialog Modals (with Custom Cover Background Picker)
+   ============================================================================ */
+.ph-create-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ph-directory-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ph-directory-picker > input {
+  min-width: 0;
+  flex: 1;
+  text-overflow: ellipsis;
+}
+
+.ph-directory-picker > button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ph-create-error {
+  color: var(--ph-danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ph-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(20, 16, 28, 0.42);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ph-dialog-card {
+  width: 100%;
+  max-width: 460px;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid var(--ph-outline);
+  background: var(--ph-surface-solid);
+  color: var(--ph-on-surface);
+  box-shadow: var(--ph-shadow-hero);
+}
+
+.ph-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.ph-dialog-label {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--ph-on-surface);
+}
+
+.ph-dialog-input,
+.ph-dialog-textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1.5px solid var(--ph-outline);
+  background: var(--ph-surface-low);
+  color: var(--ph-on-surface);
+  padding: 10px 12px;
+  font-family: var(--ph-font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.ph-dialog-input:focus,
+.ph-dialog-textarea:focus {
+  border-color: var(--ph-primary);
+  background: var(--ph-surface-solid);
+}
+
+.ph-cover-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ph-cover-preview {
+  width: 72px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ph-outline);
+  background: var(--ph-surface-low);
+  flex-shrink: 0;
+}
+
+.ph-cover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+@media (max-width: 920px) {
+  .ph-hero-card {
+    grid-template-columns: 1fr;
+  }
+
+  .ph-cards-row {
+    flex-wrap: wrap;
+  }
+}
