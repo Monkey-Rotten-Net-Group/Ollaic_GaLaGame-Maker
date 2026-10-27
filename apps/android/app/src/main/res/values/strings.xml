@@ -3,7 +3,7 @@
   <string name="home_more">更多选项</string>
   <string name="home_about">关于 Ollaic</string>
   <string name="home_create">新建项目</string>
-  <string name="home_create_draft">创建草稿</string>
+  <string name="home_create_draft">创建项目</string>
   <string name="home_import">导入</string>
   <string name="home_library">项目库</string>
   <string name="home_project_count">%1$d 个项目</string>
@@ -32,7 +32,7 @@
   <string name="home_restore">还原项目</string>
   <string name="home_remove">永久移除</string>
   <string name="home_confirm_trash">移入回收站？</string>
-  <string name="home_confirm_remove">永久移除草稿？</string>
+  <string name="home_confirm_remove">永久移除项目？</string>
   <string name="home_morning">早安，创作者</string>
   <string name="home_noon">午安，创作者</string>
   <string name="home_afternoon">下午好，创作者</string>
