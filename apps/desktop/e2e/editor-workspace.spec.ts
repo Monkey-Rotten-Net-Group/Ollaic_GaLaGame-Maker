@@ -4,8 +4,8 @@ import { openFlowBoard } from './fixtures/editor';
 test('one editing entry keeps both Agent drafts and workflow selection', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
   await expect(page).toHaveURL(/\/editor\/alpha\?agent=workflow$/);
-  await expect(page.locator('.ollaic-sidenav').getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.ollaic-sidenav').getByText(/生产流|脚本流|场景/)).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: '核心视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: '核心视图' }).getByText(/生产流|脚本流|场景/)).toHaveCount(0);
   await page.getByLabel('production brief').fill('我们这次只制作故事。');
   await page.getByLabel('执行世界观设定').uncheck();
   await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();

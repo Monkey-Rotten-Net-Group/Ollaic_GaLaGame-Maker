@@ -43,7 +43,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
+import { OllaicTopBar } from './OllaicChrome';
 import { FlowBoardView } from './FlowBoard';
 import { useFlowRunController } from '../hooks/useFlowRunController';
 import { useRuntimePreview } from '../hooks/useRuntimePreview';
@@ -1135,8 +1135,6 @@ export function StoryEditor() {
     );
   }
 
-  const gameName = projectInfo?.config?.Game_name || `项目 ${projectId ?? ''}`;
-
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="h-full story-shell">
@@ -1150,6 +1148,9 @@ export function StoryEditor() {
           </div>
         )}
         <OllaicTopBar
+          projectId={projectId}
+          activeSection="edit"
+          onBeforeNavigate={guardedNavigate}
           title="编辑"
           onUndo={workflowOwnsProject ? undefined : undo}
           onRedo={workflowOwnsProject ? undefined : redo}
@@ -1167,7 +1168,6 @@ export function StoryEditor() {
           onAutoSaveChange={setAutoSaveEnabled}
           onSettings={() => setAppSettingsOpen(true)}
         />
-        <OllaicSideNav active="edit" projectId={projectId} projectLabel={gameName} onBeforeNavigate={guardedNavigate} />
 
         <main className="ollaic-workspace flex min-w-0 flex-col">
           <header className="editor-workspace-toolbar">
@@ -1196,9 +1196,9 @@ export function StoryEditor() {
                 {scriptMode === 'script' ? '指令视图' : '脚本源码'}
               </button>
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? preferredDockLayout : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
-              <button type="button" className={`ollaic-top-action ${viewMode === 'worldline' ? 'bg-primary/10 text-primary' : ''}`} aria-pressed={viewMode === 'worldline'} onClick={toggleSceneGraph}><GitBranch className="size-4" /><span className="hidden sm:inline">场景图</span><span className="sr-only sm:hidden">场景图</span></button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/12 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? preferredDockLayout : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
+              <button type="button" className={`ollaic-top-action ${viewMode === 'worldline' ? 'bg-primary/12 text-primary' : ''}`} aria-pressed={viewMode === 'worldline'} onClick={toggleSceneGraph}><GitBranch className="size-4" /><span className="hidden sm:inline">场景图</span><span className="sr-only sm:hidden">场景图</span></button>
               <button type="button" className="ollaic-icon-button" onClick={() => setAgentOpen((value) => !value)} aria-label={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'} aria-expanded={agentOpen} title={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'}>{agentOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}</button>
             </div>
           </header>

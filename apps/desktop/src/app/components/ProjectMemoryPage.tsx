@@ -5,7 +5,7 @@ import {
   addMemoryEntry, deleteMemoryEntry, MEMORY_CATEGORIES, memoryEntries, readProjectMemory, updateMemoryEntry,
   type MemoryCategory, type MemoryEntry, type ProjectMemory,
 } from '../lib/project-memory';
-import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
+import { OllaicTopBar } from './OllaicChrome';
 import { Switch } from './ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 
@@ -131,9 +131,8 @@ export function ProjectMemoryPage() {
 
   return (
     <div className="min-h-screen bg-surface-container-lowest text-foreground">
-      <OllaicTopBar title="项目记忆" />
-      <OllaicSideNav active="memory" projectId={projectId} />
-      <main className="ml-20 min-w-0 pt-12">
+      <OllaicTopBar projectId={projectId} activeSection="edit" title="项目记忆" />
+      <main className="min-w-0 pt-16">
         <div className="mx-auto max-w-5xl px-4 py-6 sm:px-8 sm:py-8">
           <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
             <div className="flex min-w-0 items-center gap-3">

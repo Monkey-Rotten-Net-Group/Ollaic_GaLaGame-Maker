@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
-import { OllaicSideNav } from '../OllaicChrome';
+import { OllaicTopBar } from '../OllaicChrome';
 import type { WebGalNode } from '../../lib/webgal-types';
 import { FullScreenWorldline } from './SceneWorldline';
 
@@ -114,9 +114,9 @@ describe('FullScreenWorldline', () => {
   });
 });
 
-describe('OllaicSideNav navigation integration', () => {
+describe('OllaicTopBar navigation integration', () => {
   it('unifies production, scripts and scenes under editing', () => {
-    render(<MemoryRouter><OllaicSideNav active="edit" projectId="test-proj" /></MemoryRouter>);
+    render(<MemoryRouter><OllaicTopBar activeSection="edit" projectId="test-proj" /></MemoryRouter>);
     expect(screen.getByRole('button', { name: '编辑' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: /生产流|脚本流|^场景$/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /资源库/ })).toBeInTheDocument();

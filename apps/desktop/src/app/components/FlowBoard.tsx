@@ -132,7 +132,7 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
   useEffect(() => {
     const modal = Boolean(selectedStepId && (embedded || !wideInspector));
     const surfaces = [headerRef.current, workspaceRef.current,
-      ...(embedded ? [] : document.querySelectorAll<HTMLElement>('.ollaic-topbar, .ollaic-sidenav'))];
+      ...(embedded ? [] : document.querySelectorAll<HTMLElement>('.ollaic-topbar'))];
     surfaces.forEach((element) => element?.toggleAttribute('inert', modal));
     return () => surfaces.forEach((element) => element?.removeAttribute('inert'));
   }, [selectedStepId, wideInspector, embedded]);

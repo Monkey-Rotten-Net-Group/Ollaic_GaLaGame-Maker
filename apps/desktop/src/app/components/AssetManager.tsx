@@ -66,7 +66,7 @@ import { getScenePath, loadScene, openProject, saveScene } from '../lib/webgal-i
 import type { WebGalNode } from '../lib/webgal-types';
 import { listCharacters } from '../lib/character-ipc';
 import { CharacterPanel } from './CharacterPanel';
-import { OllaicSideNav, OllaicTopBar } from './OllaicChrome';
+import { OllaicTopBar } from './OllaicChrome';
 import { VoiceDubbingPanel } from './VoiceDubbingPanel';
 
 type TabId = 'scene' | 'cg' | 'music' | 'character' | 'dubbing';
@@ -1183,15 +1183,11 @@ export function AssetManager() {
   return (
     <div className="h-full story-shell">
       <OllaicTopBar
+        projectId={projectId}
+        activeSection="assets"
         title="素材库"
         onRun={() => navigate(`/editor/${projectId}?action=preview`)}
         onPublish={() => navigate(`/editor/${projectId}?action=export`)}
-      />
-      <OllaicSideNav
-        active={activeTab === 'character' ? 'characters' : 'assets'}
-        projectId={projectId}
-        projectLabel={projectPath ? projectPath.split('/').pop() : 'ALPHA'}
-        onCreate={handleImport}
       />
 
       {!projectPath ? (
@@ -1853,7 +1849,7 @@ export function AssetManager() {
                             <span>{formatSize(asset.size)}</span>
                           </div>
                           {!isAudioExt(asset.extension) && (
-                            <div className="mt-1 flex items-center gap-1 text-[11px] text-secondary/80">
+                            <div className="mt-1 flex items-center gap-1 text-[11px] text-primary/80">
                               <Eye className="h-3 w-3" />
                               <span>Used in {countUsages(assetUsages, asset.name)} scene{countUsages(assetUsages, asset.name) === 1 ? '' : 's'}</span>
                             </div>
@@ -1930,7 +1926,7 @@ export function AssetManager() {
                             </div>
                           )}
                           {!isAudioExt(asset.extension) && (
-                            <div className="mt-1 flex items-center gap-1 text-[11px] text-secondary/80">
+                            <div className="mt-1 flex items-center gap-1 text-[11px] text-primary/80">
                               <Eye className="h-3 w-3" />
                               <span>Used in {countUsages(assetUsages, asset.name)} scene{countUsages(assetUsages, asset.name) === 1 ? '' : 's'}</span>
                             </div>
