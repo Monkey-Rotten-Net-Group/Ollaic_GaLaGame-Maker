@@ -320,8 +320,6 @@ fun ProjectWorkspace(project: HomeProject, workspaces: WorkspaceDraftStore, proj
       else {
         val created = DraftScene(name = name, fileName = com.ollaic.core.sceneFileName(name))
         editor.edit { it.copy(scenes = it.scenes + created) }
-        selectedScene = created.id
-        tab = WorkspaceTab.Script
       }
       addingScene = false
       renamingScene = null

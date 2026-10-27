@@ -2,11 +2,11 @@ package com.ollaic.galagame_maker.workspace
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Subject
@@ -138,7 +138,7 @@ fun SceneListPanel(
           Modifier.fillMaxWidth().background(
             if (scene.id == selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
             RoundedCornerShape(4.dp),
-          ).clickable(enabled = enabled) { onSelect(scene.id) }.padding(start = 12.dp),
+          ).selectable(selected = scene.id == selected, enabled = enabled) { onSelect(scene.id) }.padding(start = 12.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Text((index + 1).toString().padStart(2, '0'), Modifier.width(28.dp), style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurfaceVariant)

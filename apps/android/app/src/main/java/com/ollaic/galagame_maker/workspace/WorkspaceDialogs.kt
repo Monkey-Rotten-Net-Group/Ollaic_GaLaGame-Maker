@@ -150,10 +150,10 @@ fun SceneNameDialog(scene: DraftScene?, scenes: List<DraftScene>, onDismiss: () 
         label = { Text(stringResource(R.string.workspace_scene_name)) },
         isError = duplicate || invalid,
         supportingText = { if (duplicate || invalid) Text(stringResource(if (duplicate) R.string.workspace_duplicate_scene else R.string.workspace_invalid_scene)) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("field-workspace_scene_name"),
       )
     },
-    confirmButton = { TextButton(enabled = name.isNotBlank() && !duplicate && !invalid, onClick = { onSave(name.trim()) }) { Text(stringResource(R.string.home_save)) } },
+    confirmButton = { TextButton(modifier = Modifier.testTag("scene-name-save"), enabled = name.isNotBlank() && !duplicate && !invalid, onClick = { onSave(name.trim()) }) { Text(stringResource(R.string.home_save)) } },
     dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.home_cancel)) } },
   )
 }
