@@ -49,7 +49,7 @@ private enum class LibraryFilter(val title: Int, val icon: ImageVector, val empt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NativeHomeScreen(snapshot: HomeSnapshot, onAction: (String, String?) -> Unit) {
+fun NativeHomeScreen(snapshot: HomeSnapshot, busy: Boolean = false, onAction: (String, String?) -> Unit) {
   var query by rememberSaveable { mutableStateOf("") }
   var filter by rememberSaveable { mutableStateOf(LibraryFilter.All) }
   var grid by rememberSaveable { mutableStateOf(false) }
@@ -73,6 +73,7 @@ fun NativeHomeScreen(snapshot: HomeSnapshot, onAction: (String, String?) -> Unit
     modifier = Modifier.fillMaxSize().imePadding(),
     containerColor = MaterialTheme.colorScheme.background,
     topBar = {
+      Column {
       TopAppBar(
         title = {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -86,6 +87,9 @@ fun NativeHomeScreen(snapshot: HomeSnapshot, onAction: (String, String?) -> Unit
               Icon(Icons.Outlined.MoreVert, stringResource(R.string.home_more))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+              DropdownMenuItem(text = { Text(stringResource(R.string.workspace_settings)) },
+                leadingIcon = { Icon(Icons.Outlined.Settings, null) },
+                onClick = { menuOpen = false; onAction("settings", null) })
               DropdownMenuItem(
                 text = { Text(stringResource(R.string.home_about)) },
                 leadingIcon = { Icon(Icons.Outlined.Info, null) },
@@ -96,6 +100,8 @@ fun NativeHomeScreen(snapshot: HomeSnapshot, onAction: (String, String?) -> Unit
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
       )
+      if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+      }
     },
     bottomBar = {
       if (snapshot.ready) Row(
@@ -207,7 +213,7 @@ fun NativeHomeScreen(snapshot: HomeSnapshot, onAction: (String, String?) -> Unit
             query = ""
             focus.clearFocus()
             onAction("import", null)
-          }, enabled = snapshot.ready && snapshot.canImport) {
+          }, enabled = snapshot.ready && snapshot.canImport && !busy) {
             Icon(Icons.Outlined.FileDownload, null, Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text(stringResource(R.string.home_import))
