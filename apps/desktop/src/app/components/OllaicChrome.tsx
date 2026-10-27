@@ -32,9 +32,6 @@ import {
 } from './ui/dropdown-menu';
 
 type OllaicSection = 'edit' | 'assets';
-type SeedColor = 'violet' | 'crimson' | 'teal' | 'amber';
-
-const SEED_STORAGE_KEY = 'ollaic:ph-seed-color-v3';
 
 export type OllaicSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -104,26 +101,6 @@ export function OllaicTopBar({
     if (onBeforeNavigate) onBeforeNavigate(action);
     else action();
   };
-  const [seedColor, setSeedColor] = useState<SeedColor>(() => {
-    try {
-      const saved = window.localStorage.getItem(SEED_STORAGE_KEY);
-      if (saved === 'violet' || saved === 'crimson' || saved === 'teal' || saved === 'amber') {
-        return saved;
-      }
-    } catch {
-      // ignore
-    }
-    return 'violet';
-  });
-
-  useEffect(() => {
-    document.documentElement.dataset.seed = seedColor;
-    try {
-      window.localStorage.setItem(SEED_STORAGE_KEY, seedColor);
-    } catch {
-      // ignore
-    }
-  }, [seedColor]);
 
   const topActions = [
     { label: '撤销', icon: RotateCcw, handler: onUndo },
@@ -210,49 +187,52 @@ export function OllaicTopBar({
       </div>
 
       {/* Editor actions */}
-      {(topActions.length > 0 || secondaryActions.length > 0) && (
-        <nav
-          className="ollaic-topbar-island hidden min-[1100px]:inline-flex"
-          aria-label="编辑器快捷操作"
-        >
-          {topActions.map(({ label, icon: Icon, handler, primary, dimWhenAutoSave }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={handler}
-              className={
-                primary
-                  ? `ollaic-top-action bg-primary/12 text-primary hover:bg-primary/20 ${dimWhenAutoSave && autoSave ? 'opacity-60' : ''}`
-                  : 'ollaic-top-action'
-              }
-              title={dimWhenAutoSave && autoSave ? '已开启自动保存，也可手动保存' : label}
-              aria-label={label}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span className="hidden xl:inline">{label}</span>
-            </button>
-          ))}
-          {secondaryActions.length > 0 && topActions.length > 0 && (
-            <div className="mx-1 h-4 w-px bg-border" />
-          )}
-          {secondaryActions.map(({ label, icon: Icon, handler }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={handler}
-              className="ollaic-top-action text-muted-foreground hover:text-foreground"
-              aria-label={label}
-              title={label}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span className="hidden min-[1800px]:inline">{label}</span>
-            </button>
-          ))}
-        </nav>
-      )}
+      <div className="ollaic-topbar-center">
+        {(topActions.length > 0 || secondaryActions.length > 0) && (
+          <nav
+            className="ollaic-topbar-island hidden min-[1100px]:inline-flex"
+            aria-label="编辑器快捷操作"
+          >
+            {topActions.map(({ label, icon: Icon, handler, primary, dimWhenAutoSave }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={handler}
+                className={
+                  primary
+                    ? `ollaic-top-action bg-primary/12 text-primary hover:bg-primary/20 ${dimWhenAutoSave && autoSave ? 'opacity-60' : ''}`
+                    : 'ollaic-top-action'
+                }
+                title={dimWhenAutoSave && autoSave ? '已开启自动保存，也可手动保存' : label}
+                aria-label={label}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="hidden xl:inline">{label}</span>
+              </button>
+            ))}
+            {secondaryActions.length > 0 && topActions.length > 0 && (
+              <div className="mx-1 h-4 w-px bg-border" />
+            )}
+            {secondaryActions.map(({ label, icon: Icon, handler }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={handler}
+                className="ollaic-top-action text-muted-foreground hover:text-foreground"
+                aria-label={label}
+                title={label}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="hidden min-[1800px]:inline">{label}</span>
+              </button>
+            ))}
+          </nav>
+        )}
+      </div>
 
       {/* 3. Right Search, Auto-Save, Seed Color Dots & Settings Floating Pill Island */}
-      <div className="ollaic-topbar-island">
+      <div className="ollaic-topbar-end">
+        <div className="ollaic-topbar-island">
         {(topActions.length > 0 || secondaryActions.length > 0) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -323,39 +303,6 @@ export function OllaicTopBar({
           </div>
         )}
 
-        {/* Subtle 4-Seed Accent Dots (Synced with ProjectHome) */}
-        <div
-          className="hidden sm:inline-flex items-center gap-1.5 px-1.5"
-          role="group"
-          aria-label="点缀主题色"
-        >
-          {(
-            [
-              { id: 'violet', color: '#65558f', label: '柔雾鸢尾' },
-              { id: 'crimson', color: '#9e2a47', label: '绯樱酒红' },
-              { id: 'teal', color: '#0f7685', label: '晴空青碧' },
-              { id: 'amber', color: '#d97706', label: '暮光琥珀' },
-            ] as const
-          ).map((dot) => (
-            <button
-              key={dot.id}
-              type="button"
-              onClick={() => setSeedColor(dot.id)}
-              title={dot.label}
-              aria-label={`${dot.label}主题`}
-              style={{
-                width: 11,
-                height: 11,
-                borderRadius: 999,
-                background: dot.color,
-                border:
-                  seedColor === dot.id ? '2px solid var(--foreground)' : '2px solid transparent',
-                transform: seedColor === dot.id ? 'scale(1.2)' : 'scale(1)',
-                padding: 0,
-              }}
-            />
-          ))}
-        </div>
 
         {onSettings && (
           <button
@@ -367,6 +314,7 @@ export function OllaicTopBar({
             <Settings className="h-4 w-4" />
           </button>
         )}
+        </div>
       </div>
     </header>
   );

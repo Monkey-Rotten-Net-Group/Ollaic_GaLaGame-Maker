@@ -1,1 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Geist+Mono:wght@400;500;600;700&family=M+PLUS+Rounded+1c:wght@400;500;700;800&family=Quicksand:wght@500;600;700&family=Zen+Maru+Gothic:wght@500;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Geist+Mono:wght@400;500;600;700&family=Quicksand:wght@500;600;700&display=swap');
+
+@font-face {
+  font-family: '资源圆体';
+  src:
+    local('资源圆体'),
+    local('Resource Han Rounded CN'),
+    local('Resource-Han-Rounded-CN-Regular'),
+    url('../../src-tauri/runtime/WebGAL_Template/assets/ResourceHanRoundedCN-Regular-C1HdCLVq.ttf') format('truetype');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Resource Han Rounded CN';
+  src:
+    local('资源圆体'),
+    local('Resource Han Rounded CN'),
+    local('Resource-Han-Rounded-CN-Regular'),
+    url('../../src-tauri/runtime/WebGAL_Template/assets/ResourceHanRoundedCN-Regular-C1HdCLVq.ttf') format('truetype');
+  font-weight: 100 900;
+  font-display: swap;
+}

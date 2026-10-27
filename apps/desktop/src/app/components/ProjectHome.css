@@ -44,11 +44,13 @@
 
   /* Cute Rounded Font Stack */
   --ph-font-sans:
-    'Quicksand', 'M PLUS Rounded 1c', 'Zen Maru Gothic', 'Yuanti SC', 'STYuanti-SC-Regular',
-    'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    'Quicksand', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular',
+    'Yuanti SC', 'STYuanti-SC-Regular', 'Hiragino Maru Gothic ProN', 'YouYuan',
+    'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   --ph-font-display:
-    'Fredoka', 'Zen Maru Gothic', 'M PLUS Rounded 1c', 'Yuanti SC', 'STYuanti-SC-Bold',
-    'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', sans-serif;
+    'Fredoka', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular',
+    'Yuanti SC', 'STYuanti-SC-Bold', 'Hiragino Maru Gothic ProN', 'YouYuan',
+    'PingFang SC', sans-serif;
 
   --ph-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 

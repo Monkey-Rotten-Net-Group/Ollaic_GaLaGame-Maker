@@ -4,12 +4,13 @@
   --font-size: 16px;
   /* Cute Rounded GalGame Typography Stack (matching ProjectHome) */
   --font-display:
-    'Fredoka', 'Zen Maru Gothic', 'M PLUS Rounded 1c', 'Yuanti SC', 'STYuanti-SC-Bold',
-    'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', ui-sans-serif, system-ui, sans-serif;
+    'Fredoka', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular',
+    'Yuanti SC', 'STYuanti-SC-Bold', 'Hiragino Maru Gothic ProN', 'YouYuan',
+    'PingFang SC', ui-sans-serif, system-ui, sans-serif;
   --font-body:
-    'Quicksand', 'M PLUS Rounded 1c', 'Zen Maru Gothic', 'Yuanti SC', 'STYuanti-SC-Regular',
-    'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif,
-    system-ui, sans-serif;
+    'Quicksand', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular',
+    'Yuanti SC', 'STYuanti-SC-Regular', 'Hiragino Maru Gothic ProN', 'YouYuan',
+    'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Default Seed: Soft Lavender-Violet with Generous Crisp White Surfaces */
@@ -536,11 +537,44 @@
     flex-shrink: 0;
     align-items: center;
     gap: 10px;
+    pointer-events: none;
+  }
+
+  .ollaic-topbar-center {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .ollaic-topbar-end {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    pointer-events: none;
+  }
+
+  @media (min-width: 1100px) {
+    .ollaic-topbar-start {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+    .ollaic-topbar-center {
+      flex-shrink: 0;
+    }
+    .ollaic-topbar-end {
+      flex: 1 1 0;
+      min-width: 0;
+    }
   }
 
   .ollaic-view-tab {
     display: inline-flex;
     height: 34px;
+    min-width: 86px;
+    flex: 1 1 0;
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
@@ -551,6 +585,7 @@
     font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
+    text-align: center;
   }
 
   .ollaic-view-tab:hover {
@@ -564,6 +599,7 @@
   }
 
   .ollaic-topbar-island {
+    pointer-events: auto;
     display: inline-flex;
     flex-shrink: 0;
     align-items: center;
@@ -855,6 +891,7 @@
     .ollaic-view-tab {
       gap: 4px;
       padding-inline: 9px;
+      min-width: 72px;
     }
     .ollaic-topbar-brand {
       min-width: 0;

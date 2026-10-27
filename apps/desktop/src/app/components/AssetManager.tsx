@@ -1200,7 +1200,7 @@ export function AssetManager() {
       ) : (
         <div className="ollaic-workspace flex bg-surface-container-lowest">
           <main className="relative flex-1 flex flex-col overflow-hidden bg-surface">
-            <div className="flex h-12 items-end gap-1 border-b border-border bg-surface-container-low px-4 pt-2">
+            <div className="flex h-12 items-center gap-1 border-b border-border bg-surface-container-low px-4">
               {tabConfig.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
@@ -1213,10 +1213,10 @@ export function AssetManager() {
                     setSelectedVoiceCard(null);
                     setEditingSceneCard(null);
                   }}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${
+                  className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${
                     activeTab === id
                       ? 'ollaic-layered-tab-active text-foreground'
-                      : 'rounded-t text-muted-foreground hover:bg-surface-container-highest hover:text-foreground'
+                      : 'text-muted-foreground hover:bg-surface-container-highest hover:text-foreground'
                   }`}
                 >
                   <Icon className="h-4 w-4" />

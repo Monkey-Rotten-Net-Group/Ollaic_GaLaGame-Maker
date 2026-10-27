@@ -90,7 +90,9 @@ test('editor toolbar labels stay on one line at desktop widths', async ({ page }
     );
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '绯樱酒红主题' }).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('editor-crimson-1440.png') });
 });

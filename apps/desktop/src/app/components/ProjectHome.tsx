@@ -18,6 +18,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Settings,
   Sparkles,
   Star,
   Sun,
@@ -31,7 +32,8 @@ import {
   openProject,
   type ProjectStorage,
 } from '../lib/webgal-ipc';
-import { loadAppSettings } from './AppSettingsDialog';
+import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
+import { AiSettingsDialog } from './AiSettingsDialog';
 import { saveProjectMemory } from '../lib/project-memory';
 import './ProjectHome.css';
 
@@ -329,6 +331,10 @@ export function ProjectHome() {
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editCover, setEditCover] = useState('');
+
+  // Settings modals
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Quick Hidden File Input for Direct Card Cover Upload
   const coverTargetProjectIdRef = useRef<string | null>(null);
@@ -826,36 +832,15 @@ export function ProjectHome() {
             <span>新建项目</span>
           </button>
 
-          <div className="ph-seed-island" role="group" aria-label="点缀主题色">
-            <button
-              type="button"
-              className={`ph-seed-dot ph-seed-dot--violet ${seedColor === 'violet' ? 'is-active' : ''}`}
-              onClick={() => setSeedColor('violet')}
-              title="柔雾鸢尾 (Violet)"
-              aria-label="柔雾鸢尾主题"
-            />
-            <button
-              type="button"
-              className={`ph-seed-dot ph-seed-dot--crimson ${seedColor === 'crimson' ? 'is-active' : ''}`}
-              onClick={() => setSeedColor('crimson')}
-              title="绯樱酒红 (Crimson)"
-              aria-label="绯樱酒红主题"
-            />
-            <button
-              type="button"
-              className={`ph-seed-dot ph-seed-dot--teal ${seedColor === 'teal' ? 'is-active' : ''}`}
-              onClick={() => setSeedColor('teal')}
-              title="晴空青碧 (Teal)"
-              aria-label="晴空青碧主题"
-            />
-            <button
-              type="button"
-              className={`ph-seed-dot ph-seed-dot--amber ${seedColor === 'amber' ? 'is-active' : ''}`}
-              onClick={() => setSeedColor('amber')}
-              title="暮光琥珀 (Amber)"
-              aria-label="暮光琥珀主题"
-            />
-          </div>
+          <button
+            type="button"
+            className="ph-action-pill"
+            aria-label="设置"
+            onClick={() => setAppSettingsOpen(true)}
+          >
+            <Settings size={13} />
+            <span>设置</span>
+          </button>
 
           <button
             type="button"
@@ -1386,6 +1371,20 @@ export function ProjectHome() {
           </div>
         </div>
       )}
+
+      <AppSettingsDialog
+        open={appSettingsOpen}
+        mode="home"
+        onClose={() => setAppSettingsOpen(false)}
+        onOpenAiSettings={() => {
+          setAppSettingsOpen(false);
+          setAiSettingsOpen(true);
+        }}
+      />
+      <AiSettingsDialog
+        open={aiSettingsOpen}
+        onClose={() => setAiSettingsOpen(false)}
+      />
     </div>
   );
 }
