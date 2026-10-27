@@ -199,6 +199,8 @@ private fun PreviewTool(icon: ImageVector, label: Int, tag: String, enabled: Boo
 internal fun createPreviewWebView(context: Context, url: String, model: RuntimePreviewViewModel,
   onCustomView: (View?, WebChromeClient.CustomViewCallback?) -> Unit = { _, _ -> },
 ): WebView = WebView(context).apply {
+  // Chromium's wrap-content mode can force the CSS layout height to zero.
+  layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
   val expected = Uri.parse(url)
   fun allowed(uri: Uri) = uri.scheme == "http" && uri.host == "127.0.0.1" && uri.port == expected.port
   contentDescription = context.getString(R.string.preview_title)

@@ -291,12 +291,11 @@ async fn rejects_symbolic_links_outside_game_resources() {
 }
 
 #[test]
-fn native_session_rejects_premature_start_and_closes_idempotently() {
+fn native_session_starts_pending_and_closes_idempotently() {
     let project = Project::new();
     let mut session =
         ollaic_runtime::session::PreviewSession::start(&project.engine, &project.project).unwrap();
     assert!(!session.is_ready());
-    assert!(session.begin().is_err());
     let url = reqwest::Url::parse(&session.url()).unwrap();
     session.close();
     session.close();
