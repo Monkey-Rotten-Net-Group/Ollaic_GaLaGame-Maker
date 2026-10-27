@@ -76,17 +76,6 @@ impl NativePreviewSession {
             .ok()
             .is_some_and(|inner| inner.as_ref().is_some_and(|session| session.is_ready()))
     }
-    pub fn begin(&self) -> Result<(), CoreError> {
-        let inner = self
-            .inner
-            .lock()
-            .map_err(|_| failure("Preview session is unavailable"))?;
-        inner
-            .as_ref()
-            .ok_or_else(|| failure("Preview session is closed"))?
-            .begin()
-            .map_err(failure)
-    }
     pub fn stop(&self) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.take();

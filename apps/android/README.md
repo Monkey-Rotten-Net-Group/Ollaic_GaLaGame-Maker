@@ -92,7 +92,8 @@ criteria, synchronization, commit cadence and the small set of system-picker/med
 The script toolbar and project tools open a separate preview after saving succeeds.
 Install the pinned WebGAL version with Download or import its official web ZIP.
 The engine stays in private application storage and works offline after installation.
-Start from the engine title screen; Restart begins a fresh session, Fullscreen hides
+Enter through the engine's normal entry screen and title menu. Restart begins a fresh
+session, Fullscreen hides
 the native toolbar, and Back returns to the same scene and scroll position.
 See [native runtime preview](../../docs/mobile/runtime-preview.md) for installation,
 lifecycle behavior, isolation, and the real-engine test workflow.

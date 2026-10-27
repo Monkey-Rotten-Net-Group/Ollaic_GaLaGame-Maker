@@ -1,8 +1,8 @@
 # Native Runtime Preview
 
 Android runs the pinned WebGAL web engine in a dedicated WebView. This first version
-starts at the normal title screen and plays `game/scene/start.txt`; node jumps, current-scene
-launch, and live draft synchronization remain future work. Desktop keeps its existing
+uses its normal entry screen and title menu to play `game/scene/start.txt`. Node jumps,
+current-scene launch, and live draft synchronization remain future work. Desktop keeps its existing
 preview controls and shares the HTTP/WebSocket host.
 
 ## Engine Installation
@@ -30,7 +30,11 @@ Opening preview waits for the workspace save and library update. Save failure ke
 editor visible with its error. The preview page distinguishes engine preparation, missing
 engine, download, installation, loading, ready, and failure states. Readiness requires both
 page completion and the real engine's `SYNCFC` WebSocket heartbeat, with a 30-second limit.
-Only then is the engine entry overlay dismissed; the ordinary title/start flow remains.
+Readiness does not skip or dismiss the entry screen. Its normal user gesture resolves
+the engine's initialization before the title menu becomes interactive.
+
+The native WebView fills its host in both dimensions. Wrap-content sizing can force
+Chromium's CSS layout height to zero, clipping the game stage even if its DOM exists.
 
 Restart creates a new session and clears that preview origin's browser storage so it
 starts from the title again. Fullscreen is optional. Back exits fullscreen first, then
@@ -56,10 +60,12 @@ WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip ANDROID_SERIAL=emulator-55
 The Android command validates the local ZIP path before building, supplies the archive
 to one selected emulator, and runs the preview repository and interaction tests. The
 real-engine test imports that archive into an isolated cache directory, waits for the
-production WebView and heartbeat, plays through a choice into another scene, restarts,
+production WebView and heartbeat, verifies that entry/title controls can receive input,
+plays through a choice into another scene, restarts,
 toggles fullscreen, and stops/resumes the Activity. It verifies return position,
 unchanged project files, and released ports.
-It performs DOM and Compose semantic assertions without screenshots or coordinate clicks.
+It checks DOM visibility and hit testing before semantic clicks; it never calls hidden
+initialization targets directly. It uses no screenshots or coordinate clicks.
 
 Normal instrumentation runs retain deterministic download/error tests and skip the
 real-engine case unless `WEBGAL_TEST_RUNTIME_ZIP` is supplied. Set the same variable for

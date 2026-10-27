@@ -100,7 +100,7 @@ class RuntimePreviewViewModel(
       true
     }
     check(ready == true) { "WebGAL did not become ready within 30 seconds" }
-    native.begin()
+    // WebGAL's entry gesture completes initialization before exposing the title menu.
     mutable.value = RuntimePreviewState(PreviewPhase.Ready, url = url)
     var disconnected = 0
     while (true) {

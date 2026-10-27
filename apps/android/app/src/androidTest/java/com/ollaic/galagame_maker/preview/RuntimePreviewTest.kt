@@ -127,6 +127,51 @@ class RuntimePreviewTest {
     return result.get()
   }
 
+  private fun canInteract(selector: String): Boolean = evaluate("""
+    (() => {
+      const target = document.querySelector(${org.json.JSONObject.quote(selector)});
+      if (!target) return false;
+      for (let node = target; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) <= 0) return false;
+      }
+      const rect = target.getBoundingClientRect();
+      const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+      const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+      if (right <= left || bottom <= top) return false;
+      const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+      return hit === target || target.contains(hit);
+    })()
+  """.trimIndent()) == "true"
+
+  private fun enterGame() {
+    assertTrue("Ready preview must expose an interactive engine entry screen", canInteract(".html-body__title-enter"))
+    evaluate("document.querySelector('.html-body__title-enter').click();true")
+    val start = "[class*=\"Title_buttonList\"] > [class*=\"Title_button\"]"
+    try {
+      compose.waitUntil(10_000) { canInteract(start) }
+    } catch (error: Throwable) {
+      val details = evaluate("""
+        (() => {
+          const target = document.querySelector(${org.json.JSONObject.quote(start)});
+          const parents = [];
+          for (let node = target; node; node = node.parentElement) {
+            const style = getComputedStyle(node), rect = node.getBoundingClientRect();
+            parents.push({id:node.id, class:node.className, display:style.display, visibility:style.visibility,
+              opacity:style.opacity, pointerEvents:style.pointerEvents, zIndex:style.zIndex,
+              rect:{left:rect.left,top:rect.top,width:rect.width,height:rect.height}});
+          }
+          const rect = target?.getBoundingClientRect();
+          const hit = rect ? document.elementsFromPoint(rect.left + rect.width/2, rect.top + rect.height/2)
+            .slice(0,6).map(node => ({id:node.id,class:node.className})) : [];
+          return JSON.stringify({parents,hit,entry:document.querySelector('.html-body__title-enter')?.style.cssText});
+        })()
+      """.trimIndent())
+      throw AssertionError("Title menu is not interactive: $details", error)
+    }
+    evaluate("document.querySelector(${org.json.JSONObject.quote(start)}).click();true")
+  }
+
   private fun dialogueText(): String = evaluate("""
     (() => {
       const text = document.querySelector('#textBoxMain [class*="_text_"]');
@@ -186,8 +231,7 @@ class RuntimePreviewTest {
     compose.onNodeWithText("Second line 20").assertIsDisplayed()
     compose.onNodeWithContentDescription(context.getString(R.string.workspace_preview)).performClick()
     val firstUrl = awaitReady()
-    compose.waitUntil(10_000) { evaluate("!!document.querySelector('[class*=\"Title_buttonList\"] > [class*=\"Title_button\"]')") == "true" }
-    evaluate("document.querySelector('.title__enter-game-target')?.click();document.querySelector('[class*=\"Title_buttonList\"] > [class*=\"Title_button\"]')?.click();true")
+    enterGame()
     try {
       compose.waitUntil(20_000) { dialogueText() == "Preview entry" }
     } catch (error: Throwable) {
@@ -209,7 +253,7 @@ class RuntimePreviewTest {
     val secondUrl = awaitReady(firstUrl)
     assertNotEquals(firstUrl, secondUrl)
     assertClosed(firstUrl)
-    compose.waitUntil(10_000) { evaluate("!!document.querySelector('[class*=\"Title_buttonList\"] > [class*=\"Title_button\"]')") == "true" }
+    assertTrue("Restart must restore the interactive engine entry screen", canInteract(".html-body__title-enter"))
     assertFalse(evaluate("document.body.innerText").contains("Preview entry"))
     compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
     assertClosed(secondUrl)
@@ -217,6 +261,7 @@ class RuntimePreviewTest {
     compose.waitForIdle()
     val resumedUrl = awaitReady(secondUrl)
     assertNotEquals(secondUrl, resumedUrl)
+    assertTrue("Resume must restore the interactive engine entry screen", canInteract(".html-body__title-enter"))
     compose.onNodeWithTag("preview-back").performClick()
     compose.waitUntil(10_000) { compose.onAllNodesWithTag("runtime-preview").fetchSemanticsNodes().isEmpty() }
     compose.onNodeWithText("Second line 20").assertIsDisplayed()

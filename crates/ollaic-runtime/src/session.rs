@@ -35,20 +35,6 @@ impl PreviewSession {
         self.server.is_ready()
     }
 
-    pub fn begin(&self) -> Result<(), String> {
-        if !self.is_ready() {
-            return Err("WebGAL has not connected yet".into());
-        }
-        // Dismiss the engine's entry overlay after its heartbeat; normal title/start flow remains.
-        self.server.broadcast(
-            serde_json::json!({"event": "message", "data": {
-                "command": 4, "sceneMsg": {}, "stageSyncMsg": {}, "message": ""
-            }})
-            .to_string(),
-        );
-        Ok(())
-    }
-
     pub fn close(&mut self) {
         self.server.stop();
         if let Some(runtime) = self.runtime.take() {
