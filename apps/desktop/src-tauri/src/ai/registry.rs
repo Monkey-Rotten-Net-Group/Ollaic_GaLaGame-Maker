@@ -717,7 +717,12 @@ mod tests {
     #[test]
     fn every_modality_entry_offers_its_default_model() {
         for provider in PROVIDERS {
-            for modality in [Modality::Chat, Modality::Image, Modality::Tts, Modality::Video] {
+            for modality in [
+                Modality::Chat,
+                Modality::Image,
+                Modality::Tts,
+                Modality::Video,
+            ] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -741,7 +746,12 @@ mod tests {
     #[test]
     fn base_url_requirement_matches_the_built_in_default() {
         for provider in PROVIDERS {
-            for modality in [Modality::Chat, Modality::Image, Modality::Tts, Modality::Video] {
+            for modality in [
+                Modality::Chat,
+                Modality::Image,
+                Modality::Tts,
+                Modality::Video,
+            ] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -766,7 +776,12 @@ mod tests {
     #[test]
     fn placeholders_never_contain_the_rejected_example_host() {
         for provider in PROVIDERS {
-            for modality in [Modality::Chat, Modality::Image, Modality::Tts, Modality::Video] {
+            for modality in [
+                Modality::Chat,
+                Modality::Image,
+                Modality::Tts,
+                Modality::Video,
+            ] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -800,11 +815,7 @@ mod tests {
                 find(retired).is_some(),
                 "{retired} must stay resolvable for older saved configs"
             );
-            for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts] {
                 assert!(
                     modality_spec(retired, modality).is_none(),
                     "{retired} must not appear in any picker"

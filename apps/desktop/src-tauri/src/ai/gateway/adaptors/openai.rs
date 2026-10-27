@@ -7,14 +7,10 @@
 
 use serde::Deserialize;
 
-use crate::ai::media_support::download_generated_media;
 use crate::ai::config::AiProviderConfig;
-use crate::ai::gateway::transport::{
-    media_endpoint, post_audio_bytes, post_json_text,
-};
-use crate::ai::gateway::types::{
-    strip_data_url_prefix, GeneratedMedia, ImageRequest, TtsRequest,
-};
+use crate::ai::gateway::transport::{media_endpoint, post_audio_bytes, post_json_text};
+use crate::ai::gateway::types::{strip_data_url_prefix, GeneratedMedia, ImageRequest, TtsRequest};
+use crate::ai::media_support::download_generated_media;
 use crate::ai::registry::Modality;
 
 #[derive(Debug, Deserialize)]

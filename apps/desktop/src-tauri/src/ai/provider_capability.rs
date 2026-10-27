@@ -210,11 +210,7 @@ mod tests {
     /// "未知 AI 供应商" only once the user actually ran a generation.
     #[test]
     fn every_selectable_provider_resolves_a_capability() {
-        for modality in [
-            Modality::Chat,
-            Modality::Image,
-            Modality::Tts,
-        ] {
+        for modality in [Modality::Chat, Modality::Image, Modality::Tts] {
             for option in registry::options_for(modality) {
                 let resolved = capability_for_config(&config(&option.value, &option.default_model));
                 assert!(

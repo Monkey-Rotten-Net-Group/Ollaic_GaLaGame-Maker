@@ -11,10 +11,10 @@
 use base64::Engine;
 use serde::Deserialize;
 
-use crate::ai::media_support::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{encode_base64, http_client, resolved_base_url};
 use crate::ai::gateway::types::{strip_data_url_prefix, GeneratedMedia, TtsRequest};
+use crate::ai::media_support::log_provider_event;
 use crate::ai::registry::Modality;
 
 const DEFAULT_RESOURCE_ID: &str = "seed-tts-2.0";
@@ -74,7 +74,14 @@ pub async fn generate_tts(
         .await
         .map_err(|e| {
             let message = format!("火山语音合成请求失败: {e}");
-            log_provider_event("tts_generate", cfg, request.model, &endpoint, false, &message);
+            log_provider_event(
+                "tts_generate",
+                cfg,
+                request.model,
+                &endpoint,
+                false,
+                &message,
+            );
             message
         })?;
     let status = response.status();

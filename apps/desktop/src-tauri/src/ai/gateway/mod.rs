@@ -32,9 +32,7 @@ use crate::ai::config::{self, AiProviderConfig};
 use crate::ai::provider_capability::{require_media_capability, MediaCapability};
 use crate::ai::registry::Modality;
 use adaptors::adaptor_for;
-use types::{
-    AiMediaGenerationProgress, GeneratedMedia, ImageReference, ImageRequest, TtsRequest,
-};
+use types::{AiMediaGenerationProgress, GeneratedMedia, ImageReference, ImageRequest, TtsRequest};
 
 /// Everything an adaptor needs beyond its request: the resolved provider
 /// config, and an optional app handle for progress events. Long-running jobs
@@ -170,10 +168,7 @@ fn media_capability(modality: Modality) -> MediaCapability {
 /// `require_media_capability` already rejected providers the registry does not
 /// offer, so a missing adaptor here means the registry and the dispatch table
 /// disagree — which a test asserts can never happen.
-fn resolve(
-    cfg: &AiProviderConfig,
-    modality: Modality,
-) -> Result<adaptors::MediaAdaptor, String> {
+fn resolve(cfg: &AiProviderConfig, modality: Modality) -> Result<adaptors::MediaAdaptor, String> {
     adaptor_for(&cfg.provider, modality).ok_or_else(|| {
         format!(
             "当前暂未适配 {} 的该生成接口，请使用 OpenAI 兼容 Base URL 或选择已适配供应商。",

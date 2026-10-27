@@ -275,7 +275,10 @@ fn detect_conflicts(request: &ApplyChangeSetRequest) -> Result<Vec<String>, (Str
                     && before.writing_style.is_empty()
                     && before.user_preferences.is_empty();
                 let missing_matches_empty = missing_matches_empty
-                    && before.entries.as_ref().is_none_or(|entries| entries.is_empty());
+                    && before
+                        .entries
+                        .as_ref()
+                        .is_none_or(|entries| entries.is_empty());
                 if !missing_matches_empty
                     && memory
                         .as_ref()

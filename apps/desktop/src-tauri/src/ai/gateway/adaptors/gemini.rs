@@ -6,10 +6,10 @@
 
 use serde::Deserialize;
 
-use crate::ai::media_support::log_provider_event;
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{gemini_endpoint, http_client};
 use crate::ai::gateway::types::{extension_from_mime, GeneratedMedia, ImageRequest};
+use crate::ai::media_support::log_provider_event;
 use crate::ai::registry::Modality;
 
 #[derive(Debug, Deserialize)]
@@ -76,7 +76,14 @@ pub async fn generate_image(
         .await
         .map_err(|e| format!("读取 Gemini 图片生成响应失败: {e}"))?;
     if !status.is_success() {
-        log_provider_event("image_generate", cfg, request.model, &endpoint, false, &text);
+        log_provider_event(
+            "image_generate",
+            cfg,
+            request.model,
+            &endpoint,
+            false,
+            &text,
+        );
         return Err(format!("Gemini 图片生成失败 ({status}): {text}"));
     }
     let parsed: GenerateResponse = serde_json::from_str(&text)

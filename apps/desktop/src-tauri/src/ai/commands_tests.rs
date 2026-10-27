@@ -1,10 +1,10 @@
 use super::*;
+use crate::ai::gateway::adaptors::dashscope::normalize_cosyvoice_voice;
 use crate::ai::safe_media_fetch::{
     fetch_media, is_public_download_ip, validate_download_url, FetchPolicy, MediaDnsResolver,
     MediaKind,
 };
 use std::{collections::BTreeSet, fs};
-use crate::ai::gateway::adaptors::dashscope::normalize_cosyvoice_voice;
 
 fn validate_media_download_url(url: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| format!("无效的下载 URL: {error}"))?;
@@ -26,17 +26,37 @@ async fn chat_client_preserves_base_url_path_with_or_without_trailing_slash() {
                 request.extend_from_slice(&buffer[..count]);
             }
             let headers = String::from_utf8_lossy(&request);
-            assert!(headers.starts_with("POST /api/v1/chat/completions?api-version=test HTTP/1.1"), "{headers}");
+            assert!(
+                headers.starts_with("POST /api/v1/chat/completions?api-version=test HTTP/1.1"),
+                "{headers}"
+            );
             let body = br#"{"id":"chat_test","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-            reply_once(&mut stream, "200 OK", &[("Content-Type", "application/json")], body).await;
+            reply_once(
+                &mut stream,
+                "200 OK",
+                &[("Content-Type", "application/json")],
+                body,
+            )
+            .await;
         });
         let cfg = AiConfig {
-            provider: "custom".into(), model: "test-model".into(), api_key: "test-key".into(),
-            base_url: format!("http://{address}{suffix}?api-version=test"), capabilities: None,
+            provider: "custom".into(),
+            model: "test-model".into(),
+            api_key: "test-key".into(),
+            base_url: format!("http://{address}{suffix}?api-version=test"),
+            capabilities: None,
         };
-        let response = tokio::time::timeout(Duration::from_secs(5), build_client(&cfg).exec_chat(
-            &cfg.model, ChatRequest::new(vec![ChatMessage::user("OK")]), None,
-        )).await.unwrap().unwrap();
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            build_client(&cfg).exec_chat(
+                &cfg.model,
+                ChatRequest::new(vec![ChatMessage::user("OK")]),
+                None,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(response.first_text(), Some("OK"));
         server.await.unwrap();
     }

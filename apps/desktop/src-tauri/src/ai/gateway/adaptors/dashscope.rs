@@ -12,15 +12,13 @@ use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::ai::media_support::{download_generated_media, log_provider_event};
 use crate::ai::config::AiProviderConfig;
 use crate::ai::gateway::transport::{
     encode_base64, http_client, media_endpoint, post_json_text, resolved_base_url,
 };
-use crate::ai::gateway::types::{
-    strip_data_url_prefix, GeneratedMedia, ImageRequest, TtsRequest,
-};
+use crate::ai::gateway::types::{strip_data_url_prefix, GeneratedMedia, ImageRequest, TtsRequest};
 use crate::ai::gateway::{emit_media_generation_progress, MediaCtx};
+use crate::ai::media_support::{download_generated_media, log_provider_event};
 use crate::ai::registry::Modality;
 
 /// The async image task is polled every 2s; 36 attempts bounds a generation
@@ -120,7 +118,14 @@ pub async fn generate_image(
         .await
         .map_err(|e| format!("读取阿里云图片生成响应失败: {e}"))?;
     if !status.is_success() {
-        log_provider_event("image_generate", cfg, request.model, &endpoint, false, &text);
+        log_provider_event(
+            "image_generate",
+            cfg,
+            request.model,
+            &endpoint,
+            false,
+            &text,
+        );
         return Err(format!("阿里云图片生成失败 ({status}): {text}"));
     }
     let parsed: TaskCreateResponse = serde_json::from_str(&text)
@@ -408,7 +413,14 @@ async fn generate_cosyvoice_ws(
     .map_err(|_| "连接 CosyVoice WebSocket 超时".to_string())?;
     let (ws_stream, _resp) = connect.map_err(|e| {
         let message = format!("连接 CosyVoice WebSocket 失败: {e}");
-        log_provider_event("tts_generate", cfg, request.model, &log_url, false, &message);
+        log_provider_event(
+            "tts_generate",
+            cfg,
+            request.model,
+            &log_url,
+            false,
+            &message,
+        );
         message
     })?;
     let (mut write, mut read) = ws_stream.split();
@@ -509,7 +521,14 @@ async fn generate_cosyvoice_ws(
 
     if audio_bytes.is_empty() {
         let message = "CosyVoice 合成完成但未收到任何音频数据".to_string();
-        log_provider_event("tts_generate", cfg, request.model, &log_url, false, &message);
+        log_provider_event(
+            "tts_generate",
+            cfg,
+            request.model,
+            &log_url,
+            false,
+            &message,
+        );
         return Err(message);
     }
     log_provider_event(
@@ -580,7 +599,10 @@ mod tests {
     fn normalize_cosyvoice_voice_passes_through_custom_clone_id() {
         // Clone IDs contain hyphens; must not be mangled.
         let clone_id = "speech-synthesizer-clone-v3-abc123-def456";
-        assert_eq!(normalize_cosyvoice_voice(clone_id, "cosyvoice-v2"), clone_id);
+        assert_eq!(
+            normalize_cosyvoice_voice(clone_id, "cosyvoice-v2"),
+            clone_id
+        );
     }
 
     #[test]

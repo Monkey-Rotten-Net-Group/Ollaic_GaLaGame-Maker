@@ -110,7 +110,9 @@ pub(crate) async fn next_action(
                     // either cleanup succeeded, or the concrete diagnostic
                     // below replaces it. Leaving it behind would make a
                     // successful step look like it still has pending work.
-                    attempt.warnings.retain(|w| w != SNAPSHOT_CLEANUP_PENDING_WARNING);
+                    attempt
+                        .warnings
+                        .retain(|w| w != SNAPSHOT_CLEANUP_PENDING_WARNING);
                     if let Err(error) = &cleanup_result {
                         let warning = error.to_string();
                         if !attempt.warnings.contains(&warning) {

@@ -82,7 +82,12 @@ async fn dispatch(cli: Cli) -> Result<(), String> {
         Command::Probe(args) => run_probe(&render, &cli.global, args).await,
         Command::Chat(args) => run_chat(&render, &cli.global, args).await,
         Command::Editor(args) => {
-            let report = editor::from_files(&cli.global, Path::new(&args.scenario), args.responses.as_deref().map(Path::new)).await?;
+            let report = editor::from_files(
+                &cli.global,
+                Path::new(&args.scenario),
+                args.responses.as_deref().map(Path::new),
+            )
+            .await?;
             render.editor(&report);
             Ok(())
         }

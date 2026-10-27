@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use base64::Engine;
 
-use super::types::GeneratedMedia;
 use super::types::extension_from_mime;
-use crate::ai::media_support::log_provider_event;
+use super::types::GeneratedMedia;
 use crate::ai::config::AiProviderConfig;
+use crate::ai::media_support::log_provider_event;
 use crate::ai::registry::{self, Modality};
 use crate::ai::safe_media_fetch::{collect_media_response, MediaKind};
 
@@ -98,21 +98,18 @@ pub async fn post_json_text(
 ) -> Result<String, String> {
     let body =
         serde_json::to_string(&body).map_err(|e| format!("序列化{action_label}请求失败: {e}"))?;
-    let response = bearer_post(cfg, endpoint, body)
-        .send()
-        .await
-        .map_err(|e| {
-            let message = format!("{action_label}请求失败: {e}");
-            log_provider_event(
-                "media_generate",
-                cfg,
-                cfg.model.trim(),
-                endpoint,
-                false,
-                &message,
-            );
-            message
-        })?;
+    let response = bearer_post(cfg, endpoint, body).send().await.map_err(|e| {
+        let message = format!("{action_label}请求失败: {e}");
+        log_provider_event(
+            "media_generate",
+            cfg,
+            cfg.model.trim(),
+            endpoint,
+            false,
+            &message,
+        );
+        message
+    })?;
     let status = response.status();
     let text = response
         .text()
@@ -244,8 +241,14 @@ mod tests {
     fn chat_base_url_preserves_api_prefix_without_trailing_slash() {
         for base in ["https://proxy.test/api/v1", "https://proxy.test/api/v1/"] {
             let resolved = resolved_chat_base_url("custom", base);
-            let request = reqwest::Url::parse(&resolved).unwrap().join("chat/completions").unwrap();
-            assert_eq!(request.as_str(), "https://proxy.test/api/v1/chat/completions");
+            let request = reqwest::Url::parse(&resolved)
+                .unwrap()
+                .join("chat/completions")
+                .unwrap();
+            assert_eq!(
+                request.as_str(),
+                "https://proxy.test/api/v1/chat/completions"
+            );
         }
     }
 
@@ -255,26 +258,59 @@ mod tests {
             resolved_chat_base_url("custom", " https://proxy.test/v1?api-version=2026-01 "),
             "https://proxy.test/v1/?api-version=2026-01"
         );
-        assert_eq!(resolved_chat_base_url("deepseek", ""), "https://api.deepseek.com/v1/");
+        assert_eq!(
+            resolved_chat_base_url("deepseek", ""),
+            "https://api.deepseek.com/v1/"
+        );
         assert_eq!(resolved_chat_base_url("custom", ""), "");
     }
 
     #[test]
     fn builtin_media_contract_endpoints_are_stable() {
-        assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Image, "images/generations"), "https://api.openai.com/v1/images/generations");
-        assert_eq!(media_endpoint(&cfg("openai", ""), Modality::Tts, "audio/speech"), "https://api.openai.com/v1/audio/speech");
-        assert_eq!(media_endpoint(&cfg("aliyun", ""), Modality::Image, "tasks/abc"), "https://dashscope.aliyuncs.com/api/v1/tasks/abc");
-        assert_eq!(media_endpoint(&cfg("elevenlabs", ""), Modality::Tts, "v1/text-to-speech/voice"), "https://api.elevenlabs.io/v1/text-to-speech/voice");
+        assert_eq!(
+            media_endpoint(&cfg("openai", ""), Modality::Image, "images/generations"),
+            "https://api.openai.com/v1/images/generations"
+        );
+        assert_eq!(
+            media_endpoint(&cfg("openai", ""), Modality::Tts, "audio/speech"),
+            "https://api.openai.com/v1/audio/speech"
+        );
+        assert_eq!(
+            media_endpoint(&cfg("aliyun", ""), Modality::Image, "tasks/abc"),
+            "https://dashscope.aliyuncs.com/api/v1/tasks/abc"
+        );
+        assert_eq!(
+            media_endpoint(
+                &cfg("elevenlabs", ""),
+                Modality::Tts,
+                "v1/text-to-speech/voice"
+            ),
+            "https://api.elevenlabs.io/v1/text-to-speech/voice"
+        );
     }
 
     #[test]
     fn bearer_contract_includes_auth_only_when_configured() {
-        let request = bearer_post(&cfg("openai", "https://gateway.test"), "https://gateway.test/audio/speech", "{}".into()).build().unwrap();
-        assert_eq!(request.headers().get("authorization").unwrap(), "Bearer key");
-        assert_eq!(request.headers().get("content-type").unwrap(), "application/json");
+        let request = bearer_post(
+            &cfg("openai", "https://gateway.test"),
+            "https://gateway.test/audio/speech",
+            "{}".into(),
+        )
+        .build()
+        .unwrap();
+        assert_eq!(
+            request.headers().get("authorization").unwrap(),
+            "Bearer key"
+        );
+        assert_eq!(
+            request.headers().get("content-type").unwrap(),
+            "application/json"
+        );
         let mut local_cfg = cfg("custom", "https://gateway.test");
         local_cfg.api_key.clear();
-        let local = bearer_post(&local_cfg, "https://gateway.test/audio/speech", "{}".into()).build().unwrap();
+        let local = bearer_post(&local_cfg, "https://gateway.test/audio/speech", "{}".into())
+            .build()
+            .unwrap();
         assert!(local.headers().get("authorization").is_none());
     }
 

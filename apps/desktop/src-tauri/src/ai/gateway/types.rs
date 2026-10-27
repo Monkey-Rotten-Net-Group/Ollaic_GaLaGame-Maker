@@ -117,7 +117,10 @@ mod tests {
     #[test]
     fn extension_prefers_the_mime_then_the_requested_format() {
         assert_eq!(extension_from_mime("audio/wav", "mp3"), "wav");
-        assert_eq!(extension_from_mime("application/octet-stream", "mp3"), "mp3");
+        assert_eq!(
+            extension_from_mime("application/octet-stream", "mp3"),
+            "mp3"
+        );
     }
 
     #[test]

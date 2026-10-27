@@ -23,7 +23,11 @@ pub async fn generate_tts(
     let body =
         serde_json::to_string(&body).map_err(|e| format!("序列化 ElevenLabs 请求失败: {e}"))?;
     let response = http_client()
-        .post(format!("{}?output_format={}", endpoint, output_format(request.format)))
+        .post(format!(
+            "{}?output_format={}",
+            endpoint,
+            output_format(request.format)
+        ))
         .header("Content-Type", "application/json")
         .header("xi-api-key", cfg.api_key.trim())
         .body(body)
@@ -62,7 +66,11 @@ fn output_format(format: &str) -> &'static str {
 }
 
 fn actual_extension(format: &str) -> &'static str {
-    match format { "pcm" => "pcm", "wav" => "wav", _ => "mp3" }
+    match format {
+        "pcm" => "pcm",
+        "wav" => "wav",
+        _ => "mp3",
+    }
 }
 
 /// Pull an ElevenLabs voice id out of a free-text voice prompt. Ids are long

@@ -194,19 +194,33 @@ async fn editor_cassettes_replay_the_production_hook_and_backend_parser() {
     for (name, status, turns) in cases {
         let dir = root.join(name);
         let global = super::cli::GlobalArgs {
-            profile: None, record: None, replay: Some(name.into()),
-            cassette_dir: Some(root.display().to_string()), json: true,
+            profile: None,
+            record: None,
+            replay: Some(name.into()),
+            cassette_dir: Some(root.display().to_string()),
+            json: true,
         };
         let report = super::editor::from_files(&global, &dir.join("editor.json"), None)
-            .await.unwrap_or_else(|error| panic!("{name}: {error}"));
-        let expected: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("expected.json")).unwrap()
-        ).unwrap();
+            .await
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let expected: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("expected.json")).unwrap())
+                .unwrap();
         assert_eq!(report, expected, "{name} output changed");
         assert_eq!(report["status"], status, "{name}");
-        assert_eq!(report["chatRuns"].as_array().unwrap().len(), turns, "{name}");
-        assert_eq!(report["bufferWrites"], 0, "{name} changed the saveable buffer");
-        assert_eq!(report["commitCalls"], 0, "{name} committed without approval");
+        assert_eq!(
+            report["chatRuns"].as_array().unwrap().len(),
+            turns,
+            "{name}"
+        );
+        assert_eq!(
+            report["bufferWrites"], 0,
+            "{name} changed the saveable buffer"
+        );
+        assert_eq!(
+            report["commitCalls"], 0,
+            "{name} committed without approval"
+        );
         let recorded = cassette::load(&root, name).unwrap();
         assert_eq!(recorded.provider, "scripted-editor");
         assert_eq!(recorded.interactions.len(), turns);
@@ -219,8 +233,11 @@ async fn editor_commit_page_return_keeps_saves_locked_and_reconciles_the_buffer(
     let dir = root.join("editor-commit-page-return");
     for loading in [false, true] {
         let global = super::cli::GlobalArgs {
-            profile: None, record: None, replay: Some("editor-commit-page-return".into()),
-            cassette_dir: Some(root.display().to_string()), json: true,
+            profile: None,
+            record: None,
+            replay: Some("editor-commit-page-return".into()),
+            cassette_dir: Some(root.display().to_string()),
+            json: true,
         };
         let mut scenario = super::editor::EditorScenario::load(&dir.join("editor.json")).unwrap();
         scenario.loading_on_return = loading;
@@ -233,8 +250,15 @@ async fn editor_commit_page_return_keeps_saves_locked_and_reconciles_the_buffer(
         assert_eq!(navigation["saveBlocked"], true, "{report}");
         assert_eq!(navigation["bufferContent"], ":updated;\n", "{report}");
         assert_eq!(navigation["diskContent"], ":updated;\n", "{report}");
-        assert_eq!(navigation["scenesBeforeCommit"], serde_json::json!(["start.txt"]));
-        assert_eq!(navigation["projectScenes"], serde_json::json!(["chapter_02.txt", "start.txt"]), "{report}");
+        assert_eq!(
+            navigation["scenesBeforeCommit"],
+            serde_json::json!(["start.txt"])
+        );
+        assert_eq!(
+            navigation["projectScenes"],
+            serde_json::json!(["chapter_02.txt", "start.txt"]),
+            "{report}"
+        );
         if loading {
             assert_eq!(navigation["loadBlocked"], true, "{report}");
         }
@@ -245,13 +269,23 @@ async fn editor_commit_page_return_keeps_saves_locked_and_reconciles_the_buffer(
 async fn editor_replay_rejects_a_changed_prompt_without_using_the_live_provider() {
     let root = cassette::default_root();
     let global = super::cli::GlobalArgs {
-        profile: None, record: None, replay: Some("editor-narration-repair".into()),
-        cassette_dir: Some(root.display().to_string()), json: true,
+        profile: None,
+        record: None,
+        replay: Some("editor-narration-repair".into()),
+        cassette_dir: Some(root.display().to_string()),
+        json: true,
     };
-    let mut scenario = super::editor::EditorScenario::load(&root.join("editor-narration-repair/editor.json")).unwrap();
+    let mut scenario =
+        super::editor::EditorScenario::load(&root.join("editor-narration-repair/editor.json"))
+            .unwrap();
     scenario.prompt.push_str(" changed");
-    let error = super::editor::run(&global, scenario, None).await.unwrap_err();
-    assert!(error.contains("cassette has no Chat interaction"), "{error}");
+    let error = super::editor::run(&global, scenario, None)
+        .await
+        .unwrap_err();
+    assert!(
+        error.contains("cassette has no Chat interaction"),
+        "{error}"
+    );
 }
 
 #[test]

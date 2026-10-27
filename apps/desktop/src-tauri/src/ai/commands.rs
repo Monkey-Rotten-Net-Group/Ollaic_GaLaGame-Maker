@@ -1,6 +1,8 @@
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
-use super::gateway::transport::{is_placeholder_base_url, resolved_base_url, resolved_chat_base_url};
+use super::gateway::transport::{
+    is_placeholder_base_url, resolved_base_url, resolved_chat_base_url,
+};
 use super::gateway::types::ImageReference;
 // Re-exported: this module is the IPC facade, so callers keep importing the
 // media result type from here rather than reaching into the gateway.
@@ -176,7 +178,6 @@ pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
     config::save_tts_config(&config)
 }
 
-
 #[tauri::command]
 pub fn get_ai_video_config() -> AiProviderConfig {
     config::load_video_config()
@@ -206,33 +207,85 @@ pub async fn generate_video(prompt: String, model: String) -> Result<GeneratedMe
         .post(format!("{}/video_generation", base.trim_end_matches('/')))
         .bearer_auth(auth)
         .json(&serde_json::json!({"model": model.trim(), "prompt": prompt.trim()}))
-        .send().await.map_err(|e| format!("MiniMax 视频任务提交失败: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("MiniMax 视频任务提交失败: {e}"))?;
     let status = create.status();
-    let payload: serde_json::Value = create.json().await.map_err(|e| format!("读取 MiniMax 任务响应失败: {e}"))?;
-    if !status.is_success() { return Err(format!("MiniMax 视频任务提交失败 ({status}): {payload}")); }
-    let task_id = payload.get("task_id").and_then(|v| v.as_str()).ok_or("MiniMax 响应缺少 task_id")?;
-    let query = format!("{}/query/video_generation?task_id={}", base.trim_end_matches('/'), urlencoding::encode(task_id));
+    let payload: serde_json::Value = create
+        .json()
+        .await
+        .map_err(|e| format!("读取 MiniMax 任务响应失败: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("MiniMax 视频任务提交失败 ({status}): {payload}"));
+    }
+    let task_id = payload
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .ok_or("MiniMax 响应缺少 task_id")?;
+    let query = format!(
+        "{}/query/video_generation?task_id={}",
+        base.trim_end_matches('/'),
+        urlencoding::encode(task_id)
+    );
     for _ in 0..60 {
         tokio::time::sleep(Duration::from_secs(5)).await;
-        let response: serde_json::Value = client.get(&query).bearer_auth(auth).send().await
-            .map_err(|e| format!("查询 MiniMax 视频任务失败: {e}"))?.json().await
+        let response: serde_json::Value = client
+            .get(&query)
+            .bearer_auth(auth)
+            .send()
+            .await
+            .map_err(|e| format!("查询 MiniMax 视频任务失败: {e}"))?
+            .json()
+            .await
             .map_err(|e| format!("读取 MiniMax 任务状态失败: {e}"))?;
-        match response.get("status").and_then(|v| v.as_str()).unwrap_or("") {
+        match response
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+        {
             "Success" | "success" => {
-                let file_id = response.get("file_id").and_then(|v| v.as_str())
+                let file_id = response
+                    .get("file_id")
+                    .and_then(|v| v.as_str())
                     .ok_or("MiniMax 成功响应缺少 file_id")?;
                 let file: serde_json::Value = client
-                    .get(format!("{}/files/retrieve?file_id={}", base.trim_end_matches('/'), urlencoding::encode(file_id)))
-                    .bearer_auth(auth).send().await
+                    .get(format!(
+                        "{}/files/retrieve?file_id={}",
+                        base.trim_end_matches('/'),
+                        urlencoding::encode(file_id)
+                    ))
+                    .bearer_auth(auth)
+                    .send()
+                    .await
                     .map_err(|e| format!("获取 MiniMax 视频文件失败: {e}"))?
-                    .json().await.map_err(|e| format!("读取 MiniMax 视频文件失败: {e}"))?;
-                let url = file.get("file").and_then(|v| v.get("download_url"))
-                    .and_then(|v| v.as_str()).ok_or("MiniMax 文件响应缺少 download_url")?;
-                let bytes = super::safe_media_fetch::fetch_media(url, &super::safe_media_fetch::SystemMediaDnsResolver,
-                    &super::safe_media_fetch::FetchPolicy { total_deadline: Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS), kind: super::safe_media_fetch::MediaKind::Video, allow_address: Box::new(|_, ip| super::safe_media_fetch::is_public_download_ip(ip)) }).await?;
-                return Ok(GeneratedMedia { base64_data: base64::engine::general_purpose::STANDARD.encode(bytes), extension: "mp4".into() });
+                    .json()
+                    .await
+                    .map_err(|e| format!("读取 MiniMax 视频文件失败: {e}"))?;
+                let url = file
+                    .get("file")
+                    .and_then(|v| v.get("download_url"))
+                    .and_then(|v| v.as_str())
+                    .ok_or("MiniMax 文件响应缺少 download_url")?;
+                let bytes = super::safe_media_fetch::fetch_media(
+                    url,
+                    &super::safe_media_fetch::SystemMediaDnsResolver,
+                    &super::safe_media_fetch::FetchPolicy {
+                        total_deadline: Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS),
+                        kind: super::safe_media_fetch::MediaKind::Video,
+                        allow_address: Box::new(|_, ip| {
+                            super::safe_media_fetch::is_public_download_ip(ip)
+                        }),
+                    },
+                )
+                .await?;
+                return Ok(GeneratedMedia {
+                    base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
+                    extension: "mp4".into(),
+                });
             }
-            "Fail" | "Failed" | "failed" => return Err(format!("MiniMax 视频生成失败: {response}")),
+            "Fail" | "Failed" | "failed" => {
+                return Err(format!("MiniMax 视频生成失败: {response}"))
+            }
             _ => continue,
         }
     }
@@ -311,7 +364,6 @@ pub(crate) async fn generate_tts_media(
 ) -> Result<GeneratedMedia, String> {
     gateway::generate_tts(&text, &voice_prompt, &model, &format).await
 }
-
 
 #[tauri::command]
 pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, String> {

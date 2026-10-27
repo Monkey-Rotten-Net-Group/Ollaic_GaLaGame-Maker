@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 
 /// 抠图模型（BiRefNet-lite fp16，MIT）的下载候选地址与预期大小。
 /// 模型不入 git 仓库（115MB），改由构建时下载到 `models/`，再由 Tauri 打进安装包。
@@ -136,9 +136,8 @@ fn ensure_matting_model() -> Result<(), String> {
         }
     }
 
-    let bytes = downloaded_bytes.ok_or_else(|| {
-        format!("所有镜像源下载均失败。最后错误: {last_error}")
-    })?;
+    let bytes =
+        downloaded_bytes.ok_or_else(|| format!("所有镜像源下载均失败。最后错误: {last_error}"))?;
 
     // 先写临时文件再原子重命名，避免构建中断留下半截文件。
     let tmp_path = models_dir.join(format!("{MODEL_FILENAME}.part"));

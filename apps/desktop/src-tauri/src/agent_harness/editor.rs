@@ -127,9 +127,11 @@ impl Backend {
             }
             "load_scene" | "save_scene" => {
                 let path = PathBuf::from(string(&args, "path")?)
-                    .canonicalize().map_err(|e| e.to_string())?;
+                    .canonicalize()
+                    .map_err(|e| e.to_string())?;
                 let root = PathBuf::from(&self.project)
-                    .canonicalize().map_err(|e| e.to_string())?;
+                    .canonicalize()
+                    .map_err(|e| e.to_string())?;
                 if !path.starts_with(root) {
                     return Err("editor harness accesses only its temporary project".into());
                 }
@@ -138,8 +140,8 @@ impl Backend {
                     serde_json::to_value(crate::webgal::commands::load_scene(path)?)
                         .map_err(|e| e.to_string())
                 } else {
-                    let nodes = serde_json::from_value(args["nodes"].clone())
-                        .map_err(|e| e.to_string())?;
+                    let nodes =
+                        serde_json::from_value(args["nodes"].clone()).map_err(|e| e.to_string())?;
                     crate::webgal::commands::save_scene(path, nodes)?;
                     Ok(Value::Null)
                 }

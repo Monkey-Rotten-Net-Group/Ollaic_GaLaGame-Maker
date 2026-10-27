@@ -282,13 +282,16 @@ impl AssetGenerator for PlaceholderAssetGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::{matte_figure_bytes, preflight_media_config, require_figure_matting_model, AssetGeneratorFactory, ConfiguredAssetGeneratorFactory};
+    use super::{
+        matte_figure_bytes, preflight_media_config, require_figure_matting_model,
+        AssetGeneratorFactory, ConfiguredAssetGeneratorFactory,
+    };
     use crate::ai::config::AiProviderConfig;
+    use crate::ai::provider_capability::MediaCapability;
     use crate::asset_queue::{AssetKind, AssetTask};
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-    use crate::ai::provider_capability::MediaCapability;
-    use std::path::PathBuf;
 
     #[test]
     fn generated_figure_uses_matting_output() {

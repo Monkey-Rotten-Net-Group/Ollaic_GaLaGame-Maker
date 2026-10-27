@@ -6,8 +6,8 @@
 
 use std::path::Path;
 
-use crate::agents::{AgentContext, AgentRegistry};
 use crate::agents::router::ChatGateway;
+use crate::agents::{AgentContext, AgentRegistry};
 use crate::pipeline::dsl::{StepExecutor, StepKind};
 use crate::story_plan::{self, types::StoryPlan};
 
