@@ -1,3 +1,3 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "crates/ollaic-core"]
+members = ["apps/desktop/src-tauri", "crates/ollaic-core", "crates/ollaic-ffi"]
 resolver = "2"
