@@ -12,6 +12,7 @@ parsers, repositories and components with isolated temporary projects.
 | Kotlin model | Undo/redo and bounded history | `pnpm android:test:unit` |
 | UniFFI and Android repository | Representative record/enum/optional/list mappings, errors, real Android file IO and archive interoperability | `pnpm android:test:bindings` |
 | Compose | Representative controls, source/form switching, save state, unsaved navigation and keyboard Back | `pnpm android:test:ui` |
+| Runtime preview | Engine installation, actual WebView/engine handshake, entry playback, restart and session cleanup | `WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip pnpm android:test:preview` |
 | Visual acceptance (user) | Layout, animation, displayed media and complete system-picker workflows | User checks these together after integration |
 
 ## Acceptance coverage
@@ -31,6 +32,10 @@ parsers, repositories and components with isolated temporary projects.
   numeric, asset and character-linked fields represent shared control shapes;
   each command using those controls does not need a duplicate UI scenario.
   Save/dirty/error states and navigation belong at this layer.
+- `RuntimePreviewRepositoryTest` injects HTTP responses for deterministic download,
+  cancellation, version rejection, and replacement recovery. `RuntimePreviewTest`
+  checks save failure and uses the actual engine ZIP for playback and lifecycle
+  assertions. See [runtime preview](runtime-preview.md) for fixture setup and coverage.
 
 For a feature commit, record which acceptance conditions passed, the focused
 command and any untested platform boundary. An APK build is not a device test.
@@ -66,6 +71,12 @@ device. A single class or method can be selected without editing a script:
 ```sh
 ANDROID_TEST_CLASS=com.ollaic.galagame_maker.ui.EditorInteractionTest#keyboardBackPreservesBottomSheetDraft pnpm android:test:ui
 ```
+
+UI and integrated commands temporarily enable the on-screen keyboard while a hardware
+keyboard is attached, then restore the device's original setting on exit. This keeps
+IME/Back assertions meaningful on headless emulators without changing user preferences.
+Instrumentation also collapses system panels before launch so the notification shade
+cannot retain input focus from an earlier interaction.
 
 Compose uses semantic actions and stable `testTag` values such as
 `command-mode-source`, `command-save`, `field-character_name` and

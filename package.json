@@ -26,6 +26,7 @@
     "android:test:unit": "bash scripts/android-native.sh unit-test",
     "android:test:bindings": "bash scripts/android-native.sh bindings-test",
     "android:test:ui": "bash scripts/android-native.sh ui-test",
+    "android:test:preview": "bash scripts/android-native.sh preview-test",
     "android:open": "bash scripts/android-native.sh open",
     "ios:dev": "bash scripts/ios-native.sh dev",
     "ios:build": "bash scripts/ios-native.sh build",

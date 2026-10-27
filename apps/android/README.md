@@ -3,7 +3,7 @@
 Independent Kotlin/Jetpack Compose application using Material 3 and the Ollaic brand palette.
 The Gradle project calls the shared Rust core through generated UniFFI Kotlin bindings.
 It does not include `apps/desktop/`, React, a Node build, the matting model,
-or a Tauri runtime. A network-disabled WebView is used only for SVG previews.
+or a Tauri runtime. WebView hosts local WebGAL playtesting and isolated SVG previews.
 
 ## Build
 
@@ -40,7 +40,7 @@ only an emulator is selected. `android:open` opens this independent project in A
 The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 
 Gradle's `buildNativeCore` task runs `scripts/build-native-core.sh`, builds only
-`ollaic-ffi` and `ollaic-core`, generates Kotlin bindings, and packages
+`ollaic-ffi`, `ollaic-core`, and `ollaic-runtime`, generates Kotlin bindings, and packages
 `libollaic_ffi.so` with JNA. Generated sources and libraries stay under `app/build/`.
 Android Studio invokes the same task automatically; no generated source is checked in.
 The Rust crate and bindgen CLI use the same pinned UniFFI version in `Cargo.lock`.
@@ -70,6 +70,7 @@ pnpm test:core
 pnpm android:test:unit
 ANDROID_SERIAL=emulator-5554 pnpm android:test:bindings
 ANDROID_SERIAL=emulator-5554 pnpm android:test:ui
+WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip ANDROID_SERIAL=emulator-5554 pnpm android:test:preview
 ```
 
 Rust owns the complete 23-command edit/save/reload matrix and reference/metadata correctness.
@@ -85,6 +86,16 @@ It never runs connected-device tests against every attached device. `ANDROID_TES
 selects a class or `Class#method` for a focused rerun. The unit command needs no device.
 See [the layered validation workflow](../../docs/mobile/validation.md) for acceptance
 criteria, synchronization, commit cadence and the small set of system-picker/media checks.
+
+## Playtesting
+
+The script toolbar and project tools open a separate preview after saving succeeds.
+Install the pinned WebGAL version with Download or import its official web ZIP.
+The engine stays in private application storage and works offline after installation.
+Start from the engine title screen; Restart begins a fresh session, Fullscreen hides
+the native toolbar, and Back returns to the same scene and scroll position.
+See [native runtime preview](../../docs/mobile/runtime-preview.md) for installation,
+lifecycle behavior, isolation, and the real-engine test workflow.
 
 To inspect a ZIP exported by the Android UI with the desktop's shared project/parser code:
 

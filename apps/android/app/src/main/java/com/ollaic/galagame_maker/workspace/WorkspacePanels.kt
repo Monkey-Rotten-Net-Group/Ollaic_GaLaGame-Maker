@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,7 +70,7 @@ fun ScriptPanel(scene: DraftScene, scrollState: LazyListState, enabled: Boolean,
     return
   }
   LazyColumn(
-    Modifier.fillMaxSize(),
+    Modifier.fillMaxSize().testTag("workspace-script"),
     state = scrollState,
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -192,6 +193,6 @@ fun ProjectDraftPanel(project: HomeProject, document: WorkspaceDraft, enabled: B
     }
     item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }
     item { Text(stringResource(R.string.workspace_project_tools), style = MaterialTheme.typography.titleSmall) }
-    item { PendingProjectTools(setOf(R.string.workspace_character_manager, R.string.workspace_animation_manager)) { if (enabled) onFeature(it) } }
+    item { PendingProjectTools(setOf(R.string.workspace_preview, R.string.workspace_character_manager, R.string.workspace_animation_manager)) { if (enabled) onFeature(it) } }
   }
 }
