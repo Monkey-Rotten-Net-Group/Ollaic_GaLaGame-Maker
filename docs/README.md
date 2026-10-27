@@ -31,6 +31,7 @@
 | [`assets/`](./assets/README.md) | 素材库、元数据、配音管理 |
 | [`characters/`](./characters/README.md) | 角色资料与立绘系统 |
 | [`ai/`](./ai/README.md) | AI Agent、修改预览、会话记忆、参考资料上传、媒体生成、供应商配置 |
+| [`mobile/`](./mobile/README.md) | Shared Rust core, native Android integration, iOS boundaries, and validation |
 
 ## 维护原则
 

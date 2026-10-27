@@ -1,13 +1,23 @@
 # Ollaic Android
 
 Independent Kotlin/Jetpack Compose application using Material 3 and the Ollaic brand palette.
-The Gradle project does not include `apps/desktop/`, `apps/desktop/src-tauri/`, WebView, React, a Node build,
-Rust libraries, the matting model, or a Tauri runtime.
+The Gradle project calls the shared Rust core through generated UniFFI Kotlin bindings.
+It does not include `apps/desktop/`, React, a Node build, the matting model,
+or a Tauri runtime. A network-disabled WebView is used only for SVG previews.
 
 ## Build
 
-Requires JDK 21, Android SDK 36, and access to Google Maven/Maven Central on the first build.
-An NDK and Rust toolchain are not required for this UI prototype.
+Requires JDK 21, Android SDK 36, an Android NDK, Rust stable, and access to
+Google Maven/Maven Central and crates.io on the first build. The default ABI is ARM64:
+
+```sh
+rustup target add aarch64-linux-android
+```
+
+Install the NDK in Android Studio's SDK Tools panel. `ANDROID_NDK_HOME` or
+`ANDROID_NDK_ROOT` can select an installation explicitly; otherwise the helper locates
+an installed NDK under the SDK. Gradle supplies its configured SDK path to the helper.
+The native build helper currently supports macOS and Linux hosts.
 
 From `apps/android/`:
 
@@ -21,6 +31,7 @@ From the repository root:
 pnpm android:build
 pnpm android:dev
 pnpm android:open
+pnpm android:test
 ```
 
 `android:dev` builds, installs, and launches on an existing emulator. It does not start Vite
@@ -28,35 +39,59 @@ or provide web hot reload. A device is selected explicitly with `ANDROID_SERIAL`
 only an emulator is selected. `android:open` opens this independent project in Android Studio.
 The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Prototype Scope
+Gradle's `buildNativeCore` task runs `scripts/build-native-core.sh`, builds only
+`ollaic-ffi` and `ollaic-core`, generates Kotlin bindings, and packages
+`libollaic_ffi.so` with JNA. Generated sources and libraries stay under `app/build/`.
+Android Studio invokes the same task automatically; no generated source is checked in.
+The Rust crate and bindgen CLI use the same pinned UniFFI version in `Cargo.lock`.
 
-- Native home, search, filters, list/grid presentation, menus, dialogs, and system dark mode.
-- Local UI drafts with name, description, favorites, trash, and an atomic private metadata file
-  at `files/native-home-drafts.json`. These are not initialized WebGAL projects.
-- Selecting a project opens a native workspace. New projects open it immediately with one empty scene.
-- The workspace has script, scene, asset, and project views. Phones use bottom navigation;
-  wide screens use a navigation rail and a scene sidebar.
-- Local script drafts support dialogue, narration, notes, duplicate/reorder/delete actions,
-  and up to 50 undo states. Scene creation, rename, deletion, and project notes stay native.
-- Workspace drafts are saved atomically at `files/workspaces/<project-id>/workspace.json`,
-  with a 600 ms autosave debounce, explicit save, and save-before-return navigation.
-  Editor state survives configuration changes; saved documents survive process restarts.
-- Workspace JSON is an Android draft format, not a WebGAL script. Asset import, runtime preview,
-  ZIP import/export, and AI/Agent execution await the shared Rust core.
-- No example projects are inserted into a fresh install.
-- This build uses the existing Android application ID. Installing over the previous Tauri APK
-  retains its private files, but the prototype does not read the legacy Web project library.
+For an x86-64 emulator, install `x86_64-linux-android` and build with
+`./gradlew :app:assembleDebug -PollaicAbis=x86_64`. Multiple ABIs can be supplied as a
+comma-separated Gradle property, for example `-PollaicAbis=arm64-v8a,x86_64`.
 
-The future integration boundary is a shared Rust core exposed through native bindings such as
-UniFFI. Desktop presentation stays in React/Tauri, and Android presentation stays in this project.
+## Project Workflow
+
+Android shares WebGAL parsing, project storage, structured editing, character/asset catalogs,
+and archive handling with the desktop through UniFFI. Native code owns Compose presentation,
+document-provider streams, library metadata, and editor history. See the
+[feature matrix and compatibility contract](../../docs/mobile/README.md) for behavior,
+file formats, recovery, and pending capabilities.
+
+The private library index is `files/native-home-drafts.json`; projects live under
+`files/projects/<project-id>/`. Version-1 drafts migrate when opened and retain their
+original JSON. A fresh install has no example projects. The application ID is unchanged
+from the former Tauri APK, so in-place upgrades retain private files, but this app does
+not read its legacy Web project library. Uninstalling removes private data.
 
 ## Focused Tests
 
 ```sh
-./gradlew :app:testDebugUnitTest :app:assembleDebugAndroidTest
+pnpm test:core
+pnpm android:test:unit
+ANDROID_SERIAL=emulator-5554 pnpm android:test:bindings
+ANDROID_SERIAL=emulator-5554 pnpm android:test:ui
 ```
 
-The JVM tests cover undo/redo and history bounds. Instrumented tests cover workspace persistence,
-project isolation, invalid writes/paths, and compatibility with the original home draft index.
-Install and run the instrumentation APK on a specifically selected emulator with `adb -s SERIAL`;
-avoid running connected-device tasks against every attached device.
+Rust owns the complete 23-command edit/save/reload matrix and reference/metadata correctness.
+JVM tests cover undo/redo and history bounds. The focused bindings suite uses the actual Rust
+library and Android repositories for representative type mappings, file IO, errors and archives.
+Compose tests use production components, semantic actions and stable tags for representative
+controls, mode changes, save state, unsaved navigation and keyboard Back.
+
+Run `pnpm android:test` for the integrated Android regression once features are integrated.
+It builds and installs both APKs on one selected emulator, runs instrumentation,
+and checks the test summary because `am instrument` can return a zero exit status on failures.
+It never runs connected-device tests against every attached device. `ANDROID_TEST_CLASS`
+selects a class or `Class#method` for a focused rerun. The unit command needs no device.
+See [the layered validation workflow](../../docs/mobile/validation.md) for acceptance
+criteria, synchronization, commit cadence and the small set of system-picker/media checks.
+
+To inspect a ZIP exported by the Android UI with the desktop's shared project/parser code:
+
+```sh
+cargo run --locked -p ollaic-core --example inspect-project -- /path/to/project.zip
+```
+
+The optional second argument is text expected in a scene; the command fails if it is absent.
+The shared core tests also cover unsafe ZIP paths/symlinks, size bounds, conflict handling,
+interrupted-save recovery, special-character text, scene links and opaque project files.

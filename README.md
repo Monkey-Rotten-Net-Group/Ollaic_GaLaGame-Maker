@@ -34,6 +34,8 @@ See [Development Standards](DEVELOPMENT.md) for the English directory-level rule
 - `apps/desktop/src-tauri/`: Desktop Rust backend, native capabilities, and Tauri configuration.
 - `apps/android/`: Native Kotlin/Jetpack Compose application.
 - `apps/ios/`: Native SwiftUI application for iPhone and iPad.
+- `crates/`: Shared WebGAL project core and UniFFI interfaces for native applications.
+- `bindings/swift/`: Host integration checks for generated Swift bindings.
 - `scripts/`: Shared development and release tooling.
 
 ### 环境要求
@@ -60,43 +62,54 @@ pnpm tauri:dev
 
 Vite 默认使用 `127.0.0.1:1420`，Tauri 会打开桌面窗口。
 
-### Android 开发
+### Android Development
 
-独立的 Kotlin / Jetpack Compose 原生应用位于 [`apps/android/`](apps/android/README.md)，使用 Material 3 和 Ollaic 品牌配色。这个 Gradle 工程不依赖 React、WebView 或 Tauri，不打包桌面前端、Rust 动态库和抠图模型。
+The native Kotlin / Jetpack Compose application lives in [`apps/android/`](apps/android/README.md).
+It calls the shared Rust project core through UniFFI and uses Material 3 with the Ollaic palette.
+It does not bundle the desktop frontend, Tauri, or the matting model. A network-disabled
+WebView is used only for SVG previews.
 
-需要 JDK 21 和 Android SDK 36；当前首页原型不需要 NDK 或 Rust 工具链。先在 Android Studio 的 Device Manager 中启动虚拟设备，也可以在终端启动：
+Requires JDK 21, Android SDK 36, an Android NDK, and Rust stable. The default ABI is ARM64:
+
+```bash
+rustup target add aarch64-linux-android
+```
+
+Start an emulator in Android Studio's Device Manager or from the terminal:
 
 ```bash
 emulator -list-avds
 emulator -avd YOUR_AVD_NAME
 ```
 
-将 `YOUR_AVD_NAME` 替换为上一步列出的虚拟设备名称。然后在项目根目录运行：
+Replace `YOUR_AVD_NAME` with an installed virtual device name, then run from the repository root:
 
 ```bash
 pnpm android:dev
 ```
 
-这个命令构建调试 APK，安装到正在运行的模拟器并启动应用，不启动 Vite。默认只选择模拟器；需要指定设备时设置 `ANDROID_SERIAL`。
-
-只构建调试 APK：
+This builds, installs, and launches the native app on one running emulator.
+Set `ANDROID_SERIAL` to select a device explicitly. To build without installing:
 
 ```bash
 pnpm android:build
 ```
 
-APK 输出到 `apps/android/app/build/outputs/apk/debug/app-debug.apk`。也可以直接运行 `apps/android/gradlew -p apps/android :app:assembleDebug`，整个构建不调用桌面工具链。
+The APK is `apps/android/app/build/outputs/apk/debug/app-debug.apk`.
+`pnpm android:open` opens the Gradle project in Android Studio; select JDK 21 and
+sync before running its `app` configuration. See the [Android guide](apps/android/README.md)
+for NDK selection and ABI configuration.
 
-使用 Android Studio 时运行 `pnpm android:open`，或直接打开 `apps/android/`：
+Android uses real WebGAL projects with structured command editing, scene management,
+character and asset catalogs, and ZIP import/export. See [native mobile integration](docs/mobile/README.md)
+for compatibility, draft migration, and pending features, and the
+[validation workflow](docs/mobile/validation.md) for test coverage.
 
-1. 在 Settings → Build, Execution, Deployment → Build Tools → Gradle 中，将 Gradle JDK 设为 JDK 21。
-2. 点击 File → Sync Project with Gradle Files，等待同步完成。
-3. 在 Build Variants 中选择 `debug`。
-4. 在 Device Manager 中启动虚拟设备，顶部运行配置选择 `app`、目标选择虚拟设备，然后点击 Run。
+Run the integrated native tests on one selected emulator:
 
-原生首页支持系统深色模式、搜索、筛选、列表/网格切换，以及本地草稿的创建、编辑、收藏和回收站。草稿元数据与工作区内容保存在应用私有目录，尚未初始化成 WebGAL 工程；ZIP 导入暂时禁用。后续通过共享 Rust 核心和原生绑定接入完整项目功能。
-
-点击项目卡片可进入独立原生工作区，支持场景管理、对白/旁白/备注草稿、撤销重做和创作笔记。手机使用底部导航，宽屏展开场景侧栏；草稿自动保存，返回项目库前会完成保存。当前保存的是 Android 本地工作区 JSON，运行预览、素材导入和 Agent 尚未接入 WebGAL/Rust 后端。
+```bash
+ANDROID_SERIAL=emulator-5554 pnpm android:test
+```
 
 Native Android keeps the application ID used by the former Tauri build. In-place upgrades retain private files, but the native app does not read the old Web project library. Uninstalling the app removes its private data.
 
@@ -113,6 +126,10 @@ pnpm ios:dev
 `ios:open` 打开 Xcode 工程；`ios:build` 构建无需签名的 Debug 模拟器应用；`ios:dev` 默认选择并启动普通 iPhone，没有对应设备时自动创建，随后构建、安装并启动应用。通过 `IOS_SIMULATOR_UDID` 可指定已有模拟器，包括 iPad 或 iPhone Duo。runtime 的安装和删除在 Xcode → Settings → Components 中管理；Xcode 27 的 Apple Silicon Mac 可运行 `xcodebuild -downloadPlatform iOS -buildVersion 27.0 -architectureVariant arm64` 安装普通 iPhone 所需的系统。
 
 原生首页支持本地草稿的新建和编辑、简介与封面颜色、收藏、搜索、排序、列表/网格、最近项目和回收站。项目打开后进入原生编辑器，可管理场景，编辑对白、旁白和备注，保存创作笔记，并撤销/重做。iPhone 使用底部切页，iPad 展开场景侧栏；草稿在应用私有目录中原子保存。当前草稿尚未初始化为 WebGAL 工程，素材导入、预览、导出、AI 和共享 Rust 核心尚未接入。构建不依赖 React、Tauri、Rust 或抠图模型。详见 [`apps/ios/README.md`](apps/ios/README.md)。
+
+The shared core also exposes Swift UniFFI bindings. On macOS, `pnpm bindings:test:swift`
+generates and compiles them, then validates project creation, editing, persistence,
+and ZIP round trips. Integration into the iOS app remains pending.
 
 ### 验证
 
