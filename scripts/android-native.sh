@@ -21,13 +21,19 @@ if [[ -z "${ANDROID_HOME:-}" && -d "$HOME/Library/Android/sdk" ]]; then
 fi
 
 case "$mode" in
-  build|dev) ;;
+  build|dev|test|unit-test|bindings-test|ui-test) ;;
   *) printf 'Unknown Android command: %s\n' "$mode" >&2; exit 2 ;;
 esac
 
-"$android_project_dir/gradlew" -p "$android_project_dir" :app:assembleDebug
+tasks=(:app:assembleDebug)
+case "$mode" in
+  unit-test) tasks=(:app:testDebugUnitTest) ;;
+  test) tasks+=(:app:assembleDebugAndroidTest :app:testDebugUnitTest) ;;
+  bindings-test|ui-test) tasks+=(:app:assembleDebugAndroidTest) ;;
+esac
+"$android_project_dir/gradlew" -p "$android_project_dir" "${tasks[@]}"
 
-if [[ "$mode" == "dev" ]]; then
+if [[ "$mode" == "dev" || "$mode" == "test" || "$mode" == "bindings-test" || "$mode" == "ui-test" ]]; then
   adb_command="${ANDROID_HOME:-}/platform-tools/adb"
   if [[ ! -x "$adb_command" ]]; then adb_command="$(command -v adb)"; fi
   device="${ANDROID_SERIAL:-}"
@@ -35,9 +41,27 @@ if [[ "$mode" == "dev" ]]; then
     device="$("$adb_command" devices | awk '$1 ~ /^emulator-/ && $2 == "device" {print $1; exit}')"
   fi
   if [[ -z "$device" ]]; then
-    printf 'Start an Android emulator in Android Studio, then run pnpm android:dev again.\n' >&2
+    printf 'Start an Android emulator in Android Studio, then rerun this command.\n' >&2
     exit 1
   fi
   "$adb_command" -s "$device" install -r "$android_project_dir/app/build/outputs/apk/debug/app-debug.apk"
-  "$adb_command" -s "$device" shell am start -n com.ollaic.galagame_maker/.MainActivity
+  if [[ "$mode" != "dev" ]]; then
+    "$adb_command" -s "$device" install -r "$android_project_dir/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+    filters=()
+    case "$mode" in
+      bindings-test) filters=(-e package com.ollaic.galagame_maker.core,com.ollaic.galagame_maker.workspace) ;;
+      ui-test) filters=(-e package com.ollaic.galagame_maker.ui) ;;
+    esac
+    if [[ -n "${ANDROID_TEST_CLASS:-}" ]]; then filters=(-e class "$ANDROID_TEST_CLASS"); fi
+    if ! result="$("$adb_command" -s "$device" shell am instrument -w "${filters[@]}" com.ollaic.galagame_maker.test/androidx.test.runner.AndroidJUnitRunner 2>&1)"; then
+      printf '%s\n' "$result" >&2
+      exit 1
+    fi
+    printf '%s\n' "$result"
+    if ! grep -Eq 'OK \([0-9]+ tests?\)' <<< "$result" || grep -Eq 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' <<< "$result"; then
+      exit 1
+    fi
+  else
+    "$adb_command" -s "$device" shell am start -n com.ollaic.galagame_maker/.MainActivity
+  fi
 fi
