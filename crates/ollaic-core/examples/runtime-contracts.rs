@@ -80,6 +80,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         cases.push(json!({"source":editor::edit_command("", &edit)?, "command":command, "category":category, "fileName":file_name}));
     }
+    let mut external_cases = Vec::new();
+    for url in [
+        "https://example.invalid/image;part.png?token=a;b%3Bc&key=value#fragment",
+        "http://example.invalid/media%20name;part.ogg?token=%25;keep=1",
+    ] {
+        for (kind, command) in [
+            (EditKind::ChangeBg, "changeBg"),
+            (EditKind::PlayEffect, "playEffect"),
+            (EditKind::Dialogue, "say"),
+        ] {
+            let mut edit = editor::new_command(kind);
+            if kind == EditKind::Dialogue {
+                edit.content = "Hello".into();
+                edit.voice = url.into();
+            } else {
+                edit.asset = url.into();
+            }
+            let source = editor::edit_command("", &edit)?;
+            let saved = ollaic_core::webgal::serializer::serialize_script(
+                &ollaic_core::webgal::parser::parse_script(&source),
+            );
+            external_cases
+                .push(json!({"source":source, "saved":saved, "command":command, "url":url}));
+        }
+    }
     let temporary = tempfile::tempdir()?;
     let root = temporary.path().join("project");
     project::create_project(&root, "Engine contract")?;
@@ -101,6 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = fs::read_to_string(root.join("game/config.txt"))?;
     let result = json!({
         "version":metadata["webgalVersion"], "engine":engine, "builtins":builtins, "cases":cases,
+        "externalCases":external_cases,
         "config":config, "titleName":title_name,
         "animation": {"source":editor::edit_command("", &animation)?, "table":table, "frames":serde_json::from_str::<serde_json::Value>(frames)?}
     });

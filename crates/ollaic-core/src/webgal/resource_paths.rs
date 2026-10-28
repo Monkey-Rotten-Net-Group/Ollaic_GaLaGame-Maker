@@ -1,4 +1,6 @@
-use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use percent_encoding::{
+    percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS, NON_ALPHANUMERIC,
+};
 
 const PATH_CHARACTERS: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'/')
@@ -7,13 +9,19 @@ const PATH_CHARACTERS: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'.')
     .remove(b'~');
 
+const URI_CHARACTERS: &AsciiSet = &CONTROLS.add(b' ').add(b'|').add(b'\\');
+
 fn external(value: &str) -> bool {
     value.starts_with("https://") || value.starts_with("http://")
 }
 
 pub fn encode(value: &str) -> String {
     if external(value) {
-        return value.to_owned();
+        // Keep reserved URI characters intact, including signed query parameters.
+        // WebGAL removes semicolon escapes before resolving the resulting URL.
+        return utf8_percent_encode(value, URI_CHARACTERS)
+            .to_string()
+            .replace(';', "\\;");
     }
     utf8_percent_encode(value, PATH_CHARACTERS).to_string()
 }
@@ -31,7 +39,7 @@ pub fn decode(value: &str) -> String {
 
 pub fn encode_voice(value: &str) -> String {
     if external(value) {
-        value.to_owned()
+        encode(value)
     } else {
         format!("./game/vocal/{}", encode(value))
     }

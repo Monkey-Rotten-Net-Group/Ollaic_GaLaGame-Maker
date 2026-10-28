@@ -85,7 +85,11 @@ fun rememberWorkspaceFiles(
     val owner = assetImportOwner; assetImportOwner = null
     if (uri != null && owner != project.id) error = context.getString(R.string.workspace_import_cancelled)
     else if (uri != null) transfer {
-      DocumentFiles.read(context, uri) { source, name -> workspaces.importAsset(project.id, source, assetCategory, name) }
+      DocumentFiles.read(context, uri) { source, name ->
+        check(editor.importAsset(project.id, source, assetCategory, name)) {
+          editor.state.value.error ?: context.getString(R.string.workspace_error)
+        }
+      }
       onAssetsChanged()
       notice = context.getString(R.string.workspace_asset_imported)
     }

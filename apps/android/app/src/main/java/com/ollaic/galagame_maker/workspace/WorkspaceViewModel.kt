@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ollaic.galagame_maker.home.HomeDraftStore
 import com.ollaic.galagame_maker.home.HomeProject
+import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.CancellationException
@@ -159,6 +160,9 @@ class WorkspaceViewModel(
     opening?.cancel()
     active = false
   }
+
+  suspend fun importAsset(projectId: String, source: File, category: String, name: String): Boolean =
+    mutateProject(projectId) { id -> workspaces.importAsset(id, source, category, name) }
 
   suspend fun mutateProject(projectId: String, operation: suspend (String) -> Unit): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
     if (!active || mutable.value.projectId != projectId) return@withContext false
