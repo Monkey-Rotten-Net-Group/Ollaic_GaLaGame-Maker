@@ -24,7 +24,7 @@ import java.io.File
 @Composable
 fun BlockEditorSheet(block: ScriptBlock?, scenes: List<DraftScene>, sceneId: String?, assets: List<AssetInfo>, characters: List<CharacterInfo>,
   root: File, enabled: Boolean, onImport: (String) -> Unit, onManageCharacters: () -> Unit, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-  val initial = remember(block?.id) {
+  val initial = remember(block) {
     block?.source ?: block?.let { editLine("", it.kind.name, it.speaker, it.text) }.orEmpty()
   }
   val parsed = remember(block?.id) { runCatching { readCommand(initial) }.getOrNull() }
@@ -32,8 +32,41 @@ fun BlockEditorSheet(block: ScriptBlock?, scenes: List<DraftScene>, sceneId: Str
   var sourceMode by rememberSaveable(block?.id) { mutableStateOf(initial.isNotEmpty() && parsed == null) }
   var original by rememberSaveable(block?.id) { mutableStateOf(initial) }
   var source by rememberSaveable(block?.id) { mutableStateOf(initial) }
+  var observedSource by rememberSaveable(block?.id) { mutableStateOf(initial) }
+  var sourceConflict by rememberSaveable(block?.id) { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
   var templates by remember { mutableStateOf(false) }
+
+  fun useProjectSource() {
+    val incoming = runCatching { readCommand(initial) }.getOrNull()
+    if (incoming != null) edit = incoming else sourceMode = true
+    original = initial
+    source = initial
+    observedSource = initial
+    sourceConflict = false
+    error = null
+  }
+
+  fun synchronize(): Boolean {
+    if (sourceConflict) return false
+    if (observedSource == initial) return true
+    val template = if (sourceMode) source else original
+    val merged = mergeCommandSource(observedSource, template, initial)
+    val before = runCatching { readCommand(observedSource) }.getOrNull()
+    val incoming = runCatching { readCommand(initial) }.getOrNull()
+    if (merged == null || (!sourceMode && (before == null || incoming == null))) {
+      sourceConflict = true
+      return false
+    }
+    if (!sourceMode) edit = mergeCommandFields(checkNotNull(before), edit, checkNotNull(incoming))
+    original = if (sourceMode) initial else merged
+    source = merged
+    observedSource = initial
+    error = null
+    return true
+  }
+
+  LaunchedEffect(initial) { synchronize() }
   val sceneNames = scenes.map { it.fileName }
   val labels = remember(scenes, sceneId) {
     scenes.firstOrNull { it.id == sceneId }?.let { scene ->
@@ -46,7 +79,8 @@ fun BlockEditorSheet(block: ScriptBlock?, scenes: List<DraftScene>, sceneId: Str
     Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 20.dp).imePadding()) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(if (block == null) R.string.workspace_add_block else R.string.workspace_edit_block), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        TextButton(modifier = Modifier.testTag("command-save"), enabled = enabled && (!sourceMode || source.isNotBlank()), onClick = {
+        TextButton(modifier = Modifier.testTag("command-save"), enabled = enabled && !sourceConflict && (!sourceMode || source.isNotBlank()), onClick = save@{
+          if (!synchronize()) return@save
           try {
             val rendered = if (sourceMode) source.also { require(it.isNotBlank()) } else editCommand(original, edit)
             onSave(rendered)
@@ -113,6 +147,19 @@ fun BlockEditorSheet(block: ScriptBlock?, scenes: List<DraftScene>, sceneId: Str
       Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
     }
   }
+  if (sourceConflict) AlertDialog(
+    onDismissRequest = {},
+    title = { Text(stringResource(R.string.command_updated)) },
+    text = { Text(stringResource(R.string.command_source_conflict)) },
+    confirmButton = { TextButton(modifier = Modifier.testTag("command-use-update"), onClick = ::useProjectSource) {
+      Text(stringResource(R.string.command_use_update))
+    } },
+    dismissButton = { TextButton(modifier = Modifier.testTag("command-overwrite-update"), onClick = {
+      observedSource = initial
+      sourceConflict = false
+      error = null
+    }) { Text(stringResource(R.string.command_overwrite_update)) } },
+  )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -136,4 +136,8 @@
   <string name="command_unlock_cg">解锁 CG</string>
   <string name="command_unlock_bgm">解锁音乐</string>
   <string name="command_end">结束</string>
+  <string name="command_updated">命令已更新</string>
+  <string name="command_source_conflict">源代码草稿与项目中的更新存在冲突。</string>
+  <string name="command_use_update">使用项目更新</string>
+  <string name="command_overwrite_update">覆盖项目更新</string>
 </resources>

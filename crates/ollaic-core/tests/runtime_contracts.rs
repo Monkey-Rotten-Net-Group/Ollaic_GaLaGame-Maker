@@ -99,6 +99,41 @@ fn resource_commands_use_url_paths_and_keep_physical_names_in_editor_fields() {
 }
 
 #[test]
+fn external_resource_urls_preserve_reserved_characters_through_editor_and_ast_saves() {
+    for url in [
+        "https://example.invalid/image;part.png?token=a;b%3Bc&key=value#fragment",
+        "http://example.invalid/media%20name;part.ogg?token=%25;keep=1",
+    ] {
+        for kind in [
+            editor::EditKind::ChangeBg,
+            editor::EditKind::PlayEffect,
+            editor::EditKind::PlayVideo,
+        ] {
+            let mut edit = editor::new_command(kind);
+            edit.asset = url.into();
+            let source = editor::edit_command("", &edit).unwrap();
+            assert!(source.contains("\\;"), "{source}");
+            assert_eq!(editor::read_command(&source).unwrap().asset, url);
+            let nodes = ollaic_core::webgal::parser::parse_script(&source);
+            let saved = ollaic_core::webgal::serializer::serialize_script(&nodes);
+            assert_eq!(editor::read_command(&saved).unwrap().asset, url);
+            assert!(saved.contains("\\;"), "{saved}");
+        }
+        let mut dialogue = editor::new_command(editor::EditKind::Dialogue);
+        dialogue.content = "Hello".into();
+        dialogue.voice = url.into();
+        let source = editor::edit_command("", &dialogue).unwrap();
+        assert_eq!(editor::read_command(&source).unwrap().voice, url);
+        assert!(source.contains("\\;"), "{source}");
+    }
+    let original = "changeBg:https://example.invalid/image\\;part.png;\n";
+    let saved = ollaic_core::webgal::serializer::serialize_script(
+        &ollaic_core::webgal::parser::parse_script(original),
+    );
+    assert_eq!(saved, original);
+}
+
+#[test]
 fn animation_files_commands_registry_and_references_follow_one_lifecycle() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("project");

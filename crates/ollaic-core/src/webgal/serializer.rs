@@ -141,7 +141,8 @@ fn serialize_node(node: &WebGalNode) -> String {
                     return format!("{}:{}{};", ch, node.content, flags);
                 }
             }
-            format!("{}{};", node.content, flags)
+            // URL colons in flags must not be interpreted as the speaker separator.
+            format!("say:{}{};", node.content, flags)
         }
 
         CommandType::Narrator => format!(":{}{};", node.content, flags),

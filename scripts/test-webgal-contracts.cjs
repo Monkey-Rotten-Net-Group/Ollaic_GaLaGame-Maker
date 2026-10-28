@@ -66,7 +66,7 @@ const parser =
   sourceBetween('function gD(', 'function Cte(') + sourceBetween('const WR=', 'var Np=');
 vm.runInContext(parser, context, { timeout: 1000 });
 vm.runInContext(
-  "const assetSetter = (name, category) => './game/' + category + '/' + name; const commands = new Map(Object.entries(Te).map(([name, scriptType]) => [name, { scriptType }])); commands.set('playEffect', { scriptType: 101 }); Te.playEffect = 101; commands.set('playVideo', { scriptType: Te.video });",
+  "const assetSetter = (name, category) => /^https?:\\/\\//.test(name) ? name : './game/' + category + '/' + name; const commands = new Map(Object.entries(Te).map(([name, scriptType]) => [name, { scriptType }])); commands.set('playEffect', { scriptType: 101 }); Te.playEffect = 101; commands.set('playVideo', { scriptType: Te.video });",
   context,
 );
 for (const item of report.cases) {
@@ -83,6 +83,20 @@ for (const item of report.cases) {
     `/game/${item.category}/${item.fileName}`,
     item.source,
   );
+}
+
+for (const item of report.externalCases) {
+  for (const source of [item.source, item.saved]) {
+    context.input = source;
+    const parsed = vm.runInContext('Lte(input, assetSetter, [], commands)', context, {
+      timeout: 1000,
+    });
+    const resource =
+      item.command === 'say'
+        ? parsed.args.find((argument) => argument.key === 'vocal')?.value
+        : parsed.content;
+    assert.equal(resource, item.url, source);
+  }
 }
 
 context.input = report.config.split('\n').find((line) => line.startsWith('Title_img:'));
@@ -108,5 +122,5 @@ vm.runInContext(
 vm.runInContext(sourceBetween('function wn(', 'function hy('), context);
 assert.equal(vm.runInContext('wn(animationName)', context, { timeout: 1000 }), 300);
 console.log(
-  `WebGAL ${report.version}: ${report.cases.length} resource cases, title configuration, and animation registry passed`,
+  `WebGAL ${report.version}: ${report.cases.length} local and ${report.externalCases.length} external resource cases, title configuration, and animation registry passed`,
 );

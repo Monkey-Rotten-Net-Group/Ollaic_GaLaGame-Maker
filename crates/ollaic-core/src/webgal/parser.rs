@@ -3,6 +3,7 @@ use super::types::*;
 
 /// Known WebGAL commands (not character names).
 const KNOWN_COMMANDS: &[&str] = &[
+    "say",
     "changeBg",
     "changeFigure",
     "miniAvatar",
@@ -304,6 +305,7 @@ fn apply_common_flags(node: &mut WebGalNode) {
 
 fn command_type_from_str(s: &str) -> CommandType {
     match s {
+        "say" => CommandType::Dialogue,
         "changeBg" => CommandType::ChangeBg,
         "changeFigure" => CommandType::ChangeFigure,
         "miniAvatar" => CommandType::MiniAvatar,
@@ -341,6 +343,9 @@ fn build_command_node(
     );
 
     match cmd_type {
+        CommandType::Dialogue | CommandType::Narrator => {
+            node.voice = voice_from_flags(flags);
+        }
         CommandType::ChangeBg | CommandType::MiniAvatar => {
             node.asset = Some(resource_paths::decode(content));
         }
