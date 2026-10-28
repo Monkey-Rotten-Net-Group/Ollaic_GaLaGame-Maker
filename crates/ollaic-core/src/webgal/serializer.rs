@@ -1,4 +1,5 @@
 use super::types::*;
+use super::{parser, resource_paths};
 
 fn is_voice_file_flag(key: &str) -> bool {
     let lower = key.to_lowercase();
@@ -100,7 +101,24 @@ fn serialize_flags(node: &WebGalNode) -> String {
     }
     if let Some(v) = &node.voice {
         if !v.is_empty() {
-            parts.push(format!("-{}", v));
+            let original = node.flags.iter().find(|flag| {
+                if !parser::is_voice_flag(&flag.key) {
+                    return false;
+                }
+                let raw = match &flag.value {
+                    FlagValue::Str(value) => value.as_str(),
+                    _ => flag.key.as_str(),
+                };
+                resource_paths::decode_voice(raw) == *v
+            });
+            parts.push(match original {
+                Some(Flag {
+                    key,
+                    value: FlagValue::Str(value),
+                }) => format!("-{key}={value}"),
+                Some(flag) => format!("-{}", flag.key),
+                None => format!("-vocal={}", resource_paths::encode_voice(v)),
+            });
         }
     }
 
@@ -147,7 +165,15 @@ fn serialize_node(node: &WebGalNode) -> String {
                             if c.target.is_empty() {
                                 c.text.clone()
                             } else {
-                                format!("{}:{}", c.text, c.target)
+                                format!(
+                                    "{}:{}",
+                                    c.text,
+                                    if c.target.contains('.') {
+                                        resource_paths::encode(&c.target)
+                                    } else {
+                                        c.target.clone()
+                                    }
+                                )
                             }
                         })
                         .collect();
@@ -159,27 +185,27 @@ fn serialize_node(node: &WebGalNode) -> String {
 
         CommandType::ChangeBg => {
             let asset = node.asset.as_deref().unwrap_or(&node.content);
-            format!("changeBg:{}{};", asset, flags)
+            format!("changeBg:{}{};", resource_paths::encode(asset), flags)
         }
 
         CommandType::ChangeFigure => {
             let asset = node.asset.as_deref().unwrap_or(&node.content);
-            format!("changeFigure:{}{};", asset, flags)
+            format!("changeFigure:{}{};", resource_paths::encode(asset), flags)
         }
 
         CommandType::MiniAvatar => {
             let asset = node.asset.as_deref().unwrap_or(&node.content);
-            format!("miniAvatar:{}{};", asset, flags)
+            format!("miniAvatar:{}{};", resource_paths::encode(asset), flags)
         }
 
         CommandType::ChangeScene => {
             let target = node.target_scene.as_deref().unwrap_or(&node.content);
-            format!("changeScene:{}{};", target, flags)
+            format!("changeScene:{}{};", resource_paths::encode(target), flags)
         }
 
         CommandType::CallScene => {
             let target = node.target_scene.as_deref().unwrap_or(&node.content);
-            format!("callScene:{}{};", target, flags)
+            format!("callScene:{}{};", resource_paths::encode(target), flags)
         }
 
         CommandType::End => format!("end:{flags};"),
@@ -217,12 +243,12 @@ fn serialize_node(node: &WebGalNode) -> String {
                 _ => unreachable!(),
             };
             let asset = node.asset.as_deref().unwrap_or(&node.content);
-            format!("{}:{}{};", cmd, asset, flags)
+            format!("{}:{}{};", cmd, resource_paths::encode(asset), flags)
         }
 
         CommandType::SetAnimation => {
             let name = node.animation_name.as_deref().unwrap_or(&node.content);
-            format!("setAnimation:{}{};", name, flags)
+            format!("setAnimation:{}{};", resource_paths::encode(name), flags)
         }
 
         CommandType::SetTransform => {
@@ -231,12 +257,12 @@ fn serialize_node(node: &WebGalNode) -> String {
 
         CommandType::UnlockCg => {
             let asset = node.asset.as_deref().unwrap_or(&node.content);
-            format!("unlockCg:{}{};", asset, flags)
+            format!("unlockCg:{}{};", resource_paths::encode(asset), flags)
         }
 
         CommandType::UnlockBgm => {
             let asset = node.asset.as_deref().unwrap_or(&node.content);
-            format!("unlockBgm:{}{};", asset, flags)
+            format!("unlockBgm:{}{};", resource_paths::encode(asset), flags)
         }
     }
 }

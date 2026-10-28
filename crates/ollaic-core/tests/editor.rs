@@ -5,7 +5,7 @@ use ollaic_core::webgal::{parser::parse_script, serializer::serialize_script, ty
 #[test]
 fn media_commands_edit_only_requested_fields_and_voice_markers() {
     for source in ["changeBg:old.png -next; keep\r\n", "changeFigure:old.png -left -id=hero -figureCharacter=Alice -figureEmotion=smile -duration=300; keep\r\n",
-        "miniAvatar:old.png;", "bgm:old.ogg -volume=30;", "playEffect:old.ogg;", "playVideo:old.mp4;", "setAnimation:old.json -target=fig;",
+        "miniAvatar:old.png;", "bgm:old.ogg -volume=30;", "playEffect:old.ogg;", "playVideo:old.mp4;", "setAnimation:old -target=fig;",
         "unlockCg:old.png -name=Old name;", "unlockBgm:old.ogg -name=Old name;"] {
         let mut edit = editor::read_command(source).unwrap();
         assert_eq!(editor::edit_command(source, &edit).unwrap(), source);
@@ -14,7 +14,7 @@ fn media_commands_edit_only_requested_fields_and_voice_markers() {
             editor::EditKind::ChangeFigure => { edit.figure_position = "right".into(); edit.figure_emotion = "sad".into(); },
             editor::EditKind::Bgm | editor::EditKind::PlayEffect | editor::EditKind::PlayVideo => edit.volume = Some(70),
             editor::EditKind::UnlockCg | editor::EditKind::UnlockBgm => edit.display_name = "New name".into(),
-            editor::EditKind::SetAnimation => edit.target = "fig-left".into(), _ => {},
+            editor::EditKind::SetAnimation => { edit.target = "fig-left".into(); edit.asset = "new file; -literal.json".into(); }, _ => {},
         }
         let changed = editor::edit_command(source, &edit).unwrap();
         assert_eq!(editor::read_command(&changed).unwrap(), edit, "{changed}");
@@ -28,7 +28,7 @@ fn media_commands_edit_only_requested_fields_and_voice_markers() {
         let mut edit = editor::read_command(source).unwrap();
         edit.voice = "new voice.opus".into();
         let changed = editor::edit_command(source, &edit).unwrap();
-        assert!(changed.contains("-vocal=new voice.opus"));
+        assert!(changed.contains("-vocal=./game/vocal/new%20voice.opus"));
         assert_eq!(
             editor::read_command(&changed).unwrap().voice,
             "new voice.opus"
@@ -79,7 +79,7 @@ fn list_previews_identify_every_command_without_changing_editable_source() {
         ),
         ("setTextbox:hide;", "setTextbox", "hide"),
         (
-            "setAnimation:fade.json -target=fig;",
+            "setAnimation:fade -target=fig;",
             "setAnimation",
             "fade.json",
         ),
@@ -143,7 +143,7 @@ fn all_23_commands_preserve_parameters_through_edit_save_and_reload() {
         (EditKind::Bgm, "bgm:old.ogg -volume=30"),
         (EditKind::PlayEffect, "playEffect:old.wav -volume=20"),
         (EditKind::PlayVideo, "playVideo:old.mp4 -volume=40"),
-        (EditKind::SetAnimation, "setAnimation:old.json -target=fig"),
+        (EditKind::SetAnimation, "setAnimation:old -target=fig"),
         (EditKind::UnlockCg, "unlockCg:old.png -name=Old CG"),
         (EditKind::UnlockBgm, "unlockBgm:old.ogg -name=Old music"),
     ];
@@ -195,9 +195,9 @@ fn all_23_commands_preserve_parameters_through_edit_save_and_reload() {
             EditKind::End => edit.next = true,
             EditKind::ChangeBg
             | EditKind::MiniAvatar
-            | EditKind::SetAnimation
             | EditKind::UnlockCg
             | EditKind::UnlockBgm => edit.asset = "new file.png".into(),
+            EditKind::SetAnimation => edit.asset = "new file.json".into(),
             EditKind::ChangeFigure => {
                 edit.asset = "alice-sad.png".into();
                 edit.figure_position = "right".into();

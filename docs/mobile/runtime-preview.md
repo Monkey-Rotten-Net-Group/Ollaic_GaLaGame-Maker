@@ -52,10 +52,28 @@ origin, has no native JavaScript file-write bridge, and disables file/content UR
 
 ## Verification
 
+Generated resource URLs encode spaces, script delimiters, fragments, and literal percent
+characters. Editor fields and the shared desktop AST retain physical file names; encoding
+and decoding happen at the script boundary. Title resource updates preserve inline comments
+and configuration formatting.
+
+Animation files use the lowercase `.json` extension and contain an array of frames with
+nonnegative numeric durations. Their script identifiers omit that extension. Save, import,
+rename, and delete keep `game/animation/animationTable.json` consistent with scripts and
+files through the recoverable resource journal. The registry is managed internally and is
+not offered as an editable animation asset. Adding the first custom animation preserves
+the pinned engine's built-in registry entries.
+
 ```sh
 cargo test --locked -p ollaic-runtime
+WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip pnpm test:runtime:contracts
 WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip ANDROID_SERIAL=emulator-5554 pnpm android:test:preview
 ```
+
+The contract command runs generated resource, title, and animation cases through the actual
+parser and animation lookup functions from the supplied pinned ZIP. It requires no browser,
+emulator, or network access. The Rust tests independently cover editor round trips, resource
+references, malformed input, path boundaries, and interrupted registry updates.
 
 The Android command validates the local ZIP path before building, supplies the archive
 to one selected emulator, and runs the preview repository and interaction tests. The

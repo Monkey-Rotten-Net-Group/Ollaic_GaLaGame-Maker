@@ -3,6 +3,7 @@ use crate::document::{decode_lines, escape_literal, unescape_literal};
 use crate::webgal::parser::{delimiter_positions, flag_ranges, parse_script};
 use crate::webgal::serializer::serialize_script;
 use crate::webgal::types::{ChoiceBranch, CommandType, FigurePosition, WebGalNode};
+use crate::webgal::{animations, resource_paths};
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
@@ -167,7 +168,7 @@ pub fn read_command(source: &str) -> Result<CommandEdit> {
                 target: unescape_literal(&choice.target),
             })
             .collect(),
-        scene: unescape_literal(&node.target_scene.unwrap_or_default()),
+        scene: node.target_scene.unwrap_or_default(),
         label: unescape_literal(&node.label_name.unwrap_or_default()),
         variable: unescape_literal(&node.var_name.unwrap_or_default()),
         value: unescape_literal(&node.var_value.unwrap_or_default()),
@@ -192,8 +193,12 @@ pub fn read_command(source: &str) -> Result<CommandEdit> {
         ),
         next: node.next.unwrap_or(false),
         when: unescape_literal(&node.when.unwrap_or_default()),
-        asset: unescape_literal(&node.asset.or(node.animation_name).unwrap_or_default()),
-        voice: unescape_literal(&node.voice.unwrap_or_default()),
+        asset: if kind == EditKind::SetAnimation {
+            format!("{}.json", node.animation_name.unwrap_or_default())
+        } else {
+            node.asset.unwrap_or_default()
+        },
+        voice: node.voice.unwrap_or_default(),
         figure_position: node
             .figure_position
             .map(|position| {
@@ -292,6 +297,9 @@ fn validate(edit: &CommandEdit) -> Result<()> {
     {
         return Err(invalid("Invalid figure position"));
     }
+    if edit.kind == SetAnimation {
+        animations::validate_file(&edit.asset)?;
+    }
     Ok(())
 }
 
@@ -335,12 +343,12 @@ fn body(edit: &CommandEdit) -> String {
         },
     );
     node.character = Some(escape_literal(&edit.speaker));
-    node.target_scene = Some(escape_literal(&edit.scene));
+    node.target_scene = Some(edit.scene.clone());
     node.label_name = Some(escape_literal(&edit.label));
     node.var_name = Some(escape_literal(&edit.variable));
     node.var_value = Some(escape_literal(&edit.value));
-    node.asset = Some(escape_literal(&edit.asset));
-    node.animation_name = Some(escape_literal(&edit.asset));
+    node.asset = Some(edit.asset.clone());
+    node.animation_name = Some(animations::decoded_name(&edit.asset).into());
     node.intro_lines = Some(
         edit.intro_lines
             .iter()
@@ -352,7 +360,11 @@ fn body(edit: &CommandEdit) -> String {
             .iter()
             .map(|choice| ChoiceBranch {
                 text: escape_literal(&choice.text),
-                target: escape_literal(&choice.target),
+                target: if choice.target.contains('.') {
+                    choice.target.clone()
+                } else {
+                    escape_literal(&choice.target)
+                },
             })
             .collect(),
     );
@@ -487,7 +499,10 @@ pub fn edit_command(original: &str, edit: &CommandEdit) -> Result<String> {
 
 fn voice_value(edit: &CommandEdit) -> Option<String> {
     matches!(edit.kind, EditKind::Dialogue | EditKind::Narrator)
-        .then(|| flag("vocal", &edit.voice))
+        .then(|| {
+            (!edit.voice.is_empty())
+                .then(|| format!("-vocal={}", resource_paths::encode_voice(&edit.voice)))
+        })
         .flatten()
 }
 

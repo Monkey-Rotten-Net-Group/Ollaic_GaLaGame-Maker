@@ -102,21 +102,8 @@ pub fn with_project<T>(root: &Path, operation: impl FnOnce(&Path) -> Result<T>) 
 
 pub fn parse_config(text: &str) -> HashMap<String, String> {
     text.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with(';') {
-                return None;
-            }
-            let (key, value) = line.split_once(':')?;
-            Some((
-                key.trim().to_owned(),
-                value
-                    .trim()
-                    .strip_suffix(';')
-                    .unwrap_or(value.trim())
-                    .to_owned(),
-            ))
-        })
+        .filter_map(crate::webgal::config::parse_line)
+        .map(|entry| (entry.key.to_owned(), entry.value.to_owned()))
         .collect()
 }
 

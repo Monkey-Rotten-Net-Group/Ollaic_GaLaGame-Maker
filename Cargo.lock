@@ -3049,6 +3049,7 @@ dependencies = [
 name = "ollaic-core"
 version = "0.1.0"
 dependencies = [
+ "percent-encoding",
  "serde",
  "serde_json",
  "sha2",

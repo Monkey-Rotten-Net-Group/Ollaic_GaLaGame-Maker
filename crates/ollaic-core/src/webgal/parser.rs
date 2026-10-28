@@ -1,3 +1,4 @@
+use super::resource_paths;
 use super::types::*;
 
 /// Known WebGAL commands (not character names).
@@ -125,7 +126,11 @@ fn parse_choices(raw: &str) -> Vec<ChoiceBranch> {
                 if pos > 0 {
                     return ChoiceBranch {
                         text: part[..pos].trim().to_string(),
-                        target: part[pos + 1..].trim().to_string(),
+                        target: if part[pos + 1..].contains('.') {
+                            resource_paths::decode(part[pos + 1..].trim())
+                        } else {
+                            part[pos + 1..].trim().to_owned()
+                        },
                     };
                 }
             }
@@ -177,10 +182,10 @@ fn voice_from_flags(flags: &[Flag]) -> Option<String> {
     for f in flags {
         let k = &f.key;
         if is_voice_flag(k) {
-            return Some(match &f.value {
+            return Some(resource_paths::decode_voice(&match &f.value {
                 FlagValue::Str(s) => s.clone(),
                 FlagValue::Bool(_) => k.clone(),
-            });
+            }));
         }
     }
     None
@@ -337,11 +342,11 @@ fn build_command_node(
 
     match cmd_type {
         CommandType::ChangeBg | CommandType::MiniAvatar => {
-            node.asset = Some(content.to_string());
+            node.asset = Some(resource_paths::decode(content));
         }
 
         CommandType::ChangeFigure => {
-            node.asset = Some(content.to_string());
+            node.asset = Some(resource_paths::decode(content));
             node.figure_position = Some(
                 if has_flag(flags, "left") && flag_str(flags, "left") != Some("false") {
                     FigurePosition::Left
@@ -363,7 +368,7 @@ fn build_command_node(
         }
 
         CommandType::ChangeScene | CommandType::CallScene => {
-            node.target_scene = Some(content.to_string());
+            node.target_scene = Some(resource_paths::decode(content));
         }
 
         CommandType::Choose => {
@@ -401,21 +406,21 @@ fn build_command_node(
         }
 
         CommandType::Bgm | CommandType::PlayEffect | CommandType::PlayVideo => {
-            node.asset = Some(content.to_string());
+            node.asset = Some(resource_paths::decode(content));
             if let Some(v) = flag_str(flags, "volume") {
                 node.volume = v.parse().ok();
             }
         }
 
         CommandType::SetAnimation => {
-            node.animation_name = Some(content.to_string());
+            node.animation_name = Some(resource_paths::decode(content));
             if let Some(t) = flag_str(flags, "target") {
                 node.animation_target = Some(t.to_string());
             }
         }
 
         CommandType::UnlockCg | CommandType::UnlockBgm => {
-            node.asset = Some(content.to_string());
+            node.asset = Some(resource_paths::decode(content));
             if let Some(n) = flag_str(flags, "name") {
                 node.display_name = Some(n.to_string());
             }
