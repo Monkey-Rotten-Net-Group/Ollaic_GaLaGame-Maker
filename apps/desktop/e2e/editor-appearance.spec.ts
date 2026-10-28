@@ -34,7 +34,9 @@ for (const width of [390, 1100, 1280, 1440]) {
       path: testInfo.outputPath(`global-navigation-${width}.png`),
       animations: 'disabled',
     });
-    await page.getByRole('button', { name: 'Ollaic GalGame Studio，返回首页', exact: true }).click();
+    await page
+      .getByRole('button', { name: 'Ollaic GalGame Studio，返回首页', exact: true })
+      .click();
     await expect(page).toHaveURL(/\/#\/$/);
   });
 }
@@ -56,6 +58,30 @@ test('global navigation preserves the unsaved-edit confirmation', async ({ page 
   await page.getByRole('button', { name: '直接离开', exact: true }).click();
   await expect(page).toHaveURL(/\/#\/$/);
 });
+
+for (const width of [1100, 1280, 1440, 1599, 1600]) {
+  test(`command search filters characters and content at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await openFlowBoard(page, { width, height: 900 }, 'draft');
+    await page.getByLabel('编辑器视图模式').selectOption('stream');
+    const search = page.getByRole('textbox', { name: '搜索', exact: true });
+    await expect(search).toBeVisible();
+    const commands = page.locator('[data-cmd-card]');
+    await expect(commands).toHaveCount(1);
+    await search.fill('林夏');
+    await expect(commands).toHaveCount(1);
+    await search.fill('没有这个人物');
+    await expect(commands).toHaveCount(0);
+    await search.fill('从这里开始');
+    await expect(commands).toHaveCount(1);
+    await search.clear();
+    await expect(commands).toHaveCount(1);
+    if (width === 1100 || width === 1440) {
+      await page.screenshot({ path: testInfo.outputPath(`command-search-${width}.png`) });
+    }
+  });
+}
 
 test('editor toolbar labels stay on one line at desktop widths', async ({ page }, testInfo) => {
   await openFlowBoard(page, { width: 1280, height: 900 }, 'draft');
@@ -144,26 +170,28 @@ test('assistant replies keep readable contrast across accent themes', async ({ p
   }
 });
 
-test('narrow windows retain editor actions in the overflow menu', async ({ page }) => {
-  await openFlowBoard(page, { width: 390, height: 844 }, 'draft');
-  await page.getByRole('button', { name: '更多编辑操作' }).click();
-  for (const name of [
-    '撤销',
-    '重做',
-    '保存',
-    '打包发布',
-    '打开项目',
-    '导入场景',
-    '导出场景',
-    '快照管理',
-  ]) {
-    await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
-  }
-  await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: '更多编辑操作' }).click();
-  await page.getByRole('menuitem', { name: '快照管理', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '历史版本' })).toBeVisible();
-});
+for (const width of [390, 1100, 1280]) {
+  test(`editor actions remain available in the overflow menu at ${width}px`, async ({ page }) => {
+    await openFlowBoard(page, { width, height: 844 }, 'draft');
+    await page.getByRole('button', { name: '更多编辑操作' }).click();
+    for (const name of [
+      '撤销',
+      '重做',
+      '保存',
+      '打包发布',
+      '打开项目',
+      '导入场景',
+      '导出场景',
+      '快照管理',
+    ]) {
+      await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
+    }
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '更多编辑操作' }).click();
+    await page.getByRole('menuitem', { name: '快照管理', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '历史版本' })).toBeVisible();
+  });
+}
 
 test('settings stay inside narrow and short windows', async ({ page }, testInfo) => {
   await openFlowBoard(page, { width: 390, height: 600 }, 'draft');

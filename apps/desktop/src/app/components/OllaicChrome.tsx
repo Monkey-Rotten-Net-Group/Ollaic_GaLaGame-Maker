@@ -190,7 +190,7 @@ export function OllaicTopBar({
       <div className="ollaic-topbar-center">
         {(topActions.length > 0 || secondaryActions.length > 0) && (
           <nav
-            className="ollaic-topbar-island hidden min-[1100px]:inline-flex"
+            className="ollaic-topbar-island hidden min-[1440px]:inline-flex"
             aria-label="编辑器快捷操作"
           >
             {topActions.map(({ label, icon: Icon, handler, primary, dimWhenAutoSave }) => (
@@ -207,7 +207,7 @@ export function OllaicTopBar({
                 aria-label={label}
               >
                 <Icon className="h-3.5 w-3.5" />
-                <span className="hidden xl:inline">{label}</span>
+                <span className="hidden min-[1600px]:inline">{label}</span>
               </button>
             ))}
             {secondaryActions.length > 0 && topActions.length > 0 && (
@@ -238,7 +238,7 @@ export function OllaicTopBar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="ollaic-icon-button min-[1100px]:hidden"
+                className="ollaic-icon-button min-[1440px]:hidden"
                 aria-label="更多编辑操作"
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -266,7 +266,7 @@ export function OllaicTopBar({
           </button>
         )}
         {onSearchChange && (
-          <div className="ollaic-top-search hidden min-[1600px]:flex">
+          <div className="ollaic-top-search hidden min-[1100px]:flex">
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
             <input
               type="text"
