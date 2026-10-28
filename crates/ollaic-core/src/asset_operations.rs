@@ -1,3 +1,4 @@
+use crate::webgal::{animations, config, resource_paths};
 use crate::{assets, catalog, json_store, project, webgal::references, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,6 +40,13 @@ struct Mutation {
     writes: Vec<TextWrite>,
     #[serde(default)]
     related_assets: Vec<RelatedAsset>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum PendingMutation {
+    Asset(Mutation),
+    Text { text_writes: Vec<TextWrite> },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -98,8 +106,48 @@ fn text_path(root: &Path, name: &str) -> Result<PathBuf> {
         catalog::config_path(root, catalog::CHARACTERS)
     } else if name == "game/config/asset-metadata.json" {
         catalog::config_path(root, catalog::ASSET_METADATA)
+    } else if let Some(animation) = name.strip_prefix("game/animation/") {
+        let path = if animation == animations::TABLE_FILE {
+            let directory = project::checked_directory(root, "game")?.join("animation");
+            project::reject_symlink(&directory)?;
+            fs::create_dir_all(&directory)?;
+            directory.join(animation)
+        } else {
+            animations::validate_file(animation)?;
+            assets::asset_path(root, "animation", animation)?
+        };
+        project::reject_symlink(&path)?;
+        project::reject_symlink(&path.with_file_name(format!(
+            "{}.tmp",
+            path.file_name().unwrap().to_string_lossy()
+        )))?;
+        project::reject_symlink(&json_store::backup_path(&path))?;
+        Ok(path)
     } else {
         Err(Error::Invalid("Invalid asset transaction path".into()))
+    }
+}
+
+fn apply_pending(root: &Path, pending: &PendingMutation) -> Result<()> {
+    match pending {
+        PendingMutation::Asset(mutation) => apply(root, mutation),
+        PendingMutation::Text { text_writes } => {
+            for write in text_writes {
+                if write.source.len() > project::MAX_SCRIPT_BYTES as usize {
+                    return Err(Error::Invalid(
+                        "Resource transaction exceeds the size limit".into(),
+                    ));
+                }
+                text_path(root, &write.name)?;
+            }
+            for write in text_writes {
+                json_store::write_crash_safe(
+                    &text_path(root, &write.name)?,
+                    write.source.as_bytes(),
+                )?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -178,17 +226,26 @@ pub(crate) fn recover(root: &Path) -> Result<()> {
             "Asset transaction exceeds the size limit".into(),
         ));
     }
-    let mutation: Mutation = serde_json::from_str(&json_store::read_to_string_recovering(&path)?)?;
-    apply(root, &mutation)?;
+    let mutation: PendingMutation =
+        serde_json::from_str(&json_store::read_to_string_recovering(&path)?)?;
+    apply_pending(root, &mutation)?;
     fs::remove_file(path)?;
     Ok(())
 }
 
 fn commit(root: &Path, mutation: Mutation) -> Result<()> {
-    for write in &mutation.writes {
+    commit_pending(root, PendingMutation::Asset(mutation))
+}
+
+fn commit_pending(root: &Path, pending: PendingMutation) -> Result<()> {
+    let writes = match &pending {
+        PendingMutation::Asset(mutation) => &mutation.writes,
+        PendingMutation::Text { text_writes } => text_writes,
+    };
+    for write in writes {
         text_path(root, &write.name)?;
     }
-    let bytes = serde_json::to_vec(&mutation)?;
+    let bytes = serde_json::to_vec(&pending)?;
     if bytes.len() as u64 > project::MAX_SCRIPT_BYTES {
         return Err(Error::Invalid(
             "Asset transaction exceeds the size limit".into(),
@@ -196,7 +253,7 @@ fn commit(root: &Path, mutation: Mutation) -> Result<()> {
     }
     let path = journal_path(root)?;
     json_store::write_crash_safe(&path, &bytes)?;
-    apply(root, &mutation)?;
+    apply_pending(root, &pending)?;
     fs::remove_file(path)?;
     Ok(())
 }
@@ -216,13 +273,11 @@ fn title_asset_span(
         "bgm" => "Title_bgm",
         _ => return None,
     };
-    if project::parse_config(line).get(field).map(String::as_str) != Some(name) {
+    let entry = config::parse_line(line)?;
+    if entry.key != field || resource_paths::decode(entry.value) != name {
         return None;
     }
-    let colon = line.find(':')?;
-    let value = &line[colon + 1..];
-    let start = colon + 1 + value.len() - value.trim_start().len();
-    Some((field, start..start + name.len()))
+    Some((field, entry.value_range))
 }
 
 fn usages_unlocked(root: &Path, category: &str, name: &str) -> Result<Vec<AssetUsage>> {
@@ -332,6 +387,9 @@ pub fn rename_asset(
 ) -> Result<()> {
     assets::validate_asset(category, old_name)?;
     assets::validate_asset(category, new_name)?;
+    if category == "animation" {
+        animations::validate_file(new_name)?;
+    }
     if old_name.eq_ignore_ascii_case(new_name) {
         return Err(Error::Invalid("Choose a different asset name".into()));
     }
@@ -368,7 +426,12 @@ pub fn rename_asset(
                 .split_inclusive('\n')
                 .map(|line| match title_asset_span(line, category, old_name) {
                     Some((_, span)) => {
-                        format!("{}{new_name}{}", &line[..span.start], &line[span.end..])
+                        format!(
+                            "{}{}{}",
+                            &line[..span.start],
+                            resource_paths::encode(new_name),
+                            &line[span.end..]
+                        )
                     }
                     None => line.to_owned(),
                 })
@@ -379,6 +442,15 @@ pub fn rename_asset(
                     source,
                 });
             }
+        }
+        if category == "animation" {
+            let mut table = animation_table(root)?;
+            table.retain(|entry| {
+                animations::file_name(entry) != old_name
+                    || animations::DEFAULT_NAMES.contains(&entry.as_str())
+            });
+            table.push(animations::name(new_name));
+            writes.push(animation_table_write(&table)?);
         }
         let (mut characters, _) = catalog::read_json(root, catalog::CHARACTERS)?;
         let previous = characters.clone();
@@ -605,6 +677,15 @@ pub fn delete_asset(
             ));
         }
         let path = assets::asset_path(root, category, name)?;
+        let mut writes = Vec::new();
+        if category == "animation" {
+            let mut table = animation_table(root)?;
+            table.retain(|entry| {
+                animations::file_name(entry) != name
+                    || animations::DEFAULT_NAMES.contains(&entry.as_str())
+            });
+            writes.push(animation_table_write(&table)?);
+        }
         let (mut metadata, _) = catalog::read_json(root, catalog::ASSET_METADATA)?;
         let keep_legacy = assets::list_assets_unlocked(root)?.iter().any(|asset| {
             asset.category != category && asset.category != "reference" && asset.name == name
@@ -617,6 +698,10 @@ pub fn delete_asset(
                 }
             }
         }
+        writes.push(TextWrite {
+            name: "game/config/asset-metadata.json".into(),
+            source: serde_json::to_string_pretty(&metadata)?,
+        });
         commit(
             root,
             Mutation {
@@ -625,10 +710,7 @@ pub fn delete_asset(
                 new_name: None,
                 related_assets: Vec::new(),
                 asset_digest: file_digest(&path)?,
-                writes: vec![TextWrite {
-                    name: "game/config/asset-metadata.json".into(),
-                    source: serde_json::to_string_pretty(&metadata)?,
-                }],
+                writes,
             },
         )
     })
@@ -711,52 +793,148 @@ pub fn read_animation(root: &Path, name: &str) -> Result<TextResource> {
     })
 }
 
+fn animation_table(root: &Path) -> Result<Vec<String>> {
+    let path = text_path(root, "game/animation/animationTable.json")?;
+    if !path.exists() && !json_store::backup_path(&path).exists() {
+        return Ok(animations::DEFAULT_NAMES
+            .iter()
+            .map(|name| (*name).into())
+            .collect());
+    }
+    for candidate in [&path, &json_store::backup_path(&path)] {
+        if candidate.exists() && fs::metadata(candidate)?.len() > 4 * 1024 * 1024 {
+            return Err(Error::Invalid(
+                "Animation registry exceeds the 4 MiB limit".into(),
+            ));
+        }
+    }
+    let table: Vec<String> = serde_json::from_str(&json_store::read_to_string_recovering(&path)?)?;
+    for name in &table {
+        animations::validate_file(&animations::file_name(name))?;
+    }
+    Ok(table)
+}
+
+fn animation_table_write(table: &[String]) -> Result<TextWrite> {
+    let source = serde_json::to_string_pretty(table)?;
+    if source.len() > 4 * 1024 * 1024 {
+        return Err(Error::Invalid(
+            "Animation registry exceeds the 4 MiB limit".into(),
+        ));
+    }
+    Ok(TextWrite {
+        name: "game/animation/animationTable.json".into(),
+        source,
+    })
+}
+
 pub fn save_animation(
     root: &Path,
     name: &str,
     source: &str,
     expected_revision: &str,
 ) -> Result<TextResource> {
-    if !name.to_ascii_lowercase().ends_with(".json") || source.len() > 4 * 1024 * 1024 {
-        return Err(Error::Invalid(
-            "Animation must be a JSON file within 4 MiB".into(),
-        ));
-    }
-    let value: Value = serde_json::from_str(source)?;
-    if !value.is_array() && !value.is_object() {
-        return Err(Error::Invalid(
-            "Animation must contain JSON frames or an object".into(),
-        ));
-    }
     project::with_project(root, |root| {
-        let path = assets::asset_path(root, "animation", name)?;
-        if path.exists() {
-            if fs::metadata(&path)?.len() > 4 * 1024 * 1024 {
-                return Err(Error::Conflict);
-            }
-            let current = fs::read(&path)?;
-            let revision = catalog::digest(&current);
-            if current == source.as_bytes() {
-                return Ok(TextResource {
-                    source: source.into(),
-                    revision,
-                });
-            }
-            if revision != expected_revision {
-                return Err(Error::Conflict);
-            }
-        } else if !expected_revision.is_empty() {
+        save_animation_unlocked(root, name, source, expected_revision)
+    })
+}
+
+fn save_animation_unlocked(
+    root: &Path,
+    name: &str,
+    source: &str,
+    expected_revision: &str,
+) -> Result<TextResource> {
+    animations::validate_file(name)?;
+    if source.len() > 4 * 1024 * 1024 {
+        return Err(Error::Invalid("Animation exceeds the 4 MiB limit".into()));
+    }
+    let frames: Vec<Value> = serde_json::from_str(source)?;
+    if frames.iter().any(|frame| {
+        !frame.is_object()
+            || !frame
+                .get("duration")
+                .and_then(Value::as_f64)
+                .is_some_and(|value| value.is_finite() && value >= 0.0)
+    }) {
+        return Err(Error::Invalid(
+            "Animation must contain JSON frames with nonnegative durations".into(),
+        ));
+    }
+    let path = text_path(root, &format!("game/animation/{name}"))?;
+    let current = if path.exists() {
+        if fs::metadata(&path)?.len() > 4 * 1024 * 1024 {
             return Err(Error::Conflict);
         }
-        project::reject_symlink(&path.with_file_name(format!(
-            "{}.tmp",
-            path.file_name().unwrap().to_string_lossy()
-        )))?;
-        project::reject_symlink(&json_store::backup_path(&path))?;
-        json_store::write_crash_safe(&path, source.as_bytes())?;
-        Ok(TextResource {
+        Some(fs::read(&path)?)
+    } else {
+        None
+    };
+    let unchanged = current.as_deref() == Some(source.as_bytes());
+    if !unchanged
+        && current
+            .as_ref()
+            .map(|bytes| catalog::digest(bytes))
+            .unwrap_or_default()
+            != expected_revision
+    {
+        return Err(Error::Conflict);
+    }
+    let mut text_writes = Vec::new();
+    if !unchanged {
+        text_writes.push(TextWrite {
+            name: format!("game/animation/{name}"),
             source: source.into(),
-            revision: catalog::digest(source.as_bytes()),
+        });
+    }
+    let mut table = animation_table(root)?;
+    table.retain(|entry| animations::file_name(entry) != name);
+    table.push(animations::name(name));
+    let table_write = animation_table_write(&table)?;
+    let table_path = text_path(root, &table_write.name)?;
+    if !table_path.exists() || fs::read_to_string(&table_path)? != table_write.source {
+        text_writes.push(table_write);
+    }
+    for scene in project::load_workspace_unlocked(root)?.document.scenes {
+        let (source, changed) =
+            references::rename_asset_references(&scene.source, "animation", name, name);
+        if changed > 0 {
+            text_writes.push(TextWrite {
+                name: format!("game/scene/{}", scene.file_name),
+                source,
+            });
+        }
+    }
+    if !text_writes.is_empty() {
+        commit_pending(root, PendingMutation::Text { text_writes })?;
+    }
+    Ok(TextResource {
+        source: source.into(),
+        revision: catalog::digest(source.as_bytes()),
+    })
+}
+
+pub(crate) fn import_animation(
+    root: &Path,
+    source: &Path,
+    name: &str,
+) -> Result<assets::AssetInfo> {
+    if fs::metadata(source)?.len() > 4 * 1024 * 1024 {
+        return Err(Error::Invalid("Animation exceeds the 4 MiB limit".into()));
+    }
+    let text = fs::read_to_string(source)?;
+    project::with_project(root, |root| {
+        if assets::asset_path(root, "animation", name)?.exists() {
+            return Err(Error::Invalid(
+                "An asset with this name already exists".into(),
+            ));
+        }
+        save_animation_unlocked(root, name, &text, "")?;
+        Ok(assets::AssetInfo {
+            category: "animation".into(),
+            name: name.into(),
+            size: text.len() as u64,
+            alias: String::new(),
         })
     })
 }

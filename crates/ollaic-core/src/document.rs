@@ -1,4 +1,5 @@
 use crate::webgal::parser::{delimiter_positions, split_unescaped};
+use crate::webgal::resource_paths;
 use crate::webgal::{parser::parse_script, serializer::serialize_script, types::*};
 use crate::{Error, Result};
 
@@ -106,7 +107,7 @@ fn command_preview(node: &WebGalNode) -> String {
                 if choice.target.is_empty() {
                     text
                 } else {
-                    format!("{text} -> {}", unescape_literal(&choice.target))
+                    format!("{text} -> {}", choice.target)
                 }
             })
             .collect::<Vec<_>>()
@@ -121,6 +122,20 @@ fn command_preview(node: &WebGalNode) -> String {
             .join("\n"),
         CommandType::Comment | CommandType::SetTransform => node.content.clone(),
         CommandType::End => String::new(),
+        CommandType::SetAnimation => format!(
+            "{}.json",
+            node.animation_name.as_deref().unwrap_or(&node.content)
+        ),
+        CommandType::ChangeBg
+        | CommandType::ChangeFigure
+        | CommandType::MiniAvatar
+        | CommandType::Bgm
+        | CommandType::PlayEffect
+        | CommandType::PlayVideo
+        | CommandType::UnlockCg
+        | CommandType::UnlockBgm
+        | CommandType::ChangeScene
+        | CommandType::CallScene => resource_paths::decode(&node.content),
         _ => unescape_literal(&node.content),
     }
 }
@@ -242,7 +257,7 @@ pub fn rename_scene_references(source: &str, old: &str, new: &str) -> String {
                     if parse_script(line)
                         .first()
                         .and_then(|node| node.target_scene.as_ref())
-                        .is_some_and(|target| unescape_literal(target) == old) =>
+                        .is_some_and(|target| target == old) =>
                 {
                     replace_target(value, old, new)
                 }
@@ -257,7 +272,7 @@ pub fn rename_scene_references(source: &str, old: &str, new: &str) -> String {
                                 .first()
                                 .and_then(|node| node.choices.as_ref())
                                 .and_then(|choices| choices.first())
-                                .is_some_and(|choice| unescape_literal(&choice.target) == old);
+                                .is_some_and(|choice| choice.target == old);
                             if !matches {
                                 return branch.to_owned();
                             }
@@ -290,11 +305,11 @@ fn replace_target(value: &str, old: &str, new: &str) -> String {
         .map_or(statement_end, |range| range.start);
     let target = value[..content_end].trim();
     let leading = value.len() - value.trim_start().len();
-    if unescape_literal(target) == old {
+    if resource_paths::decode(target) == old {
         format!(
             "{}{}{}",
             &value[..leading],
-            escape_literal(new),
+            resource_paths::encode(new),
             &value[leading + target.len()..]
         )
     } else {

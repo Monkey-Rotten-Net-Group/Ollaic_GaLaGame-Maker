@@ -1,5 +1,5 @@
-use super::parser;
 use super::types::{CommandType, WebGalNode};
+use super::{animations, parser, resource_paths};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetReference {
@@ -85,10 +85,8 @@ pub fn rename_asset_references(
                     let start = range.start + offset;
                     let raw = &statement[start..range.end];
                     let value = raw.trim();
-                    (crate::document::unescape_literal(value) == old_filename).then(|| {
-                        let leading = raw.len() - raw.trim_start().len();
-                        start + leading..start + leading + value.len()
-                    })
+                    (resource_paths::decode_voice(value) == old_filename)
+                        .then(|| range.start..range.end - (raw.len() - raw.trim_end().len()))
                 })
         } else {
             parser::delimiter_positions(statement, ':')
@@ -107,7 +105,13 @@ pub fn rename_asset_references(
             format!(
                 "{}{}{}",
                 &line[..span.start],
-                crate::document::escape_literal(new_filename),
+                if reference.command == "voice" {
+                    format!("-vocal={}", resource_paths::encode_voice(new_filename))
+                } else if category == "animation" {
+                    animations::name(new_filename)
+                } else {
+                    resource_paths::encode(new_filename)
+                },
                 &line[span.end..]
             )
         } else {
@@ -137,7 +141,7 @@ fn reference_from_node(
         CommandType::UnlockBgm => ("unlockBgm", "bgm"),
         CommandType::SetAnimation
             if node.animation_name.as_deref().is_some_and(|name| {
-                include_builtin_animations || name.to_ascii_lowercase().ends_with(".json")
+                include_builtin_animations || !animations::DEFAULT_NAMES.contains(&name)
             }) =>
         {
             ("setAnimation", "animation")
@@ -160,7 +164,11 @@ fn reference_from_node(
     Some((
         command,
         category,
-        crate::document::unescape_literal(filename),
+        if category == "animation" {
+            format!("{filename}.json")
+        } else {
+            filename.to_owned()
+        },
     ))
 }
 
@@ -218,7 +226,7 @@ mod tests {
 
         let (vocal, changed) = rename_asset_references(&background, "vocal", "v1.wav", "intro.wav");
         assert_eq!(changed, 1);
-        assert!(vocal.contains("Alice:hello -intro.wav;"));
+        assert!(vocal.contains("Alice:hello -vocal=./game/vocal/intro.wav;"));
         assert_eq!(find_asset_references(&vocal)[2].filename, "intro.wav");
     }
 }

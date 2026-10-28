@@ -344,7 +344,7 @@ fn scene_rename_updates_choice_targets_with_spaces_without_editing_choice_labels
 fn scene_reference_rename_escapes_new_targets_and_matches_escaped_old_targets() {
     let source = "  changeScene: old.txt -next; keep\r\ncallScene:old.txt;\nchoose:Go:old.txt|Stay:start.txt -when=ready; comment\nAlice:old.txt;\n";
     let escaped = document::rename_scene_references(source, "old.txt", "part;2| -next.txt");
-    assert_eq!(escaped, "  changeScene: part\\;2\\| \\-next.txt -next; keep\r\ncallScene:part\\;2\\| \\-next.txt;\nchoose:Go:part\\;2\\| \\-next.txt|Stay:start.txt -when=ready; comment\nAlice:old.txt;\n");
+    assert_eq!(escaped, "  changeScene: part%3B2%7C%20-next.txt -next; keep\r\ncallScene:part%3B2%7C%20-next.txt;\nchoose:Go:part%3B2%7C%20-next.txt|Stay:start.txt -when=ready; comment\nAlice:old.txt;\n");
     let restored = document::rename_scene_references(&escaped, "part;2| -next.txt", "old.txt");
     assert_eq!(restored, source);
     assert_eq!(
@@ -436,7 +436,7 @@ fn asset_commands_escape_literal_names_and_export_reports_missing_references() {
     fs::write(&source, b"asset bytes").unwrap();
     ollaic_core::assets::import_asset(&root, &source, "background", "park;next.png").unwrap();
     let command = ollaic_core::assets::asset_command("background", "park;next.png").unwrap();
-    assert!(command.contains("park\\;next.png"));
+    assert!(command.contains("park%3Bnext.png"));
     fs::write(
         root.join("game/scene/start.txt"),
         format!("{command}bgm:missing.ogg;\n"),

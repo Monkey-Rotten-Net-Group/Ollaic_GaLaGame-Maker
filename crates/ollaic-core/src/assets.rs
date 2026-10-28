@@ -36,6 +36,11 @@ pub fn validate_asset(category: &str, name: &str) -> Result<()> {
     if !CATEGORIES.contains(&category) {
         return Err(Error::Invalid("Unsupported asset category".into()));
     }
+    if category == "animation" && name == crate::webgal::animations::TABLE_FILE {
+        return Err(Error::Invalid(
+            "The animation registry is managed automatically".into(),
+        ));
+    }
     validate_asset_name(name)
 }
 
@@ -93,7 +98,12 @@ pub fn asset_command(category: &str, name: &str) -> Result<String> {
     }
     Ok(format!(
         "{command}:{};\n",
-        crate::document::escape_literal(name)
+        if category == "animation" {
+            crate::webgal::animations::validate_file(name)?;
+            crate::webgal::animations::name(name)
+        } else {
+            crate::webgal::resource_paths::encode(name)
+        }
     ))
 }
 
@@ -144,6 +154,9 @@ fn list_category(
         let entry = entry?;
         project::reject_symlink(&entry.path())?;
         let name = relative.join(entry.file_name());
+        if category == "animation" && name == Path::new(crate::webgal::animations::TABLE_FILE) {
+            continue;
+        }
         if entry.path().is_dir() {
             list_category(directory, &name, category, assets)?;
         } else {
@@ -169,6 +182,9 @@ pub fn import_asset(root: &Path, source: &Path, category: &str, name: &str) -> R
     project::reject_symlink(source)?;
     if fs::metadata(source)?.len() > crate::archive::MAX_ARCHIVE_BYTES {
         return Err(Error::Invalid("Asset exceeds the 512 MiB limit".into()));
+    }
+    if category == "animation" {
+        return crate::asset_operations::import_animation(root, source, name);
     }
     project::with_project(root, |root| {
         let target = asset_path(root, category, name)?;

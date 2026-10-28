@@ -122,10 +122,10 @@ fn narration_unlocks_and_animations_are_included_in_usage_and_rename() {
         "new voice.opus",
     );
     assert_eq!(count, 2);
-    assert!(renamed.contains("-vocal=new voice.opus -when=ready; keep\r\n"));
-    assert!(renamed.contains("-new voice.opus;"));
+    assert!(renamed.contains("-vocal=./game/vocal/new%20voice.opus -when=ready; keep\r\n"));
+    assert!(renamed.contains("-vocal=./game/vocal/new%20voice.opus;"));
     let refs = ollaic_core::webgal::references::find_asset_references(
-        "unlockCg:cg.png;\nunlockBgm:bg.ogg;\nsetAnimation:fade.json -target=fig;\n",
+        "unlockCg:cg.png;\nunlockBgm:bg.ogg;\nsetAnimation:fade -target=fig;\n",
     );
     assert_eq!(
         refs.iter()
@@ -133,19 +133,23 @@ fn narration_unlocks_and_animations_are_included_in_usage_and_rename() {
             .collect::<Vec<_>>(),
         vec!["background", "bgm", "animation"]
     );
-    let source = "setAnimation:fade -target=fig; keep\r\n";
+    let source = "setAnimation:shake -target=fig; keep\r\n";
     assert!(ollaic_core::webgal::references::find_asset_references(source).is_empty());
     assert_eq!(
-        ollaic_core::webgal::references::find_asset_references_to(source, "animation", "fade")
-            .len(),
+        ollaic_core::webgal::references::find_asset_references_to(
+            source,
+            "animation",
+            "shake.json"
+        )
+        .len(),
         1
     );
     assert_eq!(
         ollaic_core::webgal::references::rename_asset_references(
             source,
             "animation",
-            "fade",
-            "fade2"
+            "shake.json",
+            "fade2.json"
         ),
         ("setAnimation:fade2 -target=fig; keep\r\n".into(), 1)
     );
@@ -280,8 +284,8 @@ fn title_assets_cannot_be_deleted_and_renames_preserve_configuration() {
     assert_eq!(
         fs::read_to_string(root.join("game/config.txt")).unwrap(),
         config
-            .replace("title.png", "new title.png")
-            .replace("theme.ogg", "new theme.ogg")
+            .replace("title.png", "new%20title.png")
+            .replace("theme.ogg", "new%20theme.ogg")
     );
     assert!(!root.join("game/background/title.png").exists());
     assert!(!root.join("game/bgm/theme.ogg").exists());

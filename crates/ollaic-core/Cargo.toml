@@ -5,6 +5,7 @@ edition = "2021"
 description = "Platform-independent WebGAL project and script operations"
 
 [dependencies]
+percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
