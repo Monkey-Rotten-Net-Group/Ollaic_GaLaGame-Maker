@@ -170,7 +170,7 @@ test('assistant replies keep readable contrast across accent themes', async ({ p
   }
 });
 
-for (const width of [390, 1100, 1280]) {
+for (const width of [390]) {
   test(`editor actions remain available in the overflow menu at ${width}px`, async ({ page }) => {
     await openFlowBoard(page, { width, height: 844 }, 'draft');
     await page.getByRole('button', { name: '更多编辑操作' }).click();
@@ -190,6 +190,35 @@ for (const width of [390, 1100, 1280]) {
     await page.getByRole('button', { name: '更多编辑操作' }).click();
     await page.getByRole('menuitem', { name: '快照管理', exact: true }).click();
     await expect(page.getByRole('heading', { name: '历史版本' })).toBeVisible();
+  });
+}
+
+for (const width of [1100, 1280, 1440, 1600]) {
+  test(`common editor actions stay visible beside search at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await openFlowBoard(page, { width, height: 900 }, 'draft');
+    const actions = page.getByRole('navigation', { name: '编辑器快捷操作' });
+    for (const name of ['撤销', '重做', '保存', '打包发布']) {
+      await expect(actions.getByRole('button', { name, exact: true })).toBeInViewport();
+    }
+    await expect(page.getByRole('textbox', { name: '搜索', exact: true })).toBeInViewport();
+    await actions.getByRole('button', { name: '保存', exact: true }).click();
+    await expect(page.getByLabel('已保存', { exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: '搜索', exact: true })).toBeInViewport();
+    await actions.getByRole('button', { name: '更多编辑操作' }).click();
+    for (const name of ['打开项目', '导入场景', '导出场景', '快照管理']) {
+      await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole('menuitem', { name: '撤销', exact: true })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toBeHidden();
+    if (width === 1100 || width === 1440) {
+      await page.screenshot({ path: testInfo.outputPath(`toolbar-common-actions-${width}.png`) });
+      await page.locator('.ollaic-topbar').screenshot({
+        path: testInfo.outputPath(`toolbar-header-${width}.png`),
+      });
+    }
   });
 }
 

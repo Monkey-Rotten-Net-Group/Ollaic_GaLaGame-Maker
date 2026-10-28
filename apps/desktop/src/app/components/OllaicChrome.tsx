@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import type * as React from 'react';
 import {
@@ -67,6 +66,32 @@ interface OllaicPanelProps {
   children: React.ReactNode;
   className?: string;
   headerClassName?: string;
+}
+
+interface EditorAction {
+  label: string;
+  icon: LucideIcon;
+  handler?: () => void;
+}
+
+function EditorActionsMenu({ actions, className }: { actions: EditorAction[]; className: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className={className} aria-label="更多编辑操作">
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {actions.map(({ label, icon: Icon, handler }) => (
+          <DropdownMenuItem key={label} onSelect={handler}>
+            <Icon className="h-4 w-4" />
+            {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function OllaicTopBar({
@@ -154,7 +179,7 @@ export function OllaicTopBar({
             Ollaic
           </span>
           <span
-            className="hidden rounded-full px-2.5 py-0.5 text-[11px] font-bold sm:inline"
+            className="hidden rounded-full px-2.5 py-0.5 text-[11px] font-bold min-[1440px]:inline"
             style={{
               background: 'var(--badge-soft-bg, #f9d8e6)',
               color: 'var(--badge-soft-text, #5c1936)',
@@ -190,7 +215,7 @@ export function OllaicTopBar({
       <div className="ollaic-topbar-center">
         {(topActions.length > 0 || secondaryActions.length > 0) && (
           <nav
-            className="ollaic-topbar-island hidden min-[1440px]:inline-flex"
+            className="ollaic-topbar-island hidden min-[1100px]:inline-flex"
             aria-label="编辑器快捷操作"
           >
             {topActions.map(({ label, icon: Icon, handler, primary, dimWhenAutoSave }) => (
@@ -207,18 +232,18 @@ export function OllaicTopBar({
                 aria-label={label}
               >
                 <Icon className="h-3.5 w-3.5" />
-                <span className="hidden min-[1600px]:inline">{label}</span>
+                <span className="hidden min-[1440px]:inline">{label}</span>
               </button>
             ))}
             {secondaryActions.length > 0 && topActions.length > 0 && (
-              <div className="mx-1 h-4 w-px bg-border" />
+              <div className="mx-1 hidden h-4 w-px bg-border min-[1800px]:block" />
             )}
             {secondaryActions.map(({ label, icon: Icon, handler }) => (
               <button
                 key={label}
                 type="button"
                 onClick={handler}
-                className="ollaic-top-action text-muted-foreground hover:text-foreground"
+                className="ollaic-top-action hidden text-muted-foreground hover:text-foreground min-[1800px]:inline-flex"
                 aria-label={label}
                 title={label}
               >
@@ -226,33 +251,24 @@ export function OllaicTopBar({
                 <span className="hidden min-[1800px]:inline">{label}</span>
               </button>
             ))}
+            {secondaryActions.length > 0 && (
+              <EditorActionsMenu
+                actions={secondaryActions}
+                className="ollaic-icon-button min-[1800px]:hidden"
+              />
+            )}
           </nav>
         )}
       </div>
 
-      {/* 3. Right Search, Auto-Save, Seed Color Dots & Settings Floating Pill Island */}
+      {/* Search, autosave, and settings */}
       <div className="ollaic-topbar-end">
         <div className="ollaic-topbar-island">
         {(topActions.length > 0 || secondaryActions.length > 0) && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="ollaic-icon-button min-[1440px]:hidden"
-                aria-label="更多编辑操作"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {[...topActions, ...secondaryActions].map(({ label, icon: Icon, handler }) => (
-                <DropdownMenuItem key={label} onSelect={handler}>
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <EditorActionsMenu
+            actions={[...topActions, ...secondaryActions]}
+            className="ollaic-icon-button min-[1100px]:hidden"
+          />
         )}
         {onToggleScript && (
           <button
