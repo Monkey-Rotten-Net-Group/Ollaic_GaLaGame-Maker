@@ -11,8 +11,8 @@
 - `apps/desktop/src-tauri/`: desktop commands, asset protocol permissions, preview, AI and other
   desktop orchestration. Script and basic project operations delegate to the core.
 - `apps/android/`: Compose UI, document-provider streams, native library index and editor history.
-- `apps/ios/`: current SwiftUI draft app. Generated Swift bindings have a host smoke test;
-  the app's library packaging and storage migration are the next platform integration.
+- `apps/ios/`: SwiftUI UI, security-scoped Files access, managed library/migration,
+  actor-isolated shared-core adapters, editor history and WKWebView preview.
 
 ## Feature Matrix
 
@@ -44,12 +44,19 @@
 
 Pending entries open an explicit availability message; they do not simulate successful actions.
 
+The implemented rows above are also available on iOS/iPadOS through SwiftUI, Files,
+Quick Look/AVKit and WKWebView. Shared command, archive, catalog and runtime APIs own
+their format and validation. iOS uses native media support, so codec and preview availability
+differ from Android. Pending features remain pending on both platforms; the iOS interface
+omits their actions. See the [iOS guide](../../apps/ios/README.md) for storage migration,
+build targets and native checks.
+
 ## Compatibility And Persistence
 
 Projects use the desktop `game/config.txt`, `game/scene/*.txt` and asset layout. Existing
 project metadata and unfamiliar files are preserved rather than rewritten from a reduced model.
 Native visual identities/order are stored separately in `.ollaic/mobile-editor.json`.
-The Android writing-notes editor has been removed. Existing notes remain in mobile editor
+The Android and iOS writing-notes editors have been removed. Existing notes remain in mobile editor
 data and survive saves, legacy draft migration, and exports; they are separate from desktop AI memory.
 The shared editor keeps original source for unmodified entries. Engine continuations remain
 source entries, and unknown/custom syntax can be edited in the complete scene source view.
@@ -93,5 +100,5 @@ playtesting, session lifecycle, and real WebView verification.
 
 See [native validation](validation.md) for canonical commands, acceptance coverage,
 and platform boundaries. Platform setup lives in the [Android](../../apps/android/README.md)
-and [iOS](../../apps/ios/README.md) guides. Swift host validation does not prove iOS
-Simulator or device linking; the SwiftUI application still uses its draft repository.
+and [iOS](../../apps/ios/README.md) guides. Swift host validation, iOS Simulator linking,
+native UI regression and physical-device acceptance are separate checks.
