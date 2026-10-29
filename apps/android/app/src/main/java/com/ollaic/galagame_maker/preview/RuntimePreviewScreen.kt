@@ -176,11 +176,9 @@ fun RuntimePreviewScreen(projectName: String, model: RuntimePreviewViewModel, on
         }
       }
       if (state.phase == PreviewPhase.Ready) Box(Modifier.size(0.dp).testTag("preview-ready"))
-      if (fullscreen && customView == null) Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp)) {
-        Surface(shape = MaterialTheme.shapes.small) { Row {
-          PreviewTool(Icons.Outlined.FullscreenExit, R.string.preview_exit_fullscreen, "preview-exit-fullscreen", true) { fullscreen = false }
-          PreviewTool(Icons.AutoMirrored.Outlined.ArrowBack, R.string.preview_back, "preview-back", !closing, ::exit)
-        } }
+      if (fullscreen && customView == null) PreviewFullscreenControls {
+        PreviewTool(Icons.Outlined.FullscreenExit, R.string.preview_exit_fullscreen, "preview-exit-fullscreen", true) { fullscreen = false }
+        PreviewTool(Icons.AutoMirrored.Outlined.ArrowBack, R.string.preview_back, "preview-back", !closing, ::exit)
       }
       customView?.let { custom -> AndroidView(factory = { (custom.parent as? ViewGroup)?.removeView(custom); custom }, modifier = Modifier.fillMaxSize()) }
     }
