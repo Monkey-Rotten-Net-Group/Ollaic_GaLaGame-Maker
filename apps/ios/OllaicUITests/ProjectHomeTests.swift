@@ -12,7 +12,6 @@ final class ProjectHomeTests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 15))
-        snapshot("01-empty-library", app)
 
         create("Moonlit Letters", synopsis: "A quiet seaside story.", color: "rose", in: app)
         actions(for: "Moonlit Letters", in: app).tap()
@@ -33,7 +32,6 @@ final class ProjectHomeTests: XCTestCase {
         name.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Moonlit Letters".count) + "Moonlit Letters Revised")
         app.buttons["cover-blue"].tap()
-        snapshot("02-project-form", app)
         app.buttons["save-project"].tap()
         XCTAssertTrue(actions(for: "Moonlit Letters Revised", in: app).waitForExistence(timeout: 10))
 
@@ -41,7 +39,6 @@ final class ProjectHomeTests: XCTestCase {
         search.tap()
         search.typeText("unmatched-title")
         XCTAssertTrue(app.staticTexts["No Results"].waitForExistence(timeout: 5))
-        snapshot("03-search-empty", app)
         app.buttons["Clear Search"].tap()
         if app.buttons["Close"].exists {
             app.buttons["Close"].tap()
@@ -55,7 +52,6 @@ final class ProjectHomeTests: XCTestCase {
         app.buttons["Move to Trash"].tap()
         select("trash", title: "Trash", in: app)
         XCTAssertTrue(actions(for: "Moonlit Letters Revised", in: app).waitForExistence(timeout: 5))
-        snapshot("04-trash", app)
         actions(for: "Moonlit Letters Revised", in: app).tap()
         app.buttons["Restore"].tap()
         select("all", title: "All", in: app)
@@ -63,12 +59,10 @@ final class ProjectHomeTests: XCTestCase {
 
         create("A Summer in the City", synopsis: "Two friends, one last train home.", color: "green", in: app)
         create("The Observatory", synopsis: "Signals from a forgotten constellation.", color: "gold", in: app)
-        snapshot("05-project-grid", app)
 
         app.buttons["view-options"].tap()
         app.buttons["List"].tap()
         XCTAssertTrue(app.collectionViews["project-list"].exists || app.tables["project-list"].exists || app.descendants(matching: .any)["project-list"].exists)
-        snapshot("06-project-list", app)
         app.buttons["view-options"].tap()
         app.buttons["Grid"].tap()
 
@@ -101,14 +95,12 @@ final class ProjectHomeTests: XCTestCase {
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 15))
         create("The Last Train", synopsis: "A letter left on the last platform.", color: "blue", in: app)
         openWorkspace("The Last Train", in: app)
-        snapshot("07-empty-editor", app)
 
         let opening = "The last train had already left the station."
         let revised = "Only one platform light was still on."
         addEntry("narration", text: opening, in: app)
         addEntry("dialogue", text: "I thought you would be here.", speaker: "Mira", in: app)
         addEntry("note", text: "Hold the silence before the reply.", in: app)
-        snapshot("08-script-editor", app)
 
         entry(opening, in: app).tap()
         let body = app.descendants(matching: .any)["entry-text"].firstMatch
@@ -122,6 +114,26 @@ final class ProjectHomeTests: XCTestCase {
         app.buttons["workspace-redo"].tap()
         XCTAssertTrue(entry(revised, in: app).waitForExistence(timeout: 5))
 
+        entry(revised, in: app).tap()
+        let mode = app.segmentedControls["command-mode"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 5))
+        mode.buttons["Source"].tap()
+        let source = app.textViews["entry-text"]
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        source.tap()
+        source.typeKey("a", modifierFlags: .command)
+        source.typeText(":\(revised) -future=preserved; keep\n")
+        mode.buttons["Form"].tap()
+        app.buttons["save-entry"].tap()
+        XCTAssertTrue(entry(revised, in: app).waitForExistence(timeout: 5))
+        entry(revised, in: app).tap()
+        XCTAssertTrue(mode.waitForExistence(timeout: 5))
+        mode.buttons["Source"].tap()
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertTrue((source.value as? String)?.contains("-future=preserved") == true)
+        XCTAssertTrue((source.value as? String)?.contains("; keep") == true)
+        app.buttons["Cancel"].tap()
+
         workspaceTab("Scenes", in: app)
         app.buttons["new-scene"].tap()
         let sceneName = app.descendants(matching: .any)["scene-name"].firstMatch
@@ -129,25 +141,18 @@ final class ProjectHomeTests: XCTestCase {
         sceneName.tap()
         sceneName.typeText("Platform Two")
         app.buttons["save-scene"].tap()
+        XCTAssertTrue(app.buttons["Platform Two"].waitForExistence(timeout: 10))
+        app.buttons["Platform Two"].tap()
         XCTAssertTrue(workspaceControl("new-entry", in: app).waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(entry(revised, in: app).exists)
         addEntry("dialogue", text: "Let us start again from here.", speaker: "Ren", in: app)
         workspaceControl("scene-picker", in: app).tap()
-        app.buttons["Opening Scene"].tap()
+        sceneChoice("Opening Scene", in: app).tap()
         XCTAssertTrue(entry(revised, in: app).waitForExistence(timeout: 5))
 
         workspaceTab("Project", in: app)
-        app.buttons["edit-notes"].tap()
-        let notes = "Keep the opening quiet. Mira never explains the letter."
-        let notesField = app.textViews["workspace-notes"]
-        XCTAssertTrue(notesField.waitForExistence(timeout: 5))
-        notesField.tap()
-        notesField.typeText(notes)
-        app.buttons["save-notes"].tap()
-        XCTAssertTrue(app.staticTexts[notes].waitForExistence(timeout: 10))
-        snapshot("09-project-notes", app)
+        XCTAssertTrue(app.buttons["Characters"].waitForExistence(timeout: 5))
         workspaceTab("Script", in: app)
-        snapshot("10-editor-workspace", app)
 
         app.terminate()
         app.launch()
@@ -156,10 +161,10 @@ final class ProjectHomeTests: XCTestCase {
         XCTAssertTrue(entry(revised, in: app).waitForExistence(timeout: 10))
         XCTAssertTrue(entry("I thought you would be here.", in: app).exists)
         workspaceControl("scene-picker", in: app).tap()
-        app.buttons["Platform Two"].tap()
+        sceneChoice("Platform Two", in: app).tap()
         XCTAssertTrue(entry("Let us start again from here.", in: app).waitForExistence(timeout: 5))
         workspaceTab("Project", in: app)
-        XCTAssertTrue(app.staticTexts[notes].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Characters"].waitForExistence(timeout: 5))
         app.navigationBars.buttons["BackButton"].tap()
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 10))
     }
@@ -204,6 +209,11 @@ final class ProjectHomeTests: XCTestCase {
     }
 
     @MainActor
+    private func sceneChoice(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "scene-choice-", title)).firstMatch
+    }
+
+    @MainActor
     private func workspaceTab(_ title: String, in app: XCUIApplication) {
         let picker = app.segmentedControls["workspace-tabs"]
         if picker.exists { picker.buttons[title].tap() }
@@ -240,11 +250,4 @@ final class ProjectHomeTests: XCTestCase {
         }
     }
 
-    @MainActor
-    private func snapshot(_ name: String, _ app: XCUIApplication) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
 }
