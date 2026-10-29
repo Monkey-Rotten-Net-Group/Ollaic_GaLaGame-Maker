@@ -10,6 +10,36 @@ use std::{
 };
 use zip::write::SimpleFileOptions;
 
+#[cfg(unix)]
+#[test]
+fn opening_a_project_rejects_symlinked_config_companions_without_external_writes() {
+    for suffix in [".tmp", ".bak"] {
+        for external_exists in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().join("project");
+            project::create_project(&root, "Imported").unwrap();
+            let config = root.join("game/config.txt");
+            let source = "Game_name:Imported;\n";
+            fs::write(&config, source).unwrap();
+            let outside = directory.path().join("outside.txt");
+            if external_exists {
+                fs::write(&outside, "external data").unwrap();
+            }
+            std::os::unix::fs::symlink(&outside, root.join(format!("game/config.txt{suffix}")))
+                .unwrap();
+
+            let result = project::open_project(&root);
+            if external_exists {
+                assert_eq!(fs::read_to_string(&outside).unwrap(), "external data");
+            } else {
+                assert!(!outside.exists());
+            }
+            assert!(result.is_err());
+            assert_eq!(fs::read_to_string(&config).unwrap(), source);
+        }
+    }
+}
+
 fn copy_tree(source: &Path, destination: &Path) {
     fs::create_dir_all(destination).unwrap();
     for entry in fs::read_dir(source).unwrap() {

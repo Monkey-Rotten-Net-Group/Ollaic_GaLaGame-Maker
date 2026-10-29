@@ -14,6 +14,7 @@ pub fn read_to_string_recovering(path: &Path) -> std::io::Result<String> {
 }
 
 pub fn read_candidates(path: &Path) -> std::io::Result<Vec<String>> {
+    validate_store_paths(path)?;
     let backup = backup_path(path);
     if !path.exists() && !backup.exists() {
         return Ok(Vec::new());
@@ -42,11 +43,15 @@ fn write_crash_safe_inner(
     crash_point: Option<CrashPoint>,
 ) -> std::io::Result<()> {
     recover_missing_primary(path)?;
-    let temporary = suffixed_path(path, ".tmp");
-    let mut file = std::fs::File::create(&temporary)?;
+    // Never truncate a pre-existing temporary path: it may alias an external file.
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
     file.write_all(contents)?;
-    file.sync_all()?;
-    drop(file);
+    file.as_file().sync_all()?;
+    let temporary = file.into_temp_path();
 
     if crash_point == Some(CrashPoint::AfterTempSync) {
         return Err(injected_crash(CrashPoint::AfterTempSync));
@@ -83,6 +88,7 @@ fn write_crash_safe_with_fault(
 }
 
 fn recover_missing_primary(path: &Path) -> std::io::Result<()> {
+    validate_store_paths(path)?;
     if path.exists() {
         return Ok(());
     }
@@ -95,6 +101,27 @@ fn recover_missing_primary(path: &Path) -> std::io::Result<()> {
         Err(_) if path.exists() => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+fn validate_store_paths(path: &Path) -> std::io::Result<()> {
+    for candidate in [
+        path.to_owned(),
+        backup_path(path),
+        suffixed_path(path, ".tmp"),
+    ] {
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Symbolic links are not supported: {}", candidate.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -246,5 +273,83 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             r#"{"value":"old"}"#
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_store_paths_are_rejected_without_modifying_external_files() {
+        use std::os::unix::fs::symlink;
+
+        for suffix in ["", ".tmp", ".bak"] {
+            for primary_exists in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let path = directory.path().join("value.json");
+                let outside = directory.path().join("outside.json");
+                std::fs::write(&outside, "external data").unwrap();
+                if primary_exists && !suffix.is_empty() {
+                    std::fs::write(&path, "original data").unwrap();
+                }
+                let linked = suffixed_path(&path, suffix);
+                symlink(&outside, &linked).unwrap();
+
+                assert!(
+                    write_crash_safe(&path, b"replacement").is_err(),
+                    "{linked:?}"
+                );
+                assert!(read_to_string_recovering(&path).is_err(), "{linked:?}");
+                assert!(read_candidates(&path).is_err(), "{linked:?}");
+                assert_eq!(std::fs::read_to_string(&outside).unwrap(), "external data");
+                assert!(std::fs::symlink_metadata(&linked)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink());
+                if primary_exists && !suffix.is_empty() {
+                    assert_eq!(std::fs::read_to_string(&path).unwrap(), "original data");
+                } else if !suffix.is_empty() {
+                    assert!(!path.exists());
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_store_symlinks_cannot_create_external_files() {
+        use std::os::unix::fs::symlink;
+
+        for suffix in ["", ".tmp", ".bak"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("value.json");
+            let outside = directory.path().join("missing.json");
+            let linked = suffixed_path(&path, suffix);
+            symlink(&outside, &linked).unwrap();
+
+            assert!(read_candidates(&path).is_err(), "{linked:?}");
+            assert!(read_to_string_recovering(&path).is_err(), "{linked:?}");
+            assert!(
+                write_crash_safe(&path, b"replacement").is_err(),
+                "{linked:?}"
+            );
+            assert!(!outside.exists());
+            assert!(std::fs::symlink_metadata(&linked)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn stale_temporary_hard_links_cannot_modify_external_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("value.json");
+        let outside = directory.path().join("outside.json");
+        std::fs::write(&outside, "external data").unwrap();
+        std::fs::hard_link(&outside, suffixed_path(&path, ".tmp")).unwrap();
+
+        write_crash_safe(&path, b"replacement").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "replacement");
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "external data");
     }
 }
