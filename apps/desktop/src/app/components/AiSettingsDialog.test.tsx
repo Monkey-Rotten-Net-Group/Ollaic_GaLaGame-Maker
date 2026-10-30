@@ -77,6 +77,20 @@ describe('AiSettingsDialog', () => {
     expect(screen.queryByRole('button', { name: /视频/ })).not.toBeInTheDocument();
   });
 
+  it('clears credentials when a saved provider is no longer available', async () => {
+    vi.mocked(getAiConfig).mockResolvedValue({
+      provider: 'removed-provider',
+      model: 'removed-model',
+      api_key: 'removed-key',
+      base_url: 'https://removed.invalid/v1',
+    });
+
+    render(<AiSettingsDialog open={true} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('AI 设置')).toBeInTheDocument());
+    expect(screen.getByPlaceholderText('sk-...')).toHaveValue('');
+  });
+
   it('migrates TTS models into a pool and saves the selected model', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

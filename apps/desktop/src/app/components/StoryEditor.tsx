@@ -1209,7 +1209,7 @@ export function StoryEditor() {
                     <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-48 max-w-72">
+                <DropdownMenuContent align="start" className="min-w-48 max-w-72 max-h-80 overflow-y-auto">
                   {availableScenes.map((scene) => {
                     const active = scene === currentSceneName;
                     return (

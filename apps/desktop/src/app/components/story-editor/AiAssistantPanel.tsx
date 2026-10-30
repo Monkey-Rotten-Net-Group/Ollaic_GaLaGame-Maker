@@ -321,34 +321,36 @@ export function AiAssistantPanel({
                   <ChevronDown className="h-2.5 w-2.5 opacity-60" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" className="w-56">
-                <DropdownMenuLabel className="text-xs">
+              <DropdownMenuContent align="start" side="top" className="w-56 max-h-80 flex flex-col">
+                <DropdownMenuLabel className="text-xs shrink-0">
                   当前供应商: {activeProviderOption?.label || currentProvider || '默认'}
                 </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {availableModels.length > 0 ? (
-                  availableModels.map((m) => (
-                    <DropdownMenuItem
-                      key={m}
-                      disabled={modelSelection.loading || modelSelection.switching}
-                      onSelect={() => {
-                        void modelSelection.switchModel(m);
-                      }}
-                      className={`flex items-center justify-between text-xs cursor-pointer ${
-                        m === currentModel ? 'font-bold text-primary bg-primary/10' : ''
-                      }`}
-                    >
-                      <span className="truncate">{m}</span>
-                      {m === currentModel && <Check className="h-3.5 w-3.5 ml-1 text-primary shrink-0" />}
-                    </DropdownMenuItem>
-                  ))
-                ) : (
-                  <div className="px-2 py-1 text-xs text-muted-foreground">模型池为空，请在 AI 设置中添加模型</div>
-                )}
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator className="shrink-0" />
+                <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 max-h-56">
+                  {availableModels.length > 0 ? (
+                    availableModels.map((m) => (
+                      <DropdownMenuItem
+                        key={m}
+                        disabled={modelSelection.loading || modelSelection.switching}
+                        onSelect={() => {
+                          void modelSelection.switchModel(m);
+                        }}
+                        className={`flex items-center justify-between text-xs cursor-pointer ${
+                          m === currentModel ? 'font-bold text-primary bg-primary/10' : ''
+                        }`}
+                      >
+                        <span className="truncate">{m}</span>
+                        {m === currentModel && <Check className="h-3.5 w-3.5 ml-1 text-primary shrink-0" />}
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <div className="px-2 py-1 text-xs text-muted-foreground">模型池为空，请在 AI 设置中添加模型</div>
+                  )}
+                </div>
+                <DropdownMenuSeparator className="shrink-0" />
                 <DropdownMenuItem
                   onClick={onOpenSettings}
-                  className="text-xs text-primary cursor-pointer"
+                  className="text-xs text-primary cursor-pointer shrink-0"
                 >
                   <Sliders className="h-3.5 w-3.5 mr-1.5" />
                   <span>配置更多服务商与模型…</span>

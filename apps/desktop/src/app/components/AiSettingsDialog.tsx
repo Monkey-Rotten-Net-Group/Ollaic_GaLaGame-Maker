@@ -67,8 +67,8 @@ export function normalizeConfig(
         provider: options[0].value,
         model: options[0].defaultModel,
         models: [options[0].defaultModel],
-        api_key: config.api_key,
-        base_url: config.base_url,
+        api_key: '',
+        base_url: '',
       };
   const provider = options.find((option) => option.value === current.provider);
   return normalizeModelConfig(current, provider?.defaultModel);
@@ -101,7 +101,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    void reloadProfiles();
     setActiveTab('chat');
     setError(null);
     setValidation(null);
@@ -110,12 +109,13 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     setLogs([]);
     setLogPath('');
     Promise.all([
+      reloadProfiles(),
       listAiProviders(),
       getAiConfig(),
       getAiImageConfig(),
       getAiTtsConfig(),
     ])
-      .then(([providers, chat, image, tts]) => {
+      .then(([, providers, chat, image, tts]) => {
         setCatalog(providers);
         const normalizedChat = normalizeConfig(chat, providers.chat);
         setConfig(normalizedChat);

@@ -144,7 +144,6 @@ export function AppSettingsDialog({
     setVerifiedSaved(false);
     configRef.current = null;
     editedAiConfigs.current.clear();
-    void reloadProfiles();
     setCatalog(null);
     setChatConfig(null);
     setImageConfig(null);
@@ -161,12 +160,13 @@ export function AppSettingsDialog({
       });
 
     Promise.all([
+      reloadProfiles(),
       listAiProviders(),
       getAiConfig(),
       getAiImageConfig(),
       getAiTtsConfig(),
     ])
-      .then(([providers, chat, image, tts]) => {
+      .then(([, providers, chat, image, tts]) => {
         if (!active) return;
         setCatalog(providers);
         const normalizedChat = normalizeConfig(chat, providers.chat);
