@@ -44,7 +44,8 @@ for (const width of [390, 1100, 1280, 1440]) {
 test('global navigation preserves the unsaved-edit confirmation', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
   await page.getByRole('switch', { name: '自动保存' }).uncheck();
-  await page.getByLabel('编辑器视图模式').selectOption('script');
+  await page.getByLabel('编辑器视图模式').click();
+  await page.getByRole('menuitem', { name: '脚本源码', exact: true }).click();
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:保留未保存的内容。;');
   await page
     .getByRole('navigation', { name: '核心视图' })
@@ -59,12 +60,31 @@ test('global navigation preserves the unsaved-edit confirmation', async ({ page 
   await expect(page).toHaveURL(/\/#\/$/);
 });
 
+test('scene and view mode dropdown menus use rounded popovers', async ({ page }) => {
+  await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
+  for (const label of ['当前场景', '编辑器视图模式']) {
+    await page.getByLabel(label).click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const menuRadius = await menu.evaluate((el) => parseFloat(getComputedStyle(el).borderTopLeftRadius));
+    expect(menuRadius).toBeGreaterThanOrEqual(12);
+    const firstItem = menu.getByRole('menuitem').first();
+    const itemRadius = await firstItem.evaluate((el) =>
+      parseFloat(getComputedStyle(el).borderTopLeftRadius),
+    );
+    expect(itemRadius).toBeGreaterThanOrEqual(8);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+  }
+});
+
 for (const width of [1100, 1280, 1440, 1599, 1600]) {
   test(`command search filters characters and content at ${width}px`, async ({
     page,
   }, testInfo) => {
     await openFlowBoard(page, { width, height: 900 }, 'draft');
-    await page.getByLabel('编辑器视图模式').selectOption('stream');
+    await page.getByLabel('编辑器视图模式').click();
+    await page.getByRole('menuitem', { name: '指令卡片', exact: true }).click();
     const search = page.getByRole('textbox', { name: '搜索', exact: true });
     await expect(search).toBeVisible();
     const commands = page.locator('[data-cmd-card]');

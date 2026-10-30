@@ -62,6 +62,7 @@ import {
   type AiProviderConfig,
   type AiMediaGenerationProgress,
 } from '../lib/ai-ipc';
+import { getConfiguredModels, normalizeModelConfig } from '../lib/ai-models';
 import { getScenePath, loadScene, openProject, saveScene } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import { listCharacters } from '../lib/character-ipc';
@@ -2319,7 +2320,7 @@ function AssetAiGenerateDialog({
   const title = isImageGeneration
     ? activeTab === 'cg' ? 'AI 生成 CG 剧情画' : 'AI 生成背景素材'
     : 'AI 生成配音';
-  const configuredModels = config ? parseConfiguredModels(config.model) : [];
+  const configuredModels = config ? getConfiguredModels(config) : [];
   const effectiveModel = selectedModel || configuredModels[0] || config?.model.trim() || '';
   const promptSource = isImageGeneration
     ? initialSceneCard?.prompt.trim() || (initialAssetPrompt ?? '').trim()
@@ -2342,9 +2343,10 @@ function AssetAiGenerateDialog({
     setLoadingConfig(true);
     (isImageGeneration ? getAiImageConfig() : getAiTtsConfig())
       .then((nextConfig) => {
-        setConfig(nextConfig);
-        const models = parseConfiguredModels(nextConfig.model);
-        setSelectedModel(models[0] ?? nextConfig.model.trim());
+        const normalizedConfig = normalizeModelConfig(nextConfig);
+        setConfig(normalizedConfig);
+        const models = getConfiguredModels(normalizedConfig);
+        setSelectedModel(normalizedConfig.model || models[0] || '');
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoadingConfig(false));
@@ -2530,15 +2532,6 @@ function AssetAiGenerateDialog({
       </div>
     </div>
   );
-}
-
-function parseConfiguredModels(value: string): string[] {
-  return Array.from(new Set(
-    value
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ));
 }
 
 function VoiceCardDetails({

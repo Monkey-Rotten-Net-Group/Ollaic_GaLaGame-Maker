@@ -92,7 +92,7 @@ export function FullScreenWorldline({
           <button
             type="button"
             onClick={onClose}
-            className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-foreground transition-colors"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-foreground transition-colors"
             aria-label="返回编辑器"
           >
             <ArrowRight className="h-4 w-4 rotate-180" />
@@ -102,14 +102,14 @@ export function FullScreenWorldline({
           <span className="flex items-center gap-2 font-mono-family text-xs font-semibold uppercase tracking-widest text-on-surface-variant">
             <GitBranch className="h-4 w-4 text-primary" /> 场景关系图
           </span>
-          <span className="rounded bg-secondary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
+          <span className="rounded-full bg-secondary/10 px-2.5 py-0.5 font-mono text-[10px] text-primary">
             {scenes.length} 场景
           </span>
           {onNewScene && (
             <button
               type="button"
               onClick={onNewScene}
-              className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
+              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
               title="新建场景"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -120,7 +120,7 @@ export function FullScreenWorldline({
             <button
               type="button"
               onClick={onOpenSceneManager}
-              className="flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-foreground transition-colors"
+              className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-foreground transition-colors"
               title="场景管理"
             >
               <FolderOpen className="h-3.5 w-3.5" />
@@ -142,7 +142,7 @@ export function FullScreenWorldline({
           <button
             type="button"
             onClick={() => setZoom(1)}
-            className="rounded px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:bg-surface-container-high hover:text-foreground"
+            className="rounded-full px-2 py-0.5 font-mono text-xs text-muted-foreground hover:bg-surface-container-high hover:text-foreground"
             aria-label="重置缩放"
             title="重置缩放（100%）"
           >
@@ -183,12 +183,12 @@ export function FullScreenWorldline({
             <>
               <div className="fixed inset-0 z-40" onClick={() => setCtxMenu(null)} />
               <div
-                className="fixed z-50 min-w-[160px] rounded border border-border bg-surface-container-high p-1 shadow-lg"
+                className="fixed z-50 min-w-[160px] rounded-2xl border border-border bg-popover p-1.5 shadow-[0_12px_32px_-8px_rgba(29,27,34,0.14),0_4px_12px_-2px_rgba(29,27,34,0.06)] backdrop-blur-xl"
                 style={{ left: ctxMenu.x, top: ctxMenu.y }}
               >
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs hover:bg-surface-container-low"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-xs hover:bg-surface-container-low"
                 onClick={() => { onOpenScene(ctxMenu.sceneName); setCtxMenu(null); }}
               >
                 <BookOpen className="h-3.5 w-3.5" />
@@ -197,7 +197,7 @@ export function FullScreenWorldline({
               {onRenameScene && (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs hover:bg-surface-container-low"
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-xs hover:bg-surface-container-low"
                   onClick={() => { onRenameScene(ctxMenu.sceneName); setCtxMenu(null); }}
                 >
                   <FileText className="h-3.5 w-3.5" />
@@ -207,17 +207,17 @@ export function FullScreenWorldline({
               {onDeleteScene && ctxMenu.sceneName !== currentSceneName && (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-error hover:bg-error/10"
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-xs text-error hover:bg-error/10"
                   onClick={() => { onDeleteScene(ctxMenu.sceneName); setCtxMenu(null); }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   删除场景
                 </button>
               )}
-              <div className="my-0.5 h-px bg-border/50" />
+              <div className="my-1 h-px bg-border/50" />
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-muted-foreground hover:bg-surface-container-low"
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-xs text-muted-foreground hover:bg-surface-container-low"
                 onClick={() => setCtxMenu(null)}
               >
                 关闭
