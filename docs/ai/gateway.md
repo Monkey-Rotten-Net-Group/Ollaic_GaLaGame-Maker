@@ -49,7 +49,7 @@ Adaptor 只做协议转换。以下能力留在宿主（`ai::commands`）并被�
 
 | Adaptor | 图片 | 语音 |
 |---------|------|------|
-| `OpenAiCompatible` | openai / custom / zhipu / siliconflow / midjourney / volcengine | openai / custom |
+| `OpenAiCompatible` | openai / custom / volcengine | openai / custom |
 | `DashScope` | aliyun（异步任务轮询） | aliyun（Qwen-TTS HTTP / CosyVoice WebSocket） |
 | `Gemini` | gemini（inline base64） | — |
 | `SdWebUi` | sd-webui（本地） | — |

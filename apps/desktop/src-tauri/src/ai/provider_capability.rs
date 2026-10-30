@@ -198,6 +198,7 @@ mod tests {
         AiConfig {
             provider: provider.to_string(),
             model: model.to_string(),
+            models: vec![model.to_string()],
             api_key: String::new(),
             base_url: String::new(),
             capabilities: None,
@@ -236,6 +237,7 @@ mod tests {
                 let cfg = AiProviderConfig {
                     provider: option.value.clone(),
                     model: option.default_model.clone(),
+                    models: vec![option.default_model.clone()],
                     api_key: "key".to_string(),
                     base_url: if option.needs_base_url {
                         "https://gateway.test/v1".to_string()
@@ -260,10 +262,7 @@ mod tests {
             ("anthropic", true, false, false),
             ("gemini", true, true, false),
             ("deepseek", true, true, false),
-            ("groq", true, true, false),
             ("xai", true, true, false),
-            ("cohere", true, true, false),
-            ("ollama", false, true, true),
         ] {
             let capability = capability_for_config(&config(provider, "model")).unwrap();
             assert_eq!(capability.chat_tools, tools, "{provider}");
@@ -319,7 +318,7 @@ mod tests {
 
     #[test]
     fn unsupported_capability_reports_before_request() {
-        let capability = capability_for_config(&config("ollama", "qwen2.5:7b")).unwrap();
+        let capability = capability_for_config(&config("custom", "legacy-model")).unwrap();
         assert!(capability
             .require(RequiredCapability::ChatTools)
             .unwrap_err()
@@ -328,11 +327,11 @@ mod tests {
 
     #[test]
     fn media_url_output_gate_rejects_provider_that_does_not_declare_support() {
-        // ollama is a local model whose API does not return downloadable
+        // sd-webui is a local service whose API does not return downloadable
         // media URLs, so the gate must reject attempts to call
         // download_generated_media with it. The error message has to
         // surface before any network fetch happens.
-        let capability = capability_for_config(&config("ollama", "qwen2.5:7b")).unwrap();
+        let capability = capability_for_config(&config("sd-webui", "local")).unwrap();
         assert!(capability
             .require(RequiredCapability::MediaUrlOutput)
             .unwrap_err()
@@ -340,7 +339,7 @@ mod tests {
 
         // openai / aliyun etc. declare support, so the gate must let them
         // through.
-        let openai = capability_for_config(&config("openai", "gpt-image-1")).unwrap();
+        let openai = capability_for_config(&config("openai", "gpt-image-2")).unwrap();
         assert!(openai.require(RequiredCapability::MediaUrlOutput).is_ok());
     }
 
@@ -349,6 +348,7 @@ mod tests {
         let image = AiProviderConfig {
             provider: "anthropic".to_string(),
             model: "claude".to_string(),
+            models: vec!["claude".to_string()],
             api_key: "key".to_string(),
             base_url: String::new(),
         };
@@ -361,6 +361,7 @@ mod tests {
         let tts = AiProviderConfig {
             provider: "elevenlabs".to_string(),
             model: "voice".to_string(),
+            models: vec!["voice".to_string()],
             api_key: "key".to_string(),
             base_url: String::new(),
         };
@@ -373,6 +374,7 @@ mod tests {
         let mut custom = AiProviderConfig {
             provider: "custom".to_string(),
             model: "media-model".to_string(),
+            models: vec!["media-model".to_string()],
             api_key: "key".to_string(),
             base_url: String::new(),
         };
@@ -418,10 +420,10 @@ mod tests {
         let openai_deadline = capability_for_config(&config("openai", "gpt-4o-mini"))
             .unwrap()
             .flow_step_deadline_ms;
-        let ollama_deadline = capability_for_config(&config("ollama", "qwen2.5:7b"))
+        let local_deadline = capability_for_config(&config("sd-webui", "local"))
             .unwrap()
             .flow_step_deadline_ms;
-        assert!(ollama_deadline > openai_deadline);
+        assert!(local_deadline > openai_deadline);
 
         // Re-reading the original config still returns the original deadline;
         // the capability is not mutated by a call for a different config.

@@ -4,6 +4,7 @@ pub mod commands;
 pub mod config;
 pub mod gateway;
 pub(crate) mod media_support;
+pub mod model_list;
 pub mod provider_capability;
 pub mod registry;
 #[allow(dead_code)]
