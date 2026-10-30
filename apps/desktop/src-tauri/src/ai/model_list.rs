@@ -46,7 +46,6 @@ const NON_CHAT_MARKERS: &[&str] = &[
     "rerank",
     "davinci",
     "babbage",
-    "-instruct",
     "aqa",
     "-live",
     "computer-use",
@@ -146,26 +145,45 @@ pub async fn fetch_chat_models(cfg: &AiConfig) -> Result<(String, Vec<String>), 
 /// version segment (`/v1`, `/v4`) gets `/models` appended; otherwise
 /// `/v1/models` comes first with `/models` as the fallback.
 fn models_url_candidates(protocol: Protocol, base_url: &str) -> Result<Vec<String>, String> {
-    let base = base_url.trim().trim_end_matches('/');
-    if base.is_empty() {
-        return Err("Base URL 为空".into());
+    let mut url =
+        reqwest::Url::parse(base_url.trim()).map_err(|_| "Base URL 不是有效的 URL".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Base URL 必须使用 HTTP 或 HTTPS".into());
     }
-    let candidates = match protocol {
+    let base = url.path().trim_end_matches('/');
+    let paths = match protocol {
         Protocol::Gemini => {
             let root = base
                 .strip_suffix("/v1beta")
                 .or_else(|| base.strip_suffix("/v1"))
                 .unwrap_or(base);
-            vec![format!("{root}/v1beta/models?pageSize=1000")]
+            vec![format!("{root}/v1beta/models")]
         }
         Protocol::Anthropic => {
             let root = base.strip_suffix("/v1").unwrap_or(base);
-            vec![format!("{root}/v1/models?limit=1000")]
+            vec![format!("{root}/v1/models")]
         }
         Protocol::OpenAi if ends_with_version_segment(base) => vec![format!("{base}/models")],
         Protocol::OpenAi => vec![format!("{base}/v1/models"), format!("{base}/models")],
     };
-    Ok(candidates)
+    url.set_fragment(None);
+    match protocol {
+        Protocol::Gemini => {
+            url.query_pairs_mut().append_pair("pageSize", "1000");
+        }
+        Protocol::Anthropic => {
+            url.query_pairs_mut().append_pair("limit", "1000");
+        }
+        Protocol::OpenAi => {}
+    }
+    Ok(paths
+        .into_iter()
+        .map(|path| {
+            let mut candidate = url.clone();
+            candidate.set_path(&path);
+            candidate.to_string()
+        })
+        .collect())
 }
 
 fn ends_with_version_segment(url: &str) -> bool {
@@ -242,6 +260,10 @@ fn filter_chat_models(ids: Vec<String>) -> Vec<String> {
         .filter(|id| {
             let lower = id.to_ascii_lowercase();
             !NON_CHAT_MARKERS.iter().any(|marker| lower.contains(marker))
+                && !matches!(
+                    lower.as_str(),
+                    "gpt-3.5-turbo-instruct" | "gpt-3.5-turbo-instruct-0914"
+                )
         })
         .collect();
     models.sort();

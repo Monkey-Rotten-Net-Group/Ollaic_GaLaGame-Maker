@@ -185,18 +185,6 @@ fn read_profiles_at(path: &Path) -> ProviderProfiles {
         .unwrap_or_default()
 }
 
-/// Remember the profile of the provider just saved. Runs after the active
-/// config is written, so a failure here never loses the active config.
-fn remember_saved_profile(
-    kind: ProfileKind,
-    provider: &str,
-    profile: ProviderProfile,
-) -> Result<(), String> {
-    let path = config_path(PROFILES_FILE)
-        .ok_or_else(|| "Unable to locate user config directory".to_string())?;
-    remember_profile_at(&path, kind, provider, profile)
-}
-
 fn remember_profile_at(
     path: &Path,
     kind: ProfileKind,
@@ -276,9 +264,10 @@ pub fn load_config() -> AiConfig {
 }
 
 pub fn save_config(config: &AiConfig) -> Result<(), String> {
-    save_active_config(config)?;
-    remember_saved_profile(
+    save_profiled_config(
+        CONFIG_FILE,
         ProfileKind::Chat,
+        config,
         &config.provider,
         profile_of(
             &config.model,
@@ -292,6 +281,7 @@ pub fn save_config(config: &AiConfig) -> Result<(), String> {
 /// Write the active chat config without remembering it as a provider
 /// profile. For callers that stage a temporary override and restore it
 /// afterwards, which must not leave the override behind in the profiles.
+#[cfg(feature = "agent-harness")]
 pub fn save_active_config(config: &AiConfig) -> Result<(), String> {
     let path = config_path(CONFIG_FILE)
         .ok_or_else(|| "Unable to locate user config directory".to_string())?;
@@ -308,8 +298,7 @@ pub fn load_image_config() -> AiProviderConfig {
 }
 
 pub fn save_image_config(config: &AiProviderConfig) -> Result<(), String> {
-    save_provider_config(IMAGE_CONFIG_FILE, config)?;
-    remember_media_profile(ProfileKind::Image, config)
+    save_media_config(IMAGE_CONFIG_FILE, ProfileKind::Image, config)
 }
 
 pub fn load_tts_config() -> AiProviderConfig {
@@ -317,19 +306,76 @@ pub fn load_tts_config() -> AiProviderConfig {
 }
 
 pub fn save_tts_config(config: &AiProviderConfig) -> Result<(), String> {
-    save_provider_config(TTS_CONFIG_FILE, config)?;
-    remember_media_profile(ProfileKind::Tts, config)
+    save_media_config(TTS_CONFIG_FILE, ProfileKind::Tts, config)
 }
 
-fn remember_media_profile(kind: ProfileKind, config: &AiProviderConfig) -> Result<(), String> {
-    remember_saved_profile(
+fn save_media_config(
+    file_name: &str,
+    kind: ProfileKind,
+    config: &AiProviderConfig,
+) -> Result<(), String> {
+    save_profiled_config(
+        file_name,
         kind,
+        config,
         &config.provider,
         profile_of(
             &config.model,
             &config.models,
             &config.api_key,
             &config.base_url,
+        ),
+    )
+}
+
+fn save_profiled_config(
+    file_name: &str,
+    kind: ProfileKind,
+    config: &impl Serialize,
+    provider: &str,
+    profile: ProviderProfile,
+) -> Result<(), String> {
+    let root = config_root().ok_or_else(|| "Unable to locate user config directory".to_string())?;
+    save_profiled_config_at(&root, file_name, kind, config, provider, profile)
+}
+
+fn save_profiled_config_at(
+    root: &Path,
+    file_name: &str,
+    kind: ProfileKind,
+    config: &impl Serialize,
+    provider: &str,
+    profile: ProviderProfile,
+) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    remember_active_profile_at(root, file_name, kind)?;
+    fs::create_dir_all(root).map_err(|e| format!("Failed to create config directory: {e}"))?;
+    fs::write(root.join(file_name), json).map_err(|e| format!("Failed to write config: {e}"))?;
+    remember_profile_at(&root.join(PROFILES_FILE), kind, provider, profile)
+}
+
+/// Persist legacy credentials before replacing the only file containing them.
+fn remember_active_profile_at(
+    root: &Path,
+    file_name: &str,
+    kind: ProfileKind,
+) -> Result<(), String> {
+    let text = match fs::read_to_string(root.join(file_name)) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Failed to read active config: {error}")),
+    };
+    let previous: AiProviderConfig = serde_json::from_str(&text)
+        .map_err(|error| format!("Failed to parse active config: {error}"))?;
+    remember_profile_at(
+        &root.join(PROFILES_FILE),
+        kind,
+        &previous.provider,
+        profile_of(
+            &previous.model,
+            &previous.models,
+            &previous.api_key,
+            &previous.base_url,
         ),
     )
 }
@@ -345,17 +391,6 @@ fn load_provider_config(
         return default();
     };
     serde_json::from_str(&text).unwrap_or_else(|_| default())
-}
-
-fn save_provider_config(file_name: &str, config: &AiProviderConfig) -> Result<(), String> {
-    let path = config_path(file_name)
-        .ok_or_else(|| "Unable to locate user config directory".to_string())?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory: {e}"))?;
-    }
-    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write config: {e}"))
 }
 
 pub fn log_path() -> Result<PathBuf, String> {
@@ -490,6 +525,63 @@ mod tests {
         assert_eq!(profiles.image["openai"].api_key, "image-key");
         assert!(profiles.tts.is_empty());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn first_provider_switch_preserves_legacy_profiles_for_every_modality() {
+        for (file_name, kind) in [
+            (CONFIG_FILE, ProfileKind::Chat),
+            (IMAGE_CONFIG_FILE, ProfileKind::Image),
+            (TTS_CONFIG_FILE, ProfileKind::Tts),
+        ] {
+            let dir = temp_dir("profile-migration");
+            fs::create_dir_all(&dir).unwrap();
+            let legacy = r#"{"provider":"openai","model":"legacy-model","api_key":"legacy-key","base_url":"https://legacy.invalid/v1"}"#;
+            fs::write(dir.join(file_name), legacy).unwrap();
+            let next = AiProviderConfig {
+                provider: "custom".into(),
+                model: "new-model".into(),
+                models: vec!["new-model".into()],
+                api_key: "new-key".into(),
+                base_url: "https://new.invalid/v1".into(),
+            };
+            save_profiled_config_at(
+                &dir,
+                file_name,
+                kind,
+                &next,
+                &next.provider,
+                profile_of(&next.model, &next.models, &next.api_key, &next.base_url),
+            )
+            .unwrap();
+            let mut reloaded = read_profiles_at(&dir.join(PROFILES_FILE));
+            let profiles = reloaded.map_mut(kind);
+            assert_eq!(profiles["openai"].api_key, "legacy-key");
+            assert_eq!(profiles["openai"].base_url, "https://legacy.invalid/v1");
+            assert_eq!(profiles["openai"].model, "legacy-model");
+            assert_eq!(profiles["custom"].api_key, "new-key");
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn profile_migration_failure_preserves_the_active_config() {
+        let dir = temp_dir("profile-migration-failure");
+        fs::create_dir_all(dir.join(PROFILES_FILE)).unwrap();
+        let legacy = r#"{"provider":"openai","api_key":"legacy-key"}"#;
+        fs::write(dir.join(CONFIG_FILE), legacy).unwrap();
+        let next = AiConfig::default();
+        assert!(save_profiled_config_at(
+            &dir,
+            CONFIG_FILE,
+            ProfileKind::Chat,
+            &next,
+            &next.provider,
+            profile_of(&next.model, &next.models, &next.api_key, &next.base_url),
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(dir.join(CONFIG_FILE)).unwrap(), legacy);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

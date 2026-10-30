@@ -66,7 +66,9 @@ test('scene and view mode dropdown menus use rounded popovers', async ({ page })
     await page.getByLabel(label).click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
-    const menuRadius = await menu.evaluate((el) => parseFloat(getComputedStyle(el).borderTopLeftRadius));
+    const menuRadius = await menu.evaluate((el) =>
+      parseFloat(getComputedStyle(el).borderTopLeftRadius),
+    );
     expect(menuRadius).toBeGreaterThanOrEqual(12);
     const firstItem = menu.getByRole('menuitem').first();
     const itemRadius = await firstItem.evaluate((el) =>
@@ -291,13 +293,10 @@ test('settings stay inside narrow and short windows', async ({ page }, testInfo)
   await expectFits(appSettings);
   await expect(appSettings.getByRole('button', { name: '保存', exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('app-settings-narrow.png') });
-  await appSettings.getByRole('button', { name: '常规工程', exact: true }).click();
-  await appSettings.getByRole('button', { name: '打开 AI 设置' }).click();
-  const aiSettings = page.locator('div.bg-card').filter({
-    has: page.getByRole('heading', { name: 'AI 设置', exact: true }),
-  });
+  await appSettings.getByRole('button', { name: 'AI 模型服务', exact: true }).click();
+  const aiSettings = appSettings;
   await expect(aiSettings.getByRole('button', { name: '测试连接' })).toBeVisible();
   await expectFits(aiSettings);
-  await expect(aiSettings.getByRole('button', { name: '保存 AI 配置' })).toBeInViewport();
+  await expect(aiSettings.getByRole('button', { name: '保存', exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('ai-settings-narrow.png') });
 });
