@@ -97,10 +97,10 @@ test('model switching preserves credentials saved through its settings entry', a
   await openConfiguredEditor(page);
   await page.getByRole('button', { name: '切换对话模型' }).click();
   await page.getByRole('menuitem', { name: '配置更多服务商与模型…' }).click();
-  const settings = settingsPanel(page, 'AI 设置');
+  const settings = settingsPanel(page, '编辑器设置');
   await settings.getByPlaceholder('sk-...').fill('new-test-key');
   await settings.getByPlaceholder('https://test.invalid/v1').fill('https://new.test.invalid/v1');
-  await settings.getByRole('button', { name: '保存 AI 配置' }).click();
+  await settings.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('button', { name: '切换对话模型' }).click();
   await page.getByRole('menuitem', { name: 'model-b', exact: true }).click();
   await expect(page.getByRole('button', { name: '切换对话模型' })).toContainText('model-b');
@@ -149,23 +149,23 @@ test('failed model writes retain the persisted selection and show an error', asy
   await page.screenshot({ path: testInfo.outputPath('model-switch-error.png') });
 });
 
-test('parent settings save preserves all configurations saved in the nested AI dialog', async ({
-  page,
-}) => {
+test('settings save preserves edits across AI tabs and general settings', async ({ page }) => {
   await openConfiguredEditor(page);
   await page.getByRole('button', { name: '设置', exact: true }).click();
   const parent = settingsPanel(page, '编辑器设置');
-  await parent.getByRole('button', { name: '常规工程', exact: true }).click();
-  await parent.getByRole('button', { name: '打开 AI 设置' }).click();
-  const nested = settingsPanel(page, 'AI 设置');
-  for (const name of ['聊天', '图片', '音频', '视频']) {
-    await nested.getByRole('button', { name, exact: true }).click();
-    await nested.getByPlaceholder('sk-...').fill(`new-${name}-test-key`);
+  await parent.getByRole('button', { name: 'AI 模型服务', exact: true }).click();
+  for (const name of ['剧本对话', '画面插画', '角色配音']) {
+    await parent.getByRole('button', { name, exact: true }).click();
+    await parent.getByPlaceholder('sk-...').fill(`new-${name}-test-key`);
   }
-  await nested.getByRole('button', { name: '保存 AI 配置' }).click();
-  const saved = await readConfigs(page);
+  await parent.getByRole('button', { name: '常规工程', exact: true }).click();
   await parent.getByRole('button', { name: '保存', exact: true }).click();
-  expect(await readConfigs(page)).toEqual(saved);
+  await expect(parent).not.toBeVisible();
+  expect(await readConfigs(page)).toMatchObject({
+    ai: { api_key: 'new-剧本对话-test-key' },
+    ai_image: { api_key: 'new-画面插画-test-key' },
+    ai_tts: { api_key: 'new-角色配音-test-key' },
+  });
 });
 
 test('home applies saved appearance immediately', async ({ page }, testInfo) => {

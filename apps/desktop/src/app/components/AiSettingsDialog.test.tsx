@@ -1,7 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { AiSettingsDialog } from './AiSettingsDialog';
+import { AiSettingsDialog, ConfigFields } from './AiSettingsDialog';
 import {
   listAiProviders,
   getAiConfig,
@@ -34,21 +34,96 @@ vi.mock('../lib/ai-ipc', () => ({
 
 const mockCatalog = {
   chat: [
-    { value: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o', models: ['gpt-4o', 'gpt-4o-mini'], requiresApiKey: true, needsBaseUrl: false },
+    {
+      value: 'openai',
+      label: 'OpenAI',
+      defaultModel: 'gpt-4o',
+      models: ['gpt-4o', 'gpt-4o-mini'],
+      requiresApiKey: true,
+      needsBaseUrl: false,
+      defaultBaseUrl: '',
+      baseUrlPlaceholder: '',
+    },
   ],
   image: [
-    { value: 'openai', label: 'OpenAI', defaultModel: 'dall-e-3', models: ['dall-e-3', 'dall-e-2'], requiresApiKey: true, needsBaseUrl: false },
+    {
+      value: 'openai',
+      label: 'OpenAI',
+      defaultModel: 'dall-e-3',
+      models: ['dall-e-3', 'dall-e-2'],
+      requiresApiKey: true,
+      needsBaseUrl: false,
+    },
   ],
   tts: [
-    { value: 'openai', label: 'OpenAI', defaultModel: 'tts-1', models: ['tts-1', 'tts-1-hd'], requiresApiKey: true, needsBaseUrl: false },
+    {
+      value: 'openai',
+      label: 'OpenAI',
+      defaultModel: 'tts-1',
+      models: ['tts-1', 'tts-1-hd'],
+      requiresApiKey: true,
+      needsBaseUrl: false,
+    },
   ],
 };
 
 const mockChatConfig = { provider: 'openai', model: 'gpt-4o', api_key: 'test-key', base_url: '' };
-const mockImageConfig = { provider: 'openai', model: 'dall-e-3', api_key: 'test-key', base_url: '' };
-const mockTtsConfig = { provider: 'openai', model: 'tts-1,tts-1-hd', api_key: 'test-key', base_url: '' };
+const mockImageConfig = {
+  provider: 'openai',
+  model: 'dall-e-3',
+  api_key: 'test-key',
+  base_url: '',
+};
+const mockTtsConfig = {
+  provider: 'openai',
+  model: 'tts-1,tts-1-hd',
+  api_key: 'test-key',
+  base_url: '',
+};
 
 describe('AiSettingsDialog', () => {
+  it.each(['provider', 'base_url', 'api_key'] as const)(
+    'invalidates cached models and late responses when %s changes',
+    async (field) => {
+      const user = userEvent.setup();
+      const config = { ...mockChatConfig, base_url: 'https://a.invalid/v1' };
+      let resolveOld!: (models: string[]) => void;
+      const fetch = vi
+        .fn<() => Promise<string[]>>()
+        .mockResolvedValueOnce(['cached-model'])
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveOld = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(['current-model']);
+      const props = {
+        options: mockCatalog.chat,
+        onUpdate: vi.fn(),
+        onProviderChange: vi.fn(),
+        onFetchModels: fetch,
+      };
+      const { rerender, unmount } = render(<ConfigFields {...props} config={config} />);
+      await user.click(screen.getByRole('button', { name: '获取模型' }));
+      expect(await screen.findByRole('button', { name: 'cached-model' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '获取模型' }));
+      rerender(<ConfigFields {...props} config={{ ...config, [field]: 'changed' }} />);
+      expect(screen.queryByRole('button', { name: 'cached-model' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '获取模型' }));
+      expect(await screen.findByRole('button', { name: 'current-model' })).toBeInTheDocument();
+      await act(async () => {
+        resolveOld(['stale-model']);
+      });
+      expect(screen.queryByRole('button', { name: 'stale-model' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'current-model' })).toBeInTheDocument();
+      rerender(<ConfigFields {...props} config={config} />);
+      expect(screen.queryByRole('button', { name: 'cached-model' })).not.toBeInTheDocument();
+      unmount();
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(listAiProviders).mockResolvedValue(mockCatalog as any);
@@ -145,7 +220,9 @@ describe('AiSettingsDialog', () => {
     // A fetched model is only a candidate until clicked; the pool is unchanged.
     expect(within(pool).queryByText('gpt-live-a')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'gpt-live-a' }));
-    expect(within(pool).getByRole('button', { name: /gpt-live-a/, pressed: true })).toBeInTheDocument();
+    expect(
+      within(pool).getByRole('button', { name: /gpt-live-a/, pressed: true }),
+    ).toBeInTheDocument();
   });
 
   it("switches to each provider's own key instead of reusing the previous one", async () => {
@@ -154,12 +231,28 @@ describe('AiSettingsDialog', () => {
       ...mockCatalog,
       chat: [
         ...mockCatalog.chat,
-        { value: 'deepseek', label: 'DeepSeek', defaultModel: 'deepseek-flash', models: ['deepseek-flash'], requiresApiKey: true, needsBaseUrl: false },
-        { value: 'xai', label: 'xAI', defaultModel: 'grok-4.6', models: ['grok-4.6'], requiresApiKey: true, needsBaseUrl: false },
+        {
+          value: 'deepseek',
+          label: 'DeepSeek',
+          defaultModel: 'deepseek-flash',
+          models: ['deepseek-flash'],
+          requiresApiKey: true,
+          needsBaseUrl: false,
+        },
+        {
+          value: 'xai',
+          label: 'xAI',
+          defaultModel: 'grok-4.6',
+          models: ['grok-4.6'],
+          requiresApiKey: true,
+          needsBaseUrl: false,
+        },
       ],
     } as any);
     vi.mocked(listAiProviderProfiles).mockResolvedValue({
-      chat: { xai: { model: 'grok-4.6', models: ['grok-4.6'], api_key: 'saved-xai-key', base_url: '' } },
+      chat: {
+        xai: { model: 'grok-4.6', models: ['grok-4.6'], api_key: 'saved-xai-key', base_url: '' },
+      },
       image: {},
       tts: {},
     });

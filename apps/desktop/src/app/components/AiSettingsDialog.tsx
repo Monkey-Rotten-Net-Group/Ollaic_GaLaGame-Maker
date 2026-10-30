@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
   Save,
@@ -404,10 +404,12 @@ function TabButton({
   );
 }
 
+type DiscoveryIdentity = Pick<AiConfig, 'provider' | 'base_url' | 'api_key'>;
+
 type FetchState =
   | { status: 'idle' }
-  | { status: 'loading'; provider: string }
-  | { status: 'done' | 'error'; provider: string; message: string };
+  | { status: 'loading'; identity: DiscoveryIdentity }
+  | { status: 'done' | 'error'; identity: DiscoveryIdentity; message: string };
 
 export function ProviderConfigPanel({
   title,
@@ -460,32 +462,45 @@ export function ConfigFields({
     : provider
       ? [provider.defaultModel]
       : [];
-  // Fetched models are tagged with the provider they came from, so a result
-  // that arrives after a provider switch is never shown for the new provider.
-  const [fetched, setFetched] = useState<{ provider: string; models: string[] } | null>(null);
+  const identity = useMemo(
+    () => ({ provider: config.provider, base_url: config.base_url, api_key: config.api_key }),
+    [config.provider, config.base_url, config.api_key],
+  );
+  const [fetched, setFetched] = useState<{ identity: DiscoveryIdentity; models: string[] } | null>(
+    null,
+  );
   const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' });
-  const fetchedModels = fetched?.provider === config.provider ? fetched.models : [];
+  const requestId = useRef(0);
+  useEffect(
+    () => () => {
+      requestId.current += 1;
+    },
+    [identity],
+  );
+  const fetchedModels = fetched?.identity === identity ? fetched.models : [];
   const modelOptions = Array.from(new Set([...presetModels, ...fetchedModels]));
   const visibleFetchState: FetchState =
-    fetchState.status !== 'idle' && fetchState.provider !== config.provider
+    fetchState.status !== 'idle' && fetchState.identity !== identity
       ? { status: 'idle' }
       : fetchState;
   const fetchModels = onFetchModels
     ? async () => {
-        const requested = config.provider;
-        setFetchState({ status: 'loading', provider: requested });
+        const currentRequest = ++requestId.current;
+        setFetchState({ status: 'loading', identity });
         try {
           const models = await onFetchModels(config);
-          setFetched({ provider: requested, models });
+          if (currentRequest !== requestId.current) return;
+          setFetched({ identity, models });
           setFetchState({
             status: 'done',
-            provider: requested,
+            identity,
             message: models.length
               ? `已获取 ${models.length} 个对话模型，点击下方候选即可加入模型池`
               : '接口未返回对话模型',
           });
         } catch (err) {
-          setFetchState({ status: 'error', provider: requested, message: String(err) });
+          if (currentRequest !== requestId.current) return;
+          setFetchState({ status: 'error', identity, message: String(err) });
         }
       }
     : undefined;
@@ -528,10 +543,7 @@ export function ConfigFields({
         </select>
       </Field>
 
-      <Field
-        label="模型"
-        hint="从已添加的模型中切换当前使用项，也可以输入自定义模型名称。"
-      >
+      <Field label="模型" hint="从已添加的模型中切换当前使用项，也可以输入自定义模型名称。">
         <ModelPoolPicker
           value={activeModel}
           models={modelPool}
@@ -669,7 +681,9 @@ function ModelPoolPicker({
             disabled={fetchState.status === 'loading'}
             className="ml-auto flex items-center gap-1 rounded-md bg-secondary px-3 py-1.5 text-xs hover:bg-secondary/70 disabled:opacity-50"
           >
-            <RefreshCw className={`size-3.5 ${fetchState.status === 'loading' ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`size-3.5 ${fetchState.status === 'loading' ? 'animate-spin' : ''}`}
+            />
             {fetchState.status === 'loading' ? '获取中…' : '获取模型'}
           </button>
         )}

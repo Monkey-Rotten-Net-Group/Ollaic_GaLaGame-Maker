@@ -71,6 +71,65 @@ fn anthropic_and_gemini_candidates_use_their_own_paths() {
 }
 
 #[test]
+fn candidates_preserve_queries_for_each_protocol_and_fallback() {
+    for (protocol, base, paths, extra) in [
+        (Protocol::OpenAi, "/v1/", vec!["/v1/models"], None),
+        (
+            Protocol::OpenAi,
+            "/gateway",
+            vec!["/gateway/v1/models", "/gateway/models"],
+            None,
+        ),
+        (
+            Protocol::Anthropic,
+            "/v1/",
+            vec!["/v1/models"],
+            Some(("limit", "1000")),
+        ),
+        (
+            Protocol::Gemini,
+            "/v1beta/",
+            vec!["/v1beta/models"],
+            Some(("pageSize", "1000")),
+        ),
+    ] {
+        let candidates = models_url_candidates(
+            protocol,
+            &format!("https://gateway.test{base}?api-version=2026-01&route=a%2Fb"),
+        )
+        .unwrap();
+        assert_eq!(candidates.len(), paths.len());
+        for (candidate, path) in candidates.iter().zip(paths) {
+            let url = reqwest::Url::parse(candidate).unwrap();
+            assert_eq!(url.path(), path);
+            let pairs: std::collections::HashMap<_, _> = url.query_pairs().collect();
+            assert_eq!(pairs["api-version"], "2026-01");
+            assert_eq!(pairs["route"], "a/b");
+            if let Some((name, value)) = extra {
+                assert_eq!(pairs[name], value);
+            }
+        }
+    }
+}
+
+#[test]
+fn discovery_keeps_instruction_tuned_chat_models() {
+    let body = r#"{"data":[
+        {"id":"Qwen/Qwen2.5-7B-Instruct"},
+        {"id":"meta-llama/Llama-3.3-70B-Instruct"},
+        {"id":"gpt-3.5-turbo-instruct"},
+        {"id":"gpt-3.5-turbo-instruct-0914"}
+    ]}"#;
+    assert_eq!(
+        filter_chat_models(parse_model_ids(body).unwrap()),
+        vec![
+            "Qwen/Qwen2.5-7B-Instruct",
+            "meta-llama/Llama-3.3-70B-Instruct"
+        ]
+    );
+}
+
+#[test]
 fn auth_headers_follow_the_provider_protocol() {
     let openai = auth_headers(Protocol::OpenAi, "openai-key").unwrap();
     assert_eq!(openai[AUTHORIZATION], "Bearer openai-key");
