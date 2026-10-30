@@ -731,18 +731,28 @@
     padding: 8px 20px;
   }
 
-  .editor-workspace-toolbar select {
+  .editor-workspace-toolbar select,
+  .editor-toolbar-select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
     border-radius: 999px;
     padding: 5px 14px;
+    font-size: 12px;
     font-weight: 700;
+    color: var(--foreground);
     background: var(--surface-container-low);
     border: 1px solid var(--border);
     cursor: pointer;
     transition: all 160ms ease;
   }
 
-  .editor-workspace-toolbar select:hover {
+  .editor-workspace-toolbar select:hover,
+  .editor-toolbar-select:hover:not(:disabled),
+  .editor-toolbar-select[data-state='open'] {
     background: var(--surface-container);
+    border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
   }
 
   .editor-agent-dock {
@@ -863,7 +873,8 @@
       padding-inline: 12px;
       flex-wrap: wrap;
     }
-    .editor-workspace-toolbar select {
+    .editor-workspace-toolbar select,
+    .editor-toolbar-select {
       max-width: 150px;
     }
   }

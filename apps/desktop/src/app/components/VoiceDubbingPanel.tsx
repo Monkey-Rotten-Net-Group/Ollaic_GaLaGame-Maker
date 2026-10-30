@@ -15,6 +15,7 @@ import {
   type AiProviderConfig,
   type BatchTtsItem, type BatchTtsProgress,
 } from '../lib/ai-ipc';
+import { getConfiguredModels, normalizeModelConfig } from '../lib/ai-models';
 import { listCharacters } from '../lib/character-ipc';
 import type { Character } from '../lib/character-types';
 
@@ -92,15 +93,6 @@ async function writeVoiceFlagToScenes(
     }
   }
   return wroteAny;
-}
-
-function parseConfiguredModels(value: string): string[] {
-  return Array.from(new Set(
-    value
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ));
 }
 
 export function VoiceDubbingPanel({
@@ -213,7 +205,7 @@ export function VoiceDubbingPanel({
   };
 
   const selectedPendingCards = voiceCards.filter((c) => selectedIds.has(c.id) && !isGenerated(c));
-  const configuredModels = batchConfig ? parseConfiguredModels(batchConfig.model) : [];
+  const configuredModels = batchConfig ? getConfiguredModels(batchConfig) : [];
   const effectiveBatchModel = batchModel || configuredModels[0] || batchConfig?.model.trim() || '';
   const completedBatchCount = Array.from(batchProgress.values()).filter((p) => p.status === 'done' || p.status === 'error').length;
   const doneBatchCount = Array.from(batchProgress.values()).filter((p) => p.status === 'done').length;
@@ -232,9 +224,12 @@ export function VoiceDubbingPanel({
       setBatchConfigError('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;
     }
-    const models = parseConfiguredModels(ttsConfig.model);
-    setBatchConfig(ttsConfig);
-    setBatchModel((current) => (models.includes(current) ? current : models[0] || ttsConfig.model.trim()));
+    const normalizedConfig = normalizeModelConfig(ttsConfig);
+    const models = getConfiguredModels(normalizedConfig);
+    setBatchConfig(normalizedConfig);
+    setBatchModel((current) =>
+      models.includes(current) ? current : normalizedConfig.model || models[0] || '',
+    );
   }, [batchRunning, isGenerated, selectedIds, voiceCards]);
 
   // Batch generate
@@ -298,8 +293,9 @@ export function VoiceDubbingPanel({
       alert('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;
     }
-    const configuredModels = parseConfiguredModels(ttsConfig.model);
-    const modelToUse = configuredModels[0] || ttsConfig.model.trim();
+    const normalizedConfig = normalizeModelConfig(ttsConfig);
+    const configuredModels = getConfiguredModels(normalizedConfig);
+    const modelToUse = normalizedConfig.model || configuredModels[0] || '';
     if (!modelToUse) {
       alert('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;

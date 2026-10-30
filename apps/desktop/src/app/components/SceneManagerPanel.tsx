@@ -99,7 +99,7 @@ export function SceneManagerPanel({
                         value={editChapter}
                         onChange={(e) => setEditChapter(e.target.value)}
                         placeholder="章节名称"
-                        className="w-full rounded border border-border bg-surface-container-low px-2 py-1 text-xs focus:border-secondary focus:outline-none"
+                        className="w-full rounded-xl border border-border bg-surface-container-low px-3 py-1.5 text-xs focus:border-secondary focus:outline-none"
                         aria-label="章节名称"
                       />
                       <input
@@ -107,7 +107,7 @@ export function SceneManagerPanel({
                         value={editOutline}
                         onChange={(e) => setEditOutline(e.target.value)}
                         placeholder="概要"
-                        className="w-full rounded border border-border bg-surface-container-low px-2 py-1 text-xs focus:border-secondary focus:outline-none"
+                        className="w-full rounded-xl border border-border bg-surface-container-low px-3 py-1.5 text-xs focus:border-secondary focus:outline-none"
                         aria-label="概要"
                       />
                       <div className="flex gap-2">
@@ -115,7 +115,7 @@ export function SceneManagerPanel({
                           type="button"
                           onClick={() => { void handleSaveHeader(sceneName); }}
                           disabled={saving}
-                          className="flex items-center gap-1 rounded bg-secondary-container/60 px-3 py-1 text-[10px] font-semibold text-primary hover:bg-secondary-container disabled:opacity-50"
+                          className="flex items-center gap-1 rounded-full bg-secondary-container/60 px-3 py-1 text-[10px] font-semibold text-primary hover:bg-secondary-container disabled:opacity-50"
                         >
                           <Check className="h-3 w-3" />
                           保存
@@ -123,7 +123,7 @@ export function SceneManagerPanel({
                         <button
                           type="button"
                           onClick={() => setEditingScene(null)}
-                          className="rounded px-3 py-1 text-[10px] text-muted-foreground hover:bg-surface-container-low"
+                          className="rounded-full px-3 py-1 text-[10px] text-muted-foreground hover:bg-surface-container-low"
                         >
                           取消
                         </button>
@@ -147,7 +147,7 @@ export function SceneManagerPanel({
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleEdit(sceneName); }}
-                        className="shrink-0 rounded p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground"
+                        className="shrink-0 rounded-full p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground"
                         title="编辑章节信息"
                         aria-label="编辑章节信息"
                       >
@@ -160,7 +160,7 @@ export function SceneManagerPanel({
                           void onDeleteScene(sceneName);
                         }}
                         disabled={scenes.length <= 1}
-                        className="flex shrink-0 items-center gap-1 rounded border border-transparent px-2 py-1 text-[10px] text-outline-variant/70 hover:border-error/30 hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-30"
+                        className="flex shrink-0 items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[10px] text-outline-variant/70 hover:border-error/30 hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-30"
                         title={scenes.length <= 1 ? '至少保留一个场景' : '删除场景'}
                         aria-label="删除场景"
                       >
@@ -180,7 +180,7 @@ export function SceneManagerPanel({
         <button
           type="button"
           onClick={() => { void onNewScene(); }}
-          className="flex w-full items-center justify-center gap-2 rounded border border-dashed border-outline-variant/50 py-2 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-full border border-dashed border-outline-variant/50 py-2 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
         >
           <Plus className="h-4 w-4" />
           新建场景
@@ -188,7 +188,7 @@ export function SceneManagerPanel({
         <button
           type="button"
           onClick={onClose}
-          className="flex w-full items-center justify-center gap-2 rounded border border-border bg-surface-container-low py-2 text-sm text-on-surface-variant hover:border-outline-variant hover:text-on-surface transition-colors"
+          className="flex w-full items-center justify-center gap-2 rounded-full border border-border bg-surface-container-low py-2 text-sm text-on-surface-variant hover:border-outline-variant hover:text-on-surface transition-colors"
         >
           <X className="h-4 w-4" />
           关闭面板

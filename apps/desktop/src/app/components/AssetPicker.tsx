@@ -110,7 +110,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="px-2 py-1.5 text-xs rounded bg-secondary hover:bg-secondary/70 transition-colors border border-border flex items-center gap-1"
+        className="px-3 py-1.5 text-xs rounded-xl bg-secondary hover:bg-secondary/70 transition-colors border border-border flex items-center gap-1"
         title="浏览素材库"
         aria-label="浏览素材库"
       >
@@ -129,13 +129,13 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
 
           <div className="px-5 py-3 border-b border-border">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索显示名称或文件名..."
-                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full pl-10 pr-4 py-2 text-sm bg-input-background border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
                 autoFocus
                 aria-label="搜索素材"
               />
@@ -155,7 +155,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
               <div className={imageLike ? 'grid grid-cols-2 sm:grid-cols-3 gap-3' : 'space-y-2'}>
                 <button
                   onClick={() => selectAndClose('none')}
-                  className={`rounded-md border border-dashed border-border px-3 py-3 text-sm text-left hover:bg-secondary/50 transition-colors ${
+                  className={`rounded-2xl border border-dashed border-border px-3 py-3 text-sm text-left hover:bg-secondary/50 transition-colors ${
                     currentValue === 'none' ? 'bg-primary/10 text-primary border-primary/30' : ''
                   } ${imageLike ? 'min-h-28' : 'w-full'}`}
                 >
@@ -175,7 +175,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
                       onClick={() => selectAndClose(asset.name)}
                       onMouseEnter={() => playPreview(asset)}
                       onMouseLeave={stopPreview}
-                      className={`group text-left rounded-md border overflow-hidden hover:bg-secondary/50 transition-all ${
+                      className={`group text-left rounded-2xl border overflow-hidden hover:bg-secondary/50 transition-all ${
                         isSelected ? 'bg-primary/10 text-primary border-primary/40' : 'border-border bg-card/60'
                       } ${imageLike ? '' : 'w-full flex items-center gap-3 p-3'}`}
                     >
@@ -195,7 +195,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
                         </>
                       ) : (
                         <>
-                          <div className="w-11 h-11 rounded-md bg-secondary/40 flex-shrink-0 flex items-center justify-center">
+                          <div className="w-11 h-11 rounded-xl bg-secondary/40 flex-shrink-0 flex items-center justify-center">
                             {isAudio ? <Music className="w-5 h-5 text-muted-foreground" /> : <Image className="w-5 h-5 text-muted-foreground/40" />}
                           </div>
                           <div className="min-w-0 flex-1">
