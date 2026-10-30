@@ -38,12 +38,10 @@ pub enum MediaAdaptor {
 pub fn adaptor_for(provider: &str, modality: Modality) -> Option<MediaAdaptor> {
     let provider = provider.trim().to_ascii_lowercase();
     match (provider.as_str(), modality) {
-        // Volcengine image generation is OpenAI-shaped (Seedream variant), and
-        // Midjourney-Proxy exposes an OpenAI-compatible surface.
-        (
-            "openai" | "custom" | "zhipu" | "siliconflow" | "midjourney" | "volcengine",
-            Modality::Image,
-        ) => Some(MediaAdaptor::OpenAiCompatible),
+        // Volcengine image generation is OpenAI-shaped (Seedream variant).
+        ("openai" | "custom" | "volcengine", Modality::Image) => {
+            Some(MediaAdaptor::OpenAiCompatible)
+        }
         ("aliyun", Modality::Image) => Some(MediaAdaptor::DashScope),
         ("gemini", Modality::Image) => Some(MediaAdaptor::Gemini),
         ("sd-webui", Modality::Image) => Some(MediaAdaptor::SdWebUi),

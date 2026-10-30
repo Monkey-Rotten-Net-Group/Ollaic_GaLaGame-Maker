@@ -99,6 +99,7 @@ mod tests {
         AiProviderConfig {
             provider: "elevenlabs".to_string(),
             model: "eleven_multilingual_v2".to_string(),
+            models: vec!["eleven_multilingual_v2".to_string()],
             api_key: "key".to_string(),
             base_url: base_url.to_string(),
         }

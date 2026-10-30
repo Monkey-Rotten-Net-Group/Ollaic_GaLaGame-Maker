@@ -247,7 +247,7 @@ pub async fn generate_tts(
     }
     if lower_model.starts_with("sambert") {
         return Err(format!(
-            "暂不支持 {}（Sambert 系列需独立协议）。请改用 CosyVoice（如 cosyvoice-v2）或 Qwen-TTS（如 qwen3-tts-flash）。",
+            "暂不支持 {}（Sambert 系列需独立协议）。请改用 CosyVoice（如 cosyvoice-v3-flash）或 Qwen-TTS（如 qwen3-tts-flash）。",
             request.model
         ));
     }
@@ -328,17 +328,26 @@ fn simple_task_id() -> String {
 }
 
 /// Align a voice name with the model version: cosyvoice-v1 takes bare names,
-/// v2 and newer take a `_v2` suffix. Mixing them is rejected by the engine
-/// with a 418, so correct it rather than letting the user hit that.
-/// Custom cloned voice ids usually contain hyphens and pass through untouched.
+/// v2 takes a `_v2` suffix, and v3 takes `_v3` (plus a few bare names such as
+/// `longanyang`). Mixing them is rejected by the engine with a 418, so correct
+/// it rather than letting the user hit that. Custom cloned voice ids usually
+/// contain hyphens and pass through untouched.
 pub fn normalize_cosyvoice_voice(voice: &str, lower_model: &str) -> String {
-    let is_v1 = lower_model.starts_with("cosyvoice-v1");
-    if is_v1 {
-        voice.trim_end_matches("_v2").to_string()
-    } else if !voice.ends_with("_v2")
-        && voice.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        format!("{}_v2", voice)
+    if !voice.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return voice.to_string();
+    }
+    let base = voice
+        .strip_suffix("_v2")
+        .or_else(|| voice.strip_suffix("_v3"))
+        .unwrap_or(voice);
+    if lower_model.starts_with("cosyvoice-v1") {
+        base.to_string()
+    } else if lower_model.starts_with("cosyvoice-v2") {
+        format!("{base}_v2")
+    } else if voice.ends_with("_v2") {
+        // v3 and newer: only a v2-suffixed id is known to be wrong; bare names
+        // can be valid v3 voices, so they are left alone.
+        format!("{base}_v3")
     } else {
         voice.to_string()
     }
@@ -377,8 +386,11 @@ async fn generate_cosyvoice_ws(
         if trimmed.is_empty() {
             if lower_model.starts_with("cosyvoice-v1") {
                 "longxiaochun".to_string()
-            } else {
+            } else if lower_model.starts_with("cosyvoice-v2") {
                 "longxiaochun_v2".to_string()
+            } else {
+                // Listed for v3 models in both the Beijing and Singapore regions.
+                "longanyang".to_string()
             }
         } else {
             normalize_cosyvoice_voice(trimmed, &lower_model)
@@ -573,13 +585,30 @@ mod tests {
             "longwanjun_v2"
         );
         assert_eq!(
-            normalize_cosyvoice_voice("longanrou", "cosyvoice-v3-flash"),
-            "longanrou_v2"
+            normalize_cosyvoice_voice("longxiaochun_v3", "cosyvoice-v2"),
+            "longxiaochun_v2"
         );
         // Already has _v2 — no double-append.
         assert_eq!(
             normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v2"),
             "longxiaochun_v2"
+        );
+    }
+
+    #[test]
+    fn normalize_cosyvoice_voice_maps_v2_ids_to_v3_for_v3_model() {
+        assert_eq!(
+            normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v3-flash"),
+            "longxiaochun_v3"
+        );
+        // Bare names can be valid v3 voices.
+        assert_eq!(
+            normalize_cosyvoice_voice("longanyang", "cosyvoice-v3-flash"),
+            "longanyang"
+        );
+        assert_eq!(
+            normalize_cosyvoice_voice("longshu_v3", "cosyvoice-v3-flash"),
+            "longshu_v3"
         );
     }
 

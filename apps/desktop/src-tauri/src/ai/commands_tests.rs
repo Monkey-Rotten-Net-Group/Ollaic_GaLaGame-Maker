@@ -42,6 +42,7 @@ async fn chat_client_preserves_base_url_path_with_or_without_trailing_slash() {
         let cfg = AiConfig {
             provider: "custom".into(),
             model: "test-model".into(),
+            models: vec!["test-model".into()],
             api_key: "test-key".into(),
             base_url: format!("http://{address}{suffix}?api-version=test"),
             capabilities: None,
@@ -90,13 +91,30 @@ fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {
         "longwanjun_v2"
     );
     assert_eq!(
-        normalize_cosyvoice_voice("longanrou", "cosyvoice-v3-flash"),
-        "longanrou_v2"
+        normalize_cosyvoice_voice("longxiaochun_v3", "cosyvoice-v2"),
+        "longxiaochun_v2"
     );
     // Already has _v2 — no double-append.
     assert_eq!(
         normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v2"),
         "longxiaochun_v2"
+    );
+}
+
+#[test]
+fn normalize_cosyvoice_voice_maps_v2_ids_to_v3_for_v3_model() {
+    assert_eq!(
+        normalize_cosyvoice_voice("longxiaochun_v2", "cosyvoice-v3-flash"),
+        "longxiaochun_v3"
+    );
+    // Bare names can be valid v3 voices.
+    assert_eq!(
+        normalize_cosyvoice_voice("longanyang", "cosyvoice-v3-flash"),
+        "longanyang"
+    );
+    assert_eq!(
+        normalize_cosyvoice_voice("longshu_v3", "cosyvoice-v3-flash"),
+        "longshu_v3"
     );
 }
 

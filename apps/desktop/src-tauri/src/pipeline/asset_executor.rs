@@ -313,6 +313,7 @@ mod tests {
         let config = AiProviderConfig {
             provider: "custom".to_string(),
             model: "media-model".to_string(),
+            models: vec!["media-model".to_string()],
             api_key: "key".to_string(),
             base_url: String::new(),
         };
