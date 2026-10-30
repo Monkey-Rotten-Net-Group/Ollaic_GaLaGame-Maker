@@ -111,7 +111,7 @@ function RoundedSelect({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="w-(--radix-dropdown-menu-trigger-width) min-w-44 max-h-72"
+        className="w-(--radix-dropdown-menu-trigger-width) min-w-44 max-h-72 overflow-y-auto"
       >
         {options.map((opt) => {
           const active = opt.value === value;
