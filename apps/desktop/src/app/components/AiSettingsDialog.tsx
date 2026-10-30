@@ -11,7 +11,6 @@ import {
   MessageSquareText,
   Image,
   Volume2,
-  Film,
 } from 'lucide-react';
 import {
   type AiLogEntry,
@@ -27,15 +26,16 @@ import {
   setAiImageConfig,
   getAiTtsConfig,
   setAiTtsConfig,
-  getAiVideoConfig,
-  setAiVideoConfig,
   validateAiConfig,
+  listAiChatModels,
   listAiLogs,
   clearAiLogs,
   getAiLogPath,
 } from '../lib/ai-ipc';
+import { getConfiguredModels, normalizeModelConfig } from '../lib/ai-models';
+import { useProviderProfiles, type ProfileKind } from '../hooks/useProviderProfiles';
 
-type AiSettingsTab = 'chat' | 'image' | 'tts' | 'video';
+type AiSettingsTab = 'chat' | 'image' | 'tts';
 
 // Base URL is deliberately left empty: the backend falls back to the
 // provider's built-in endpoint, and a provider that has none shows the
@@ -45,6 +45,7 @@ function configFromOption(option: ProviderOption): AiProviderConfig {
   return {
     provider: option.value,
     model: option.defaultModel,
+    models: [option.defaultModel],
     api_key: '',
     base_url: '',
   };
@@ -58,24 +59,19 @@ function configFromOption(option: ProviderOption): AiProviderConfig {
 export function normalizeConfig(
   config: AiProviderConfig,
   options: ProviderOption[],
-  singleModel = false,
 ): AiProviderConfig {
-  if (options.length === 0) return config;
+  if (options.length === 0) return normalizeModelConfig(config);
   const current = options.some((option) => option.value === config.provider)
     ? config
     : {
         provider: options[0].value,
         model: options[0].defaultModel,
+        models: [options[0].defaultModel],
         api_key: config.api_key,
         base_url: config.base_url,
       };
-  if (singleModel && current.model) {
-    const first = current.model.split(/[\n,，]/)[0]?.trim();
-    if (first && first !== current.model) {
-      return { ...current, model: first };
-    }
-  }
-  return current;
+  const provider = options.find((option) => option.value === current.provider);
+  return normalizeModelConfig(current, provider?.defaultModel);
 }
 
 interface Props {
@@ -90,7 +86,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [config, setConfig] = useState<AiConfig | null>(null);
   const [imageConfig, setImageConfig] = useState<AiProviderConfig | null>(null);
   const [ttsConfig, setTtsConfig] = useState<AiProviderConfig | null>(null);
-  const [videoConfig, setVideoConfig] = useState<AiProviderConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -101,9 +96,12 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
   const [logPath, setLogPath] = useState('');
   const configRef = useRef<AiConfig | null>(null);
+  const profiles = useProviderProfiles();
+  const reloadProfiles = profiles.reload;
 
   useEffect(() => {
     if (!open) return;
+    void reloadProfiles();
     setActiveTab('chat');
     setError(null);
     setValidation(null);
@@ -116,18 +114,17 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       getAiConfig(),
       getAiImageConfig(),
       getAiTtsConfig(),
-      getAiVideoConfig(),
     ])
-      .then(([providers, chat, image, tts, video]) => {
+      .then(([providers, chat, image, tts]) => {
         setCatalog(providers);
-        setConfig(chat);
-        configRef.current = chat;
+        const normalizedChat = normalizeConfig(chat, providers.chat);
+        setConfig(normalizedChat);
+        configRef.current = normalizedChat;
         setImageConfig(normalizeConfig(image, providers.image));
-        setTtsConfig(normalizeConfig(tts, providers.tts, true));
-        setVideoConfig(normalizeConfig(video, providers.video));
+        setTtsConfig(normalizeConfig(tts, providers.tts));
       })
       .catch((e) => setError(String(e)));
-  }, [open]);
+  }, [open, reloadProfiles]);
 
   if (!open) return null;
 
@@ -148,14 +145,12 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   const updateTts = (patch: Partial<AiProviderConfig>) =>
     setTtsConfig((c) => (c ? { ...c, ...patch } : c));
 
-  const updateVideo = (patch: Partial<AiProviderConfig>) =>
-    setVideoConfig((c) => (c ? { ...c, ...patch } : c));
-
   const handleProviderChange = (
     value: string,
     current: AiConfig,
     options: ProviderOption[],
     update: (patch: Partial<AiConfig>) => void,
+    kind: ProfileKind,
   ) => {
     const option = options.find((p) => p.value === value);
     if (!option) {
@@ -164,14 +159,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
       setVerifiedSaved(false);
       return;
     }
-    update({
-      provider: value,
-      model: option.defaultModel,
-      // A Base URL typed for the previous provider almost never applies to the
-      // new one, so keep it only where the new provider has no built-in
-      // endpoint and the user would otherwise have to retype it.
-      base_url: option.needsBaseUrl ? current.base_url : '',
-    });
+    update(profiles.switchProvider(kind, current, option));
     setValidation(null);
     setVerifiedSaved(false);
   };
@@ -237,19 +225,14 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
   };
 
   const handleSave = async () => {
-    if (!config || !imageConfig || !ttsConfig || !videoConfig) return;
+    if (!config || !imageConfig || !ttsConfig) return;
     setSaving(true);
     setError(null);
     try {
-      const normalizedTtsConfig = {
-        ...ttsConfig,
-        model: ttsConfig.model.split(/[\n,，]/)[0]?.trim() || ttsConfig.model.trim(),
-      };
       await Promise.all([
         setAiConfig(config),
         setAiImageConfig(imageConfig),
-        setAiTtsConfig(normalizedTtsConfig),
-        setAiVideoConfig(videoConfig),
+        setAiTtsConfig(ttsConfig),
       ]);
       onSaved?.();
       onClose();
@@ -260,7 +243,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
     }
   };
 
-  const loaded = catalog && config && imageConfig && ttsConfig && videoConfig;
+  const loaded = catalog && config && imageConfig && ttsConfig;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -296,12 +279,6 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
               label="音频"
               onClick={() => setActiveTab('tts')}
             />
-            <TabButton
-              active={activeTab === 'video'}
-              icon={<Film className="h-4 w-4" />}
-              label="视频"
-              onClick={() => setActiveTab('video')}
-            />
           </div>
         </div>
 
@@ -316,11 +293,11 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                     <ConfigFields
                       config={config}
                       options={catalog.chat}
-                      multiModel={false}
                       onProviderChange={(value) =>
-                        handleProviderChange(value, config, catalog.chat, updateChat)
+                        handleProviderChange(value, config, catalog.chat, updateChat, 'chat')
                       }
                       onUpdate={updateChat}
+                      onFetchModels={listAiChatModels}
                     />
                   </fieldset>
 
@@ -348,7 +325,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   options={catalog.image}
                   onUpdate={updateImage}
                   onProviderChange={(value) =>
-                    handleProviderChange(value, imageConfig, catalog.image, updateImage)
+                    handleProviderChange(value, imageConfig, catalog.image, updateImage, 'image')
                   }
                 />
               )}
@@ -358,22 +335,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                   title="音频 / TTS 配置"
                   config={ttsConfig}
                   options={catalog.tts}
-                  multiModel={false}
                   onUpdate={updateTts}
                   onProviderChange={(value) =>
-                    handleProviderChange(value, ttsConfig, catalog.tts, updateTts)
-                  }
-                />
-              )}
-
-              {activeTab === 'video' && videoConfig && (
-                <ProviderConfigPanel
-                  title="视频生成配置"
-                  config={videoConfig}
-                  options={catalog.video}
-                  onUpdate={updateVideo}
-                  onProviderChange={(value) =>
-                    handleProviderChange(value, videoConfig, catalog.video, updateVideo)
+                    handleProviderChange(value, ttsConfig, catalog.tts, updateTts, 'tts')
                   }
                 />
               )}
@@ -440,18 +404,21 @@ function TabButton({
   );
 }
 
+type FetchState =
+  | { status: 'idle' }
+  | { status: 'loading'; provider: string }
+  | { status: 'done' | 'error'; provider: string; message: string };
+
 export function ProviderConfigPanel({
   title,
   config,
   options,
-  multiModel = true,
   onUpdate,
   onProviderChange,
 }: {
   title: string;
   config: AiProviderConfig;
   options: ProviderOption[];
-  multiModel?: boolean;
   onUpdate: (patch: Partial<AiProviderConfig>) => void;
   onProviderChange: (value: string) => void;
 }) {
@@ -466,7 +433,6 @@ export function ProviderConfigPanel({
       <ConfigFields
         config={config}
         options={options}
-        multiModel={multiModel}
         onProviderChange={onProviderChange}
         onUpdate={onUpdate}
       />
@@ -474,103 +440,70 @@ export function ProviderConfigPanel({
   );
 }
 
-const CUSTOM_MODEL_SENTINEL = '__custom__';
-
-// Single-field model picker: a dropdown of preset models plus a "custom" option
-// that turns the same slot into a free-text input for typing any model name.
-function ModelSelectField({
-  value,
-  options,
-  placeholder,
-  onChange,
-}: {
-  value: string;
-  options: string[];
-  placeholder: string;
-  onChange: (model: string) => void;
-}) {
-  // Custom mode is active when the user explicitly picks it, or when the saved
-  // model isn't one of the presets (e.g. a previously typed custom value).
-  const [custom, setCustom] = useState(() => options.length > 0 && !options.includes(value));
-
-  if (options.length === 0 || custom) {
-    return (
-      <div className="space-y-2">
-        {options.length > 0 && (
-          <select
-            value={CUSTOM_MODEL_SENTINEL}
-            onChange={(e) => {
-              if (e.target.value !== CUSTOM_MODEL_SENTINEL) {
-                setCustom(false);
-                onChange(e.target.value);
-              }
-            }}
-            className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-            aria-label="选择模型"
-          >
-            {options.map((model) => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-            <option value={CUSTOM_MODEL_SENTINEL}>自定义…</option>
-          </select>
-        )}
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          autoFocus
-          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-          aria-label="模型名称"
-        />
-      </div>
-    );
-  }
-
-  return (
-    <select
-      value={value}
-      onChange={(e) => {
-        if (e.target.value === CUSTOM_MODEL_SENTINEL) {
-          setCustom(true);
-        } else {
-          onChange(e.target.value);
-        }
-      }}
-      className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-      aria-label="选择模型"
-    >
-      {options.map((model) => (
-        <option key={model} value={model}>
-          {model}
-        </option>
-      ))}
-      <option value={CUSTOM_MODEL_SENTINEL}>自定义…</option>
-    </select>
-  );
-}
-
 export function ConfigFields({
   config,
   options,
-  multiModel = false,
   onProviderChange,
   onUpdate,
+  onFetchModels,
 }: {
   config: AiConfig;
   options: ProviderOption[];
-  multiModel?: boolean;
   onProviderChange: (value: string) => void;
   onUpdate: (patch: Partial<AiConfig>) => void;
+  /** Chat only: fetch the provider's live model list. Omitted elsewhere, which hides the button. */
+  onFetchModels?: (config: AiConfig) => Promise<string[]>;
 }) {
   const provider = options.find((p) => p.value === config.provider);
-  const modelOptions = provider?.models?.length
+  const presetModels = provider?.models?.length
     ? provider.models
     : provider
       ? [provider.defaultModel]
       : [];
+  // Fetched models are tagged with the provider they came from, so a result
+  // that arrives after a provider switch is never shown for the new provider.
+  const [fetched, setFetched] = useState<{ provider: string; models: string[] } | null>(null);
+  const [fetchState, setFetchState] = useState<FetchState>({ status: 'idle' });
+  const fetchedModels = fetched?.provider === config.provider ? fetched.models : [];
+  const modelOptions = Array.from(new Set([...presetModels, ...fetchedModels]));
+  const visibleFetchState: FetchState =
+    fetchState.status !== 'idle' && fetchState.provider !== config.provider
+      ? { status: 'idle' }
+      : fetchState;
+  const fetchModels = onFetchModels
+    ? async () => {
+        const requested = config.provider;
+        setFetchState({ status: 'loading', provider: requested });
+        try {
+          const models = await onFetchModels(config);
+          setFetched({ provider: requested, models });
+          setFetchState({
+            status: 'done',
+            provider: requested,
+            message: models.length
+              ? `已获取 ${models.length} 个对话模型，点击下方候选即可加入模型池`
+              : '接口未返回对话模型',
+          });
+        } catch (err) {
+          setFetchState({ status: 'error', provider: requested, message: String(err) });
+        }
+      }
+    : undefined;
+  const modelPool = getConfiguredModels(config);
+  const activeModel = modelPool.includes(config.model) ? config.model : modelPool[0] || '';
+  const updateModelPool = (models: string[]) => {
+    const nextModels = Array.from(new Set(models));
+    onUpdate({
+      models: nextModels,
+      model: nextModels.includes(activeModel) ? activeModel : nextModels[0] || '',
+    });
+  };
+  const selectModel = (model: string) => {
+    onUpdate({
+      model,
+      models: modelPool.includes(model) ? modelPool : [...modelPool, model],
+    });
+  };
   const apiKeyHint =
     provider && !provider.requiresApiKey
       ? '该供应商通常不需要 Key，可留空'
@@ -597,29 +530,17 @@ export function ConfigFields({
 
       <Field
         label="模型"
-        hint={
-          multiModel
-            ? '从当前供应商的模型池选择，可批量填入，也可追加自定义模型名。'
-            : provider
-              ? `可下拉选择常用模型，也可直接输入自定义模型名。推荐: ${provider.defaultModel}`
-              : '可直接输入模型名'
-        }
+        hint="从已添加的模型中切换当前使用项，也可以输入自定义模型名称。"
       >
-        {multiModel ? (
-          <ModelTagPicker
-            value={config.model}
-            options={modelOptions}
-            onChange={(model) => onUpdate({ model })}
-          />
-        ) : (
-          <ModelSelectField
-            key={provider?.value || 'custom'}
-            value={config.model}
-            options={modelOptions}
-            placeholder={provider?.defaultModel || '输入模型名'}
-            onChange={(model) => onUpdate({ model })}
-          />
-        )}
+        <ModelPoolPicker
+          value={activeModel}
+          models={modelPool}
+          options={modelOptions}
+          onPoolChange={updateModelPool}
+          onSelectModel={selectModel}
+          onFetchModels={fetchModels}
+          fetchState={visibleFetchState}
+        />
       </Field>
 
       <Field label="API Key" hint={apiKeyHint}>
@@ -645,65 +566,82 @@ export function ConfigFields({
   );
 }
 
-function parseModelList(value: string) {
-  return value
-    .split(/[\n,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function serializeModelList(models: string[]) {
-  return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean))).join(',');
-}
-
-function ModelTagPicker({
+function ModelPoolPicker({
   value,
+  models,
   options,
-  onChange,
+  onPoolChange,
+  onSelectModel,
+  onFetchModels,
+  fetchState = { status: 'idle' },
 }: {
   value: string;
+  models: string[];
   options: string[];
-  onChange: (value: string) => void;
+  onPoolChange: (models: string[]) => void;
+  onSelectModel: (model: string) => void;
+  onFetchModels?: () => void;
+  fetchState?: FetchState;
 }) {
   const [customModel, setCustomModel] = useState('');
-  const selected = parseModelList(value);
-  const selectedSet = new Set(selected);
+  const modelSet = new Set(models);
 
   const addModels = (models: string[]) => {
-    onChange(serializeModelList([...selected, ...models]));
+    onPoolChange(Array.from(new Set([...modelSet, ...models])));
   };
 
   const removeModel = (model: string) => {
-    onChange(serializeModelList(selected.filter((item) => item !== model)));
+    onPoolChange(models.filter((item) => item !== model));
   };
 
   const addCustomModel = () => {
     const next = customModel.trim();
-    if (!next) return;
+    if (!next || modelSet.has(next)) return;
     addModels([next]);
+    onSelectModel(next);
     setCustomModel('');
   };
 
   return (
     <div className="space-y-3">
-      <div className="min-h-24 rounded-md border border-border bg-input-background p-2">
-        {selected.length > 0 ? (
+      <div
+        role="group"
+        aria-label="模型列表"
+        className="min-h-24 rounded-md border border-border bg-input-background p-2"
+      >
+        {models.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {selected.map((model) => (
-              <button
+            {models.map((model) => (
+              <div
                 key={model}
-                type="button"
-                onClick={() => removeModel(model)}
-                className="max-w-full rounded-md bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/70"
-                title="点击移除"
+                className={`flex max-w-full items-center rounded-md border ${
+                  value === model ? 'border-primary bg-primary/10' : 'border-border bg-secondary'
+                }`}
               >
-                <span className="break-all">{model}</span>
-                <span className="ml-1 text-muted-foreground">x</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectModel(model)}
+                  aria-pressed={value === model}
+                  className="min-w-0 px-2 py-1 text-left text-xs text-foreground"
+                >
+                  <span className="break-all">{model}</span>
+                  {value === model && (
+                    <span className="ml-2 whitespace-nowrap text-primary">当前使用</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeModel(model)}
+                  aria-label={`移除模型 ${model}`}
+                  className="shrink-0 p-1 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
             ))}
           </div>
         ) : (
-          <div className="px-1 py-1 text-sm text-muted-foreground">尚未选择模型</div>
+          <div className="px-1 py-1 text-sm text-muted-foreground">尚未添加模型</div>
         )}
       </div>
 
@@ -718,28 +656,57 @@ function ModelTagPicker({
         </button>
         <button
           type="button"
-          onClick={() => onChange('')}
-          disabled={selected.length === 0}
+          onClick={() => onPoolChange([])}
+          disabled={models.length === 0}
           className="rounded-md bg-secondary px-3 py-1.5 text-xs hover:bg-secondary/70 disabled:opacity-50"
         >
           清空
         </button>
+        {onFetchModels && (
+          <button
+            type="button"
+            onClick={onFetchModels}
+            disabled={fetchState.status === 'loading'}
+            className="ml-auto flex items-center gap-1 rounded-md bg-secondary px-3 py-1.5 text-xs hover:bg-secondary/70 disabled:opacity-50"
+          >
+            <RefreshCw className={`size-3.5 ${fetchState.status === 'loading' ? 'animate-spin' : ''}`} />
+            {fetchState.status === 'loading' ? '获取中…' : '获取模型'}
+          </button>
+        )}
       </div>
+
+      {(fetchState.status === 'done' || fetchState.status === 'error') && (
+        <div
+          role={fetchState.status === 'error' ? 'alert' : 'status'}
+          className={`break-all text-xs ${
+            fetchState.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+          }`}
+        >
+          {fetchState.message}
+        </div>
+      )}
 
       {options.length > 0 && (
         <div className="max-h-40 overflow-y-auto rounded-md border border-border bg-background/40 p-2">
           <div className="flex flex-wrap gap-2">
             {options.map((model) => {
-              const active = selectedSet.has(model);
+              const configured = modelSet.has(model);
+              const active = value === model;
               return (
                 <button
                   key={model}
                   type="button"
-                  onClick={() => (active ? removeModel(model) : addModels([model]))}
+                  onClick={() => {
+                    if (!configured) addModels([model]);
+                    onSelectModel(model);
+                  }}
+                  aria-pressed={active}
                   className={`rounded-md px-2 py-1 text-xs transition-colors ${
                     active
                       ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary text-foreground hover:bg-secondary/70'
+                      : configured
+                        ? 'bg-primary/10 text-primary hover:bg-primary/15'
+                        : 'bg-secondary text-foreground hover:bg-secondary/70'
                   }`}
                 >
                   {model}
@@ -756,6 +723,7 @@ function ModelTagPicker({
           <input
             type="text"
             value={customModel}
+            aria-label="输入模型名称"
             onChange={(e) => setCustomModel(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -763,15 +731,16 @@ function ModelTagPicker({
                 addCustomModel();
               }
             }}
-            placeholder="输入自定义模型名称"
+            placeholder="输入模型名称"
             className="min-w-0 flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
           <button
             type="button"
             onClick={addCustomModel}
-            className="rounded-md bg-secondary px-3 py-2 text-sm hover:bg-secondary/70"
+            disabled={!customModel.trim() || modelSet.has(customModel.trim())}
+            className="rounded-md bg-secondary px-3 py-2 text-sm hover:bg-secondary/70 disabled:opacity-50"
           >
-            填入
+            添加
           </button>
         </div>
       </div>

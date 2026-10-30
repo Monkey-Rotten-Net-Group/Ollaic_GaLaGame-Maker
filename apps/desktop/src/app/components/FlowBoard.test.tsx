@@ -81,6 +81,19 @@ function stepStatus(id: string): string | null {
 }
 
 describe('FlowBoard', () => {
+  it('opens the current AI settings tab from the pre-run check', async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await user.click(await screen.findByRole('button', { name: 'AI 设置' }));
+
+    expect(await screen.findByRole('heading', { name: '编辑器设置' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'AI 模型服务' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('only requires media capabilities when material production is selected', async () => {
     const user = userEvent.setup();
     render(<FlowBoard projectPath="/tmp/proj" />);

@@ -6,6 +6,7 @@ import {
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useChatModelSelection } from '../../hooks/useChatModelSelection';
 import { useAiAgent } from '../../hooks/useAiAgent';
+import { getConfiguredModels } from '../../lib/ai-models';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
 import { ConflictCard, ErrorCard, MissingAssetCard } from '../AiStatusCard';
@@ -119,13 +120,9 @@ export function AiAssistantPanel({
   const currentProvider = chatConfig?.provider ?? '';
   const currentModel = chatConfig?.model ?? '';
   const activeProviderOption = catalog?.chat.find((p) => p.value === currentProvider);
-  const availableModels = activeProviderOption?.models?.length
-    ? activeProviderOption.models
-    : activeProviderOption?.defaultModel
-      ? [activeProviderOption.defaultModel]
-      : currentModel
-        ? [currentModel]
-        : [];
+  // Only models the user added to this provider's pool in AI settings are
+  // switchable here, not the provider's full preset list.
+  const availableModels = chatConfig ? getConfiguredModels(chatConfig) : [];
 
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
 
@@ -346,7 +343,7 @@ export function AiAssistantPanel({
                     </DropdownMenuItem>
                   ))
                 ) : (
-                  <div className="px-2 py-1 text-xs text-muted-foreground">暂无可切换的预设模型</div>
+                  <div className="px-2 py-1 text-xs text-muted-foreground">模型池为空，请在 AI 设置中添加模型</div>
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

@@ -15,7 +15,6 @@ import {
   MessageSquareText,
   Image,
   Volume2,
-  Film,
   Bot,
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -34,9 +33,8 @@ import {
   setAiImageConfig,
   getAiTtsConfig,
   setAiTtsConfig,
-  getAiVideoConfig,
-  setAiVideoConfig,
   validateAiConfig,
+  listAiChatModels,
   listAiLogs,
   clearAiLogs,
   getAiLogPath,
@@ -48,6 +46,7 @@ import {
   normalizeConfig,
   ProviderConfigPanel,
 } from './AiSettingsDialog';
+import { useProviderProfiles, type ProfileKind } from '../hooks/useProviderProfiles';
 
 import {
   DEFAULT_APP_SETTINGS,
@@ -61,7 +60,7 @@ export { loadAppSettings, saveAppSettings } from '../lib/app-settings';
 export type { AppSettings, SeedColor } from '../lib/app-settings';
 
 export type SettingsTab = 'appearance' | 'general' | 'ai';
-export type AiSubTab = 'chat' | 'image' | 'tts' | 'video';
+export type AiSubTab = 'chat' | 'image' | 'tts';
 
 export const SEED_COLORS: {
   id: SeedColor;
@@ -82,7 +81,6 @@ interface Props {
   onSaved?: (settings: AppSettings) => void;
   mode?: 'home' | 'editor';
   initialTab?: string;
-  onOpenAiSettings?: () => void;
   onApplyRuntimeTemplateDir?: (dir: string) => Promise<void> | void;
 }
 
@@ -92,7 +90,6 @@ export function AppSettingsDialog({
   onSaved,
   mode = 'editor',
   initialTab,
-  onOpenAiSettings,
   onApplyRuntimeTemplateDir,
 }: Props) {
   const resolveInitialTab = (tab?: string): SettingsTab => {
@@ -105,7 +102,6 @@ export function AppSettingsDialog({
   const resolveInitialAiSubTab = (tab?: string): AiSubTab => {
     if (tab === 'ai-image' || tab === 'image') return 'image';
     if (tab === 'ai-tts' || tab === 'tts') return 'tts';
-    if (tab === 'ai-video' || tab === 'video') return 'video';
     return 'chat';
   };
 
@@ -125,7 +121,6 @@ export function AppSettingsDialog({
   const [chatConfig, setChatConfig] = useState<AiConfig | null>(null);
   const [imageConfig, setImageConfig] = useState<AiProviderConfig | null>(null);
   const [ttsConfig, setTtsConfig] = useState<AiProviderConfig | null>(null);
-  const [videoConfig, setVideoConfig] = useState<AiProviderConfig | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [validation, setValidation] = useState<AiValidationResult | null>(null);
   const [verifiedSaved, setVerifiedSaved] = useState(false);
@@ -134,6 +129,8 @@ export function AppSettingsDialog({
   const [logsLoading, setLogsLoading] = useState(false);
   const configRef = useRef<AiConfig | null>(null);
   const editedAiConfigs = useRef(new Set<AiSubTab>());
+  const profiles = useProviderProfiles();
+  const reloadProfiles = profiles.reload;
 
   useEffect(() => {
     if (!open) return;
@@ -147,11 +144,11 @@ export function AppSettingsDialog({
     setVerifiedSaved(false);
     configRef.current = null;
     editedAiConfigs.current.clear();
+    void reloadProfiles();
     setCatalog(null);
     setChatConfig(null);
     setImageConfig(null);
     setTtsConfig(null);
-    setVideoConfig(null);
     setLogs([]);
     setLogPath('');
 
@@ -168,16 +165,15 @@ export function AppSettingsDialog({
       getAiConfig(),
       getAiImageConfig(),
       getAiTtsConfig(),
-      getAiVideoConfig(),
     ])
-      .then(([providers, chat, image, tts, video]) => {
+      .then(([providers, chat, image, tts]) => {
         if (!active) return;
         setCatalog(providers);
-        setChatConfig(chat);
-        configRef.current = chat;
+        const normalizedChat = normalizeConfig(chat, providers.chat);
+        setChatConfig(normalizedChat);
+        configRef.current = normalizedChat;
         setImageConfig(normalizeConfig(image, providers.image));
-        setTtsConfig(normalizeConfig(tts, providers.tts, true));
-        setVideoConfig(normalizeConfig(video, providers.video));
+        setTtsConfig(normalizeConfig(tts, providers.tts));
       })
       .catch((e) => {
         if (active) setError(String(e));
@@ -185,7 +181,7 @@ export function AppSettingsDialog({
     return () => {
       active = false;
     };
-  }, [open, initialTab]);
+  }, [open, initialTab, reloadProfiles]);
 
   if (!open) return null;
 
@@ -212,16 +208,12 @@ export function AppSettingsDialog({
     setTtsConfig((c) => (c ? { ...c, ...patch } : c));
   };
 
-  const updateVideo = (patch: Partial<AiProviderConfig>) => {
-    editedAiConfigs.current.add('video');
-    setVideoConfig((c) => (c ? { ...c, ...patch } : c));
-  };
-
   const handleProviderChange = (
     value: string,
     current: AiConfig,
     options: ProviderOption[],
     updateFn: (patch: Partial<AiConfig>) => void,
+    kind: ProfileKind,
   ) => {
     const option = options.find((p) => p.value === value);
     if (!option) {
@@ -230,11 +222,7 @@ export function AppSettingsDialog({
       setVerifiedSaved(false);
       return;
     }
-    updateFn({
-      provider: value,
-      model: option.defaultModel,
-      base_url: option.needsBaseUrl ? current.base_url : '',
-    });
+    updateFn(profiles.switchProvider(kind, current, option));
     setValidation(null);
     setVerifiedSaved(false);
   };
@@ -339,15 +327,7 @@ export function AppSettingsDialog({
         writes.push(setAiImageConfig(imageConfig));
       }
       if (editedAiConfigs.current.has('tts') && ttsConfig) {
-        writes.push(
-          setAiTtsConfig({
-            ...ttsConfig,
-            model: ttsConfig.model.split(/[\n,，]/)[0]?.trim() || ttsConfig.model.trim(),
-          }),
-        );
-      }
-      if (editedAiConfigs.current.has('video') && videoConfig) {
-        writes.push(setAiVideoConfig(videoConfig));
+        writes.push(setAiTtsConfig(ttsConfig));
       }
       await Promise.all(writes);
       saveAppSettings(settings);
@@ -548,28 +528,6 @@ export function AppSettingsDialog({
                 </div>
               )}
 
-              {/* 快捷跳转 AI 设置 */}
-              <div className="pt-2 border-t border-border">
-                <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-primary/5">
-                  <div className="flex items-center gap-2 text-xs">
-                    <Bot className="w-4 h-4 text-primary" />
-                    <span>需要配置大模型或 API Key？</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('ai');
-                      setAiSubTab('chat');
-                      onOpenAiSettings?.();
-                    }}
-                    className="text-xs text-primary font-semibold hover:underline"
-                    aria-label="打开 AI 设置"
-                  >
-                    配置 AI 服务与模型 →
-                  </button>
-                </div>
-              </div>
-
               {/* WebGAL 运行时引擎 */}
               <div className="pt-2 border-t border-border space-y-2">
                 <label className="block text-xs uppercase tracking-widest text-muted-foreground font-mono-family">
@@ -667,18 +625,6 @@ export function AppSettingsDialog({
                   <Volume2 className="w-3.5 h-3.5" />
                   <span>角色配音</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setAiSubTab('video')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                    aiSubTab === 'video'
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Film className="w-3.5 h-3.5" />
-                  <span>视频生成</span>
-                </button>
               </div>
 
               {/* Subtab Panels */}
@@ -697,11 +643,11 @@ export function AppSettingsDialog({
                         <ConfigFields
                           config={chatConfig}
                           options={catalog.chat}
-                          multiModel={false}
                           onProviderChange={(value) =>
-                            handleProviderChange(value, chatConfig, catalog.chat, updateChat)
+                            handleProviderChange(value, chatConfig, catalog.chat, updateChat, 'chat')
                           }
                           onUpdate={updateChat}
+                          onFetchModels={listAiChatModels}
                         />
                       </fieldset>
 
@@ -735,7 +681,7 @@ export function AppSettingsDialog({
                       options={catalog.image}
                       onUpdate={updateImage}
                       onProviderChange={(value) =>
-                        handleProviderChange(value, imageConfig, catalog.image, updateImage)
+                        handleProviderChange(value, imageConfig, catalog.image, updateImage, 'image')
                       }
                     />
                   ) : (
@@ -751,10 +697,9 @@ export function AppSettingsDialog({
                       title="音频与语音合成 (TTS) 配置"
                       config={ttsConfig}
                       options={catalog.tts}
-                      multiModel={false}
                       onUpdate={updateTts}
                       onProviderChange={(value) =>
-                        handleProviderChange(value, ttsConfig, catalog.tts, updateTts)
+                        handleProviderChange(value, ttsConfig, catalog.tts, updateTts, 'tts')
                       }
                     />
                   ) : (
@@ -763,23 +708,6 @@ export function AppSettingsDialog({
                 </div>
               )}
 
-              {aiSubTab === 'video' && (
-                <div className="space-y-4 pt-1">
-                  {catalog && videoConfig ? (
-                    <ProviderConfigPanel
-                      title="动态视频生成配置"
-                      config={videoConfig}
-                      options={catalog.video}
-                      onUpdate={updateVideo}
-                      onProviderChange={(value) =>
-                        handleProviderChange(value, videoConfig, catalog.video, updateVideo)
-                      }
-                    />
-                  ) : (
-                    <div className="text-xs text-muted-foreground py-4 text-center">正在读取 AI 配置…</div>
-                  )}
-                </div>
-              )}
             </div>
           )}
 

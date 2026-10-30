@@ -28,7 +28,13 @@ async function openConfiguredEditor(page: Page) {
       configs: Object.fromEntries(
         ['ai', 'ai_image', 'ai_tts', 'ai_video'].map((kind) => [
           kind,
-          { provider: 'test', model: 'model-a', api_key: 'old-test-key', base_url: '' },
+          {
+            provider: 'test',
+            model: 'model-a',
+            models: ['model-a', 'model-b'],
+            api_key: 'old-test-key',
+            base_url: '',
+          },
         ]),
       ),
       failChatWrite: false,
@@ -101,6 +107,7 @@ test('model switching preserves credentials saved through its settings entry', a
   expect((await readConfigs(page)).ai).toEqual({
     provider: 'test',
     model: 'model-b',
+    models: ['model-a', 'model-b'],
     api_key: 'new-test-key',
     base_url: 'https://new.test.invalid/v1',
   });
@@ -113,6 +120,9 @@ test('model switching refreshes the provider after editor settings save', async 
   await settings.getByRole('button', { name: 'AI 模型服务', exact: true }).click();
   await settings.getByLabel('选择 AI 供应商').selectOption('other');
   await settings.getByPlaceholder('sk-...').fill('other-test-key');
+  // Switching provider resets the pool to its default model; add the rest so
+  // the agent switcher offers other-b.
+  await settings.getByRole('button', { name: '填入相关模型', exact: true }).click();
   await settings.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('button', { name: '切换对话模型' }).click();
   await page.getByRole('menuitem', { name: 'other-b', exact: true }).click();
