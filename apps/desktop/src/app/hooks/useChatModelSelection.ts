@@ -7,6 +7,7 @@ import {
   type AiConfig,
   type ProviderCatalog,
 } from '../lib/ai-ipc';
+import { getConfiguredModels } from '../lib/ai-models';
 
 export function useChatModelSelection() {
   const [config, setConfig] = useState<AiConfig | null>(null);
@@ -69,7 +70,14 @@ export function useChatModelSelection() {
         setError('供应商配置已更新，请重新选择模型。');
         return;
       }
-      const updated = { ...latest, model };
+      // Only a model from the saved pool may be selected; the pool itself is
+      // kept so the next switch still offers the same choices.
+      const pool = getConfiguredModels(latest);
+      if (!pool.includes(model)) {
+        setError('该模型不在模型池中，请在 AI 设置中添加后再切换。');
+        return;
+      }
+      const updated = { ...latest, model, models: pool };
       await setAiConfig(updated);
       if (activeRef.current) setConfig(updated);
     } catch {

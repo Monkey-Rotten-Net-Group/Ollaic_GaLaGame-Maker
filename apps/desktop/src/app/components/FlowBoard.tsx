@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { FlowStepInspector } from './FlowStepInspector';
 import { PipelineEventLedger } from './PipelineEventLedger';
-import { AiSettingsDialog } from './AiSettingsDialog';
+import { AppSettingsDialog } from './AppSettingsDialog';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Switch } from './ui/switch';
@@ -67,7 +67,13 @@ export function FlowBoard(props: FlowBoardProps) {
   return <FlowBoardView {...props} controller={controller} />;
 }
 
-export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedded = false, blocked = false }: FlowBoardProps & {
+export function FlowBoardView({
+  projectPath,
+  onOpenArtifact,
+  controller,
+  embedded = false,
+  blocked = false,
+}: FlowBoardProps & {
   controller: ReturnType<typeof useFlowRunController>;
   embedded?: boolean;
   blocked?: boolean;
@@ -189,6 +195,9 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
     setSelectedStepId(null);
     if (await start(selectedIds)) setNewConfiguration(false);
   };
+  const handleOpenAiSettings = () => {
+    setSettingsOpen(true);
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-container-lowest">
@@ -290,7 +299,12 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
               </section>
 
               {configuring && <section aria-label="运行前检查" className="rounded-xl border border-border bg-surface-container-low p-4 text-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">运行前检查</h2><Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}><Settings2 /> AI 设置</Button></div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold">运行前检查</h2>
+                  <Button variant="ghost" size="sm" onClick={handleOpenAiSettings}>
+                    <Settings2 /> AI 设置
+                  </Button>
+                </div>
                 {checking ? <p className="mt-2 flex items-center gap-2 text-muted-foreground"><Loader2 className="size-3 animate-spin" />正在检查接口配置</p> : capabilityError || !capabilities ? <div role="alert" className="mt-2 text-destructive">接口检查失败：{capabilityError ?? '未读取到配置'}<Button variant="outline" size="sm" className="ml-2" onClick={checkCapabilities}>重新检查</Button></div> : <>
                   <p className={`mt-2 ${capabilities.chatError ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>内容生成：{capabilities.chatError ?? '对话模型已配置'}</p>
                   <p className="mt-2 leading-5 text-muted-foreground">{assetSelected ? `素材制作：${capabilities.assetError ?? '图片、语音及立绘抠图能力已配置；BGM 和音效需手动导入'}` : '本次不制作素材，无需图片或语音接口。场景中的素材可之后手动补充。'}</p>
@@ -350,7 +364,17 @@ export function FlowBoardView({ projectPath, onOpenArtifact, controller, embedde
             onBindImportedAudio={bindImportedAudio} importedAudioByDir={importedAudioByDir} />
         </div>}
       </div>
-      <AiSettingsDialog open={settingsOpen} onClose={() => { setSettingsOpen(false); void checkCapabilities(); }} onSaved={() => { void checkCapabilities(); }} />
+      <AppSettingsDialog
+        open={settingsOpen}
+        initialTab="ai"
+        onClose={() => {
+          setSettingsOpen(false);
+          void checkCapabilities();
+        }}
+        onSaved={() => {
+          void checkCapabilities();
+        }}
+      />
       <span className="sr-only" aria-live="polite">{configuring ? `已选择 ${selectedIds.length} 个生产步骤` : `当前运行状态：${RUN_STATUS[state.runStatus]}，总体进度 ${progress}%`}</span>
     </div>
   );
