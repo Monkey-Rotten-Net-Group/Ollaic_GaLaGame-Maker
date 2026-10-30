@@ -2,10 +2,9 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Bot, FileText, FolderOpen, GitBranch, Loader2, PanelRightClose, PanelRightOpen, Play, X } from 'lucide-react';
+import { Bot, Check, ChevronDown, FolderOpen, GitBranch, Loader2, PanelRightClose, PanelRightOpen, Play, X } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AiSettingsDialog } from './AiSettingsDialog';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
 import { ProjectMetadataDialog } from './ProjectMetadataDialog';
 import { SnapshotManagerDialog } from './SnapshotManagerDialog';
@@ -43,6 +42,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { OllaicTopBar } from './OllaicChrome';
 import { FlowBoardView } from './FlowBoard';
 import { useFlowRunController } from '../hooks/useFlowRunController';
@@ -219,9 +224,17 @@ export function StoryEditor() {
   const runtimePreview = useRuntimePreview(projectPath, scriptSource, previewStarted);
 
   // AI state
-  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
   const [aiUploadsRevision, setAiUploadsRevision] = useState(0);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [appSettingsInitialTab, setAppSettingsInitialTab] = useState<string | undefined>();
+  const openAppSettings = () => {
+    setAppSettingsInitialTab(undefined);
+    setAppSettingsOpen(true);
+  };
+  const openAiSettings = () => {
+    setAppSettingsInitialTab('ai');
+    setAppSettingsOpen(true);
+  };
   // Transient success toast for single-scene export, rendered by React so its
   // dismissal timer is cleaned up on unmount (no stray DOM nodes).
   const [exportToast, setExportToast] = useState<string | null>(null);
@@ -883,9 +896,21 @@ export function StoryEditor() {
     setSelectedNode(null);
     setShowScript(false);
     markDirty();
-  }, [scriptSource, markDirty, setNodes, setSelectedNode]);
+  }, [scriptSource, markDirty, setNodes, setSelectedNode, setShowScript]);
 
   const projectName = projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
+  const availableScenes = projectInfo?.scenes.length ? projectInfo.scenes : [currentSceneName];
+  const formatSceneOptionLabel = (scene: string) =>
+    sceneHeaders[scene]?.chapter || sceneHeaders[scene]?.outline
+      ? `${sceneDisplayName(scene, sceneHeaders[scene])} · ${scene}`
+      : scene;
+  const scriptModeOptions = [
+    { value: 'compact', label: '剧本视图' },
+    { value: 'stream', label: '指令卡片' },
+    { value: 'script', label: '脚本源码' },
+  ] as const;
+  const currentScriptModeLabel =
+    scriptModeOptions.find((option) => option.value === scriptMode)?.label ?? '剧本视图';
 
   const reloadAfterSnapshot = useCallback(async () => {
     if (!projectPath) return;
@@ -1166,27 +1191,77 @@ export function StoryEditor() {
           saveStatus={saveStatus}
           autoSave={autoSaveEnabled}
           onAutoSaveChange={setAutoSaveEnabled}
-          onSettings={() => setAppSettingsOpen(true)}
+          onSettings={openAppSettings}
         />
 
         <main className="ollaic-workspace flex min-w-0 flex-col">
           <header className="editor-workspace-toolbar">
             <div className="flex min-w-0 items-center gap-2">
-              <select aria-label="当前场景" value={currentSceneName} disabled={workflowOwnsProject} onChange={(event) => stableSwitchScene(event.target.value)} className="min-w-0 max-w-48 rounded-md border border-border bg-surface-container-lowest px-2 py-1.5 text-xs">
-                {(projectInfo?.scenes.length ? projectInfo.scenes : [currentSceneName]).map((scene) => <option key={scene} value={scene}>{sceneHeaders[scene]?.chapter || sceneHeaders[scene]?.outline ? `${sceneDisplayName(scene, sceneHeaders[scene])} · ${scene}` : scene}</option>)}
-              </select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="当前场景"
+                    disabled={workflowOwnsProject}
+                    className="editor-toolbar-select group min-w-0 max-w-48"
+                  >
+                    <span className="truncate">{formatSceneOptionLabel(currentSceneName)}</span>
+                    <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-48 max-w-72 max-h-80 overflow-y-auto">
+                  {availableScenes.map((scene) => {
+                    const active = scene === currentSceneName;
+                    return (
+                      <DropdownMenuItem
+                        key={scene}
+                        onSelect={() => stableSwitchScene(scene)}
+                        className={`flex items-center justify-between gap-2.5 text-xs font-semibold ${
+                          active
+                            ? 'bg-primary/12 font-bold text-primary focus:bg-primary/16 focus:text-primary'
+                            : ''
+                        }`}
+                      >
+                        <span className="truncate">{formatSceneOptionLabel(scene)}</span>
+                        {active && <Check className="size-3.5 shrink-0 text-primary" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <button type="button" className="ollaic-icon-button" disabled={workflowOwnsProject} onClick={() => setSceneManagerOpen(true)} aria-label="场景管理" title="场景管理"><FolderOpen className="size-4" /></button>
-              <select
-                aria-label="编辑器视图模式"
-                value={scriptMode}
-                disabled={workflowOwnsProject}
-                onChange={(event) => setScriptMode(event.target.value as 'compact' | 'stream' | 'script')}
-                className="min-w-0 rounded-md border border-border bg-surface-container-lowest px-2 py-1.5 text-xs text-foreground"
-              >
-                <option value="compact">剧本视图</option>
-                <option value="stream">指令卡片</option>
-                <option value="script">脚本源码</option>
-              </select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="编辑器视图模式"
+                    disabled={workflowOwnsProject}
+                    className="editor-toolbar-select group min-w-0"
+                  >
+                    <span className="truncate">{currentScriptModeLabel}</span>
+                    <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-40">
+                  {scriptModeOptions.map((option) => {
+                    const active = scriptMode === option.value;
+                    return (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onSelect={() => setScriptMode(option.value)}
+                        className={`flex items-center justify-between gap-2.5 text-xs font-semibold ${
+                          active
+                            ? 'bg-primary/12 font-bold text-primary focus:bg-primary/16 focus:text-primary'
+                            : ''
+                        }`}
+                      >
+                        <span>{option.label}</span>
+                        {active && <Check className="size-3.5 shrink-0 text-primary" />}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <button
                 type="button"
                 className="sr-only"
@@ -1216,7 +1291,7 @@ export function StoryEditor() {
                       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background/50">
                         <div className="flex items-center justify-between gap-2 border-b border-border p-3 text-xs">
                           <span className="truncate text-muted-foreground">脚本源码 · {currentSceneName}</span>
-                          <button type="button" onClick={handleApplyScript} className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-primary-foreground">应用更改</button>
+                          <button type="button" onClick={handleApplyScript} className="shrink-0 rounded-full bg-primary px-3.5 py-1.5 font-semibold text-primary-foreground">应用更改</button>
                         </div>
                         <textarea value={scriptSource} onChange={(event) => { setScriptSource(event.target.value); markDirty(); }} className="min-h-0 w-full flex-1 resize-none bg-transparent p-4 text-sm leading-relaxed outline-none font-mono-family" spellCheck={false} aria-label="WebGAL 脚本编辑器" />
                       </div>
@@ -1256,7 +1331,7 @@ export function StoryEditor() {
                     sceneName={currentSceneName}
                     dirty={dirty}
                     onLayoutChange={changePreviewLayout}
-                    onSettings={() => setAppSettingsOpen(true)}
+                    onSettings={openAppSettings}
                   />
                 )}
               </div>
@@ -1265,41 +1340,59 @@ export function StoryEditor() {
             <aside aria-label="Agent 面板" className={`editor-agent-dock ${agentOpen ? '' : 'hidden'}`}>
               <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
                 <Bot className="size-4 shrink-0 text-primary" />
-                <div className="flex min-w-0 flex-1 gap-1 rounded-lg bg-surface-container-low p-1" role="tablist" aria-label="Agent 模式" onKeyDown={(event) => {
+                <div className="flex min-w-0 flex-1 gap-1 rounded-full bg-surface-container-low p-1" role="tablist" aria-label="Agent 模式" onKeyDown={(event) => {
                   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
                   event.preventDefault();
                   const mode = event.key === 'Home' ? 'workflow' : event.key === 'End' ? 'edit' : agentMode === 'edit' ? 'workflow' : 'edit';
                   setAgentMode(mode);
                   document.getElementById(mode === 'workflow' ? 'workflow-agent-tab' : 'editing-agent-tab')?.focus();
                 }}>
-                  <button id="workflow-agent-tab" role="tab" type="button" aria-selected={agentMode === 'workflow'} tabIndex={agentMode === 'workflow' ? 0 : -1} aria-controls="workflow-agent-panel" onClick={() => setAgentMode('workflow')} className={`flex-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs ${agentMode === 'workflow' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>Workflow Agent</button>
-                  <button id="editing-agent-tab" role="tab" type="button" aria-selected={agentMode === 'edit'} tabIndex={agentMode === 'edit' ? 0 : -1} aria-controls="editing-agent-panel" onClick={() => setAgentMode('edit')} className={`flex-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs ${agentMode === 'edit' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>编辑 Agent</button>
+                  <button id="workflow-agent-tab" role="tab" type="button" aria-selected={agentMode === 'workflow'} tabIndex={agentMode === 'workflow' ? 0 : -1} aria-controls="workflow-agent-panel" onClick={() => setAgentMode('workflow')} className={`flex-1 whitespace-nowrap rounded-full px-2 py-1.5 text-xs ${agentMode === 'workflow' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>Workflow Agent</button>
+                  <button id="editing-agent-tab" role="tab" type="button" aria-selected={agentMode === 'edit'} tabIndex={agentMode === 'edit' ? 0 : -1} aria-controls="editing-agent-panel" onClick={() => setAgentMode('edit')} className={`flex-1 whitespace-nowrap rounded-full px-2 py-1.5 text-xs ${agentMode === 'edit' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>编辑 Agent</button>
                 </div>
                 <button type="button" className="ollaic-icon-button lg:hidden" onClick={() => setAgentOpen(false)} aria-label="关闭 Agent 面板"><X className="size-4" /></button>
               </header>
               <div id="workflow-agent-panel" role="tabpanel" aria-labelledby="workflow-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'workflow' ? 'flex' : 'hidden'}`}>
                 {editingAgentBlocked && <p role="status" className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">请先完成编辑 Agent 的生成和修改确认，再运行生产。</p>}
-                {projectPath ? <FlowBoardView key={projectPath} projectPath={projectPath} controller={workflowController} embedded blocked={Boolean(editingAgentBlocked || workflowSyncRequired || (dirty && ['running', 'paused'].includes(flow.state.runStatus)))} onOpenArtifact={(step, plan) => {
-                  if (step.kind === 'character' || step.kind === 'asset') guardedNavigate(() => navigate(`/editor/${projectId}/assets${step.kind === 'character' ? '?tab=character' : ''}`));
-                  else if (step.id === 'scene') {
-                    const scene = plan?.scenePlans.find((candidate) => candidate.id === plan.branches.entryScene)?.file ?? plan?.scenes[0];
-                    if (scene) stableSwitchScene(scene);
-                    setAgentMode('edit');
-                  }
-                }} /> : <p className="p-4 text-sm text-muted-foreground">打开项目后即可安排生产。</p>}
+                {projectPath ? (
+                  <FlowBoardView
+                    key={projectPath}
+                    projectPath={projectPath}
+                    controller={workflowController}
+                    embedded
+                    blocked={Boolean(
+                      editingAgentBlocked ||
+                        workflowSyncRequired ||
+                        (dirty && ['running', 'paused'].includes(flow.state.runStatus)),
+                    )}
+                    onOpenArtifact={(step, plan) => {
+                      if (step.kind === 'character' || step.kind === 'asset') {
+                        guardedNavigate(() =>
+                          navigate(
+                            `/editor/${projectId}/assets${step.kind === 'character' ? '?tab=character' : ''}`,
+                          ),
+                        );
+                      } else if (step.id === 'scene') {
+                        const scene =
+                          plan?.scenePlans.find(
+                            (candidate) => candidate.id === plan.branches.entryScene,
+                          )?.file ?? plan?.scenes[0];
+                        if (scene) stableSwitchScene(scene);
+                        setAgentMode('edit');
+                      }
+                    }}
+                  />
+                ) : (
+                  <p className="p-4 text-sm text-muted-foreground">打开项目后即可安排生产。</p>
+                )}
               </div>
               <div id="editing-agent-panel" role="tabpanel" aria-labelledby="editing-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'edit' ? 'flex' : 'hidden'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
                 {workflowOwnsProject && <p className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">生产期间可查看对话。停止生产后可发送编辑请求。</p>}
-                <AiAssistantPanel embedded disabled={workflowOwnsProject} aiAgent={aiAgent} projectPath={projectPath} sceneHeaders={sceneHeaders} onOpenSettings={() => setAiSettingsOpen(true)} onOpenMemory={() => guardedNavigate(() => navigate(`/editor/${projectId}/memory`))} onSend={handleAiSend} />
+                <AiAssistantPanel embedded disabled={workflowOwnsProject} aiAgent={aiAgent} projectPath={projectPath} sceneHeaders={sceneHeaders} onOpenSettings={openAiSettings} onOpenMemory={() => guardedNavigate(() => navigate(`/editor/${projectId}/memory`))} onSend={handleAiSend} />
               </div>
             </aside>
           </div>
         </main>
-
-        <AiSettingsDialog
-          open={aiSettingsOpen}
-          onClose={() => setAiSettingsOpen(false)}
-        />
 
         <ProjectMetadataDialog
           open={projectMetadataOpen}
@@ -1350,7 +1443,7 @@ export function StoryEditor() {
         <AppSettingsDialog
           open={appSettingsOpen}
           onClose={() => { setAppSettingsOpen(false); if (previewStarted) runtimePreview.reconnect(); }}
-          onOpenAiSettings={() => setAiSettingsOpen(true)}
+          initialTab={appSettingsInitialTab}
           onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { Image, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, Image, Search, Sparkles, Trash2, Plus, X } from 'lucide-react';
 import type { WebGalNode, WebGalCommandType } from '../lib/webgal-types';
 import { commandLabels } from '../lib/webgal-types';
 import { AssetPickerButton } from './AssetPicker';
@@ -21,6 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 
 interface DetailPanelProps {
   node: WebGalNode;
@@ -64,8 +70,68 @@ const typeOptions: { value: WebGalCommandType; label: string }[] = [
   { value: 'comment', label: '注释' },
 ];
 
-const inputClass = 'w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm';
+const inputClass =
+  'w-full px-3.5 py-2 bg-input-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm transition-colors';
 const labelClass = 'block text-xs uppercase tracking-widest text-muted-foreground mb-1.5';
+
+function RoundedSelect({
+  value,
+  options,
+  onChange,
+  placeholder,
+  compact = false,
+  className = '',
+  'aria-label': ariaLabel,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  compact?: boolean;
+  className?: string;
+  'aria-label'?: string;
+}) {
+  const selectedOption = options.find((opt) => opt.value === value);
+  const displayLabel = selectedOption ? selectedOption.label : value || placeholder || '';
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          className={`group flex w-full items-center justify-between gap-2 border border-border bg-input-background text-left text-sm transition-colors hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/50 ${
+            compact ? 'rounded-xl px-3 py-1.5 text-xs' : 'rounded-xl px-3.5 py-2'
+          } ${className}`}
+        >
+          <span className={`truncate ${!selectedOption && !value ? 'text-muted-foreground' : 'text-foreground'}`}>
+            {displayLabel}
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-(--radix-dropdown-menu-trigger-width) min-w-44 max-h-72 overflow-y-auto"
+      >
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <DropdownMenuItem
+              key={opt.value || '__empty__'}
+              onSelect={() => onChange(opt.value)}
+              className={`flex items-center justify-between gap-2 text-xs font-medium ${
+                active ? 'bg-primary/12 font-bold text-primary focus:bg-primary/16 focus:text-primary' : ''
+              }`}
+            >
+              <span className="truncate">{opt.label}</span>
+              {active && <Check className="size-3.5 shrink-0 text-primary" />}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function DetailPanel({
   node,
@@ -110,7 +176,7 @@ export function DetailPanel({
             {commandLabels[node.type]}
           </div>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors" aria-label="关闭">
+        <button onClick={onClose} className="p-1.5 rounded-full hover:bg-secondary/50 transition-colors" aria-label="关闭">
           <X className="w-4 h-4 text-muted-foreground" />
         </button>
       </div>
@@ -120,16 +186,13 @@ export function DetailPanel({
         {/* Type selector */}
         <div>
           <label className={`${labelClass} font-mono-family`}>指令类型</label>
-          <select
+          <RoundedSelect
             value={node.type}
-            onChange={(e) => onUpdateNode({ type: e.target.value as WebGalCommandType })}
-            className={`${inputClass} font-mono-family`}
+            options={typeOptions}
+            onChange={(val) => onUpdateNode({ type: val as WebGalCommandType })}
+            className="font-mono-family"
             aria-label="指令类型"
-          >
-            {typeOptions.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          />
         </div>
 
         {/* Type-specific fields */}
@@ -178,7 +241,7 @@ export function DetailPanel({
       <div className="p-4 border-t border-border space-y-2">
         <button
           onClick={onDeleteNode}
-          className="w-full px-4 py-2 bg-destructive/10 text-destructive rounded-md hover:bg-destructive/20 transition-colors text-sm"
+          className="w-full px-4 py-2 bg-destructive/10 text-destructive rounded-full font-semibold hover:bg-destructive/20 transition-colors text-sm"
           aria-label="删除指令"
         >
           删除指令
@@ -332,7 +395,7 @@ function renderTypeFields(
         <div>
           <label className={`${labelClass} font-mono-family`}>背景图片</label>
           {projectPath && node.asset && node.asset !== 'none' && (
-            <div className="mb-2 overflow-hidden rounded-md border border-border bg-secondary/20">
+            <div className="mb-2 overflow-hidden rounded-2xl border border-border bg-secondary/20">
               <div className="aspect-video bg-secondary/30">
                 <img
                   src={convertFileSrc(`${projectPath}/game/background/${node.asset}`)}
@@ -347,7 +410,7 @@ function renderTypeFields(
               </div>
             </div>
           )}
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             <input
               type="text"
               value={node.asset || node.content}
@@ -370,7 +433,7 @@ function renderTypeFields(
             <button
               type="button"
               onClick={() => onUpdate({ asset: 'none', content: 'none' })}
-              className="mt-2 px-2 py-1 rounded bg-secondary hover:bg-secondary/70 text-xs"
+              className="mt-2 px-3 py-1 rounded-full bg-secondary hover:bg-secondary/70 text-xs"
             >
               清除
             </button>
@@ -391,16 +454,16 @@ function renderTypeFields(
           />
           <div>
             <label className={`${labelClass} font-mono-family`}>位置</label>
-            <select
+            <RoundedSelect
               value={node.figurePosition || 'center'}
-              onChange={(e) => onUpdate({ figurePosition: e.target.value as 'left' | 'center' | 'right' })}
-              className={inputClass}
+              options={[
+                { value: 'left', label: '左侧' },
+                { value: 'center', label: '居中' },
+                { value: 'right', label: '右侧' },
+              ]}
+              onChange={(val) => onUpdate({ figurePosition: val as 'left' | 'center' | 'right' })}
               aria-label="立绘位置"
-            >
-              <option value="left">左侧</option>
-              <option value="center">居中</option>
-              <option value="right">右侧</option>
-            </select>
+            />
           </div>
           <div>
             <label className={`${labelClass} font-mono-family`}>自定义 ID</label>
@@ -606,15 +669,16 @@ function renderTypeFields(
       return (
         <div>
           <label className={`${labelClass} font-mono-family`}>操作</label>
-          <select
+          <RoundedSelect
             value={node.content || 'hide'}
-            onChange={(e) => onUpdate({ content: e.target.value })}
-            className={`${inputClass} font-mono-family`}
+            options={[
+              { value: 'hide', label: '隐藏' },
+              { value: 'show', label: '显示' },
+            ]}
+            onChange={(val) => onUpdate({ content: val })}
+            className="font-mono-family"
             aria-label="操作"
-          >
-            <option value="hide">隐藏</option>
-            <option value="show">显示</option>
-          </select>
+          />
         </div>
       );
 
@@ -803,17 +867,15 @@ function CharacterFigurePicker({
     <div className="space-y-3">
       <div>
         <label className={`${labelClass} font-mono-family`}>关联角色</label>
-        <select
+        <RoundedSelect
           value={selectedCharacterName}
-          onChange={(e) => chooseCharacter(e.target.value)}
-          className={inputClass}
+          options={[
+            { value: '', label: '无' },
+            ...characters.map((character) => ({ value: character.name, label: character.name })),
+          ]}
+          onChange={(val) => chooseCharacter(val)}
           aria-label="关联角色"
-        >
-          <option value="">无</option>
-          {characters.map((character) => (
-            <option key={character.id} value={character.name}>{character.name}</option>
-          ))}
-        </select>
+        />
       </div>
 
       {selectedCharacter ? (
@@ -968,11 +1030,11 @@ function CharacterEmotionDialog({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-md border border-border bg-card/60 hover:bg-secondary/50 transition-colors overflow-hidden text-left"
+        className="w-full rounded-2xl border border-border bg-card/60 hover:bg-secondary/50 transition-colors overflow-hidden text-left"
       >
         {hasSelection ? (
-          <div className="flex items-center gap-3 p-2">
-            <div className="w-14 h-20 rounded bg-secondary/30 overflow-hidden flex-shrink-0 flex items-center justify-center">
+          <div className="flex items-center gap-3 p-2.5">
+            <div className="w-14 h-20 rounded-xl bg-secondary/30 overflow-hidden flex-shrink-0 flex items-center justify-center">
               {selectedSrc ? (
                 <img src={selectedSrc} alt="" className="w-full h-full object-cover object-top" />
               ) : (
@@ -997,13 +1059,13 @@ function CharacterEmotionDialog({
           </DialogHeader>
           <div className="px-5 py-3 border-b border-border">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索表情、姿态或文件名..."
-                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full pl-10 pr-4 py-2 text-sm bg-input-background border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
                 aria-label="搜索表情"
                 autoFocus
               />
@@ -1024,7 +1086,7 @@ function CharacterEmotionDialog({
                           type="button"
                           key={`${character.id}-${sprite.file}-${sprite.emotion}`}
                           onClick={() => { onSelect({ ...sprite, file: resolved.file || sprite.file }); setOpen(false); }}
-                          className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
+                          className={`min-h-40 rounded-2xl border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
                             selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
                           }`}
                         >
@@ -1035,7 +1097,7 @@ function CharacterEmotionDialog({
                               <Image className="w-7 h-7 text-muted-foreground/40" />
                             )}
                           </div>
-                          <div className="px-2 py-1 text-center">
+                          <div className="px-2 py-1.5 text-center">
                             <div className="truncate text-xs">{sprite.emotion || '默认'}</div>
                           </div>
                         </button>
@@ -1056,14 +1118,14 @@ function CharacterEmotionDialog({
                             type="button"
                             key={asset.path}
                             onClick={() => { onSelect({ emotion: '', file: qualifiedFile }); setOpen(false); }}
-                            className={`min-h-40 rounded-md border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
+                            className={`min-h-40 rounded-2xl border overflow-hidden bg-card/60 hover:bg-secondary/50 transition-colors text-left ${
                               selected ? 'border-primary bg-primary/10 text-primary' : 'border-border'
                             }`}
                           >
                             <div className="h-28 bg-secondary/30 flex items-center justify-center overflow-hidden">
                               <img src={convertFileSrc(asset.path)} alt="" className="w-full h-full object-cover object-top" />
                             </div>
-                            <div className="px-2 py-1 text-center">
+                            <div className="px-2 py-1.5 text-center">
                               <div className="truncate text-xs text-muted-foreground">{tail}</div>
                             </div>
                           </button>
@@ -1105,24 +1167,23 @@ function SceneSelect({
   'aria-label'?: string;
 }) {
   const known = !value || scenes.includes(value);
-  const cls = compact
-    ? 'w-full px-2 py-1 bg-background border border-border/50 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/50'
-    : inputClass;
+  const options = [
+    { value: '', label: allowEmpty ? '（不跳转）' : placeholder },
+    ...(!known && value ? [{ value, label: `${value}（未找到）` }] : []),
+    ...scenes.map((s) => ({
+      value: s,
+      label: showOutline ? sceneDisplayName(s, sceneHeaders[s]) : (sceneHeaders[s]?.chapter?.trim() || s),
+    })),
+  ];
   return (
-    <select
+    <RoundedSelect
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={cls}
+      options={options}
+      onChange={onChange}
+      placeholder={placeholder}
+      compact={compact}
       aria-label={ariaLabel ?? '目标场景'}
-    >
-      <option value="">{allowEmpty ? '（不跳转）' : placeholder}</option>
-      {!known && value && <option value={value}>{value}（未找到）</option>}
-      {scenes.map((s) => (
-        <option key={s} value={s}>
-          {showOutline ? sceneDisplayName(s, sceneHeaders[s]) : (sceneHeaders[s]?.chapter?.trim() || s)}
-        </option>
-      ))}
-    </select>
+    />
   );
 }
 
@@ -1155,7 +1216,7 @@ function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
         <label className={`${labelClass} font-mono-family mb-0`}>选项分支</label>
         <button
           onClick={add}
-          className="px-2 py-0.5 text-xs bg-primary/10 hover:bg-primary/20 text-primary rounded transition-colors flex items-center gap-1"
+          className="px-2.5 py-1 text-xs bg-primary/10 hover:bg-primary/20 text-primary rounded-full font-semibold transition-colors flex items-center gap-1"
           aria-label="添加选项"
         >
           <Plus className="w-3 h-3" />
@@ -1165,14 +1226,14 @@ function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
 
       <div className="space-y-2">
         {choices.map((choice, idx) => (
-          <div key={idx} className="p-2.5 bg-input-background border border-border rounded-md">
+          <div key={idx} className="p-3 bg-input-background border border-border rounded-2xl">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] text-muted-foreground font-mono-family">
                 选项 {idx + 1}
               </span>
               <button
                 onClick={() => remove(idx)}
-                className="p-0.5 hover:bg-destructive/10 rounded transition-colors group"
+                className="p-1 hover:bg-destructive/10 rounded-full transition-colors group"
                 aria-label={`Delete option ${idx + 1}`}
               >
                 <Trash2 className="w-3 h-3 text-muted-foreground group-hover:text-destructive transition-colors" />
@@ -1182,7 +1243,7 @@ function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
               type="text"
               value={choice.text}
               onChange={(e) => update(idx, 'text', e.target.value)}
-              className="w-full px-2 py-1 mb-1.5 bg-background border border-border/50 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+              className="w-full px-3 py-1.5 mb-2 bg-background border border-border/50 rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
               placeholder="选项文本"
               aria-label={`Option ${idx + 1} text`}
             />

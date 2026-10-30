@@ -80,7 +80,7 @@ function InsertZone({ atIndex, onInsert, compact = false }: { atIndex: number; o
           align="center"
           sideOffset={8}
           collisionPadding={12}
-          className="z-50 rounded border border-border bg-surface-container-high p-3 shadow-lg"
+          className="z-50 rounded-2xl border border-border bg-popover p-3.5 shadow-[0_12px_32px_-8px_rgba(29,27,34,0.14),0_4px_12px_-2px_rgba(29,27,34,0.06)] backdrop-blur-xl"
         >
           <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">插入指令</div>
           {Object.entries(commandCategories).map(([category, types]) => (
@@ -88,13 +88,13 @@ function InsertZone({ atIndex, onInsert, compact = false }: { atIndex: number; o
               <div className="mb-1 text-[9px] font-semibold uppercase text-on-surface-variant/60">
                 {categoryLabels[category] || category}
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {types.map((type) => (
                   <button
                     key={type}
                     type="button"
                     onClick={() => insertCommand(type)}
-                    className="rounded-sm border border-outline-variant/30 px-2 py-1 text-[10px] text-on-surface-variant hover:border-primary hover:text-primary transition-colors"
+                    className="rounded-full border border-outline-variant/30 bg-surface-container-low/60 px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant hover:border-primary hover:bg-primary/10 hover:text-primary transition-colors"
                   >
                     {commandLabels[type]}
                   </button>
@@ -224,9 +224,9 @@ function ScriptCommandCard({
         <ContextMenuTrigger asChild>
       <div
         ref={ref}
-        className={`relative w-full max-w-3xl overflow-hidden border shadow-sm transition-all ${
+        className={`relative w-full max-w-3xl overflow-hidden rounded-2xl border shadow-sm transition-all ${
           isBranch
-            ? `border-2 bg-tertiary/5 ${selected ? 'border-tertiary' : 'border-tertiary/30'} ollaic-chamfer-tr`
+            ? `border-2 bg-tertiary/5 ${selected ? 'border-tertiary' : 'border-tertiary/30'}`
             : `bg-surface-bright ${selected ? 'border-primary ring-1 ring-primary/20' : 'border-outline-variant/40 hover:border-secondary'}`
         }`}
       >
@@ -235,11 +235,11 @@ function ScriptCommandCard({
           onClick={() => onSelectNode(node)}
           className="w-full p-4 text-left"
         >
-          <div className={`absolute right-0 top-0 px-2 py-1 text-[9px] uppercase tracking-tight ${tagClass}`}>{tag}</div>
+          <div className={`absolute right-0 top-0 rounded-bl-xl px-2.5 py-1 text-[9px] font-bold uppercase tracking-tight ${tagClass}`}>{tag}</div>
 
           {isBackground ? (
             <div className="flex items-center gap-4">
-              <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden border border-outline-variant/20 bg-surface-container-highest">
+              <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-highest">
                 {projectPath && (node.asset || node.content) ? (
                   <img
                     src={convertFileSrc(`${projectPath}/game/background/${node.asset || node.content}`)}
@@ -256,7 +256,7 @@ function ScriptCommandCard({
             </div>
           ) : node.type === 'bgm' || node.type === 'playEffect' || node.type === 'playVideo' ? (
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center border border-audio/25 bg-audio-soft">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-audio/25 bg-audio-soft">
                 <Music className="h-5 w-5 text-audio" />
               </div>
               <div className="min-w-0 flex-1">
@@ -265,7 +265,7 @@ function ScriptCommandCard({
                     {node.type === 'bgm' ? '背景音乐' : node.type === 'playEffect' ? '音效' : '视频'}
                   </span>
                   {node.volume !== undefined && (
-                    <span className="rounded border border-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant/60">
+                    <span className="rounded-full border border-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant/60">
                       音量 {node.volume}
                     </span>
                   )}
@@ -302,7 +302,7 @@ function ScriptCommandCard({
                     {displayCharacter || '未指定角色'}
                   </span>
                   {characterInherited && (
-                    <span className="rounded border border-outline-variant/30 px-1.5 py-0.5 text-[9px] font-normal text-on-surface-variant/50">
+                    <span className="rounded-full border border-outline-variant/30 px-2 py-0.5 text-[9px] font-normal text-on-surface-variant/50">
                       承上
                     </span>
                   )}
@@ -317,7 +317,7 @@ function ScriptCommandCard({
                           role={merged ? 'button' : undefined}
                           tabIndex={merged ? 0 : undefined}
                           onClick={merged ? (e) => { e.stopPropagation(); onSelectNode(lineNode); } : undefined}
-                          className={`border-l-4 p-3 text-base leading-relaxed text-on-surface whitespace-pre-wrap transition-colors ${
+                          className={`rounded-xl border-l-4 p-3 text-base leading-relaxed text-on-surface whitespace-pre-wrap transition-colors ${
                             merged
                               ? `cursor-pointer ${lineSelected ? 'border-primary bg-primary/5' : 'border-primary/30 bg-surface-container-low/50 hover:bg-surface-container-low'}`
                               : 'border-primary/30 bg-surface-container-low/50'
@@ -327,9 +327,9 @@ function ScriptCommandCard({
                         </div>
                         {(lineNode.voice || lineNode.figureEmotion) && (
                           <div className="mt-1 flex flex-wrap gap-2 pl-3">
-                            {lineNode.voice && <span className="rounded border border-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant/60">语音: {lineNode.voice}</span>}
+                            {lineNode.voice && <span className="rounded-full border border-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant/60">语音: {lineNode.voice}</span>}
                             {lineNode.figureEmotion && (
-                              <span className="rounded border border-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant/60">表情: {lineNode.figureEmotion}</span>
+                              <span className="rounded-full border border-outline-variant/30 px-2 py-0.5 text-[10px] text-on-surface-variant/60">表情: {lineNode.figureEmotion}</span>
                             )}
                           </div>
                         )}
@@ -347,7 +347,7 @@ function ScriptCommandCard({
               </div>
               <div className="space-y-2">
                 {(node.choices?.length ? node.choices : [{ text: getCommandSummary(node), target: '@next' }]).map((choice, choiceIndex) => (
-                  <div key={`${node.id}-${choiceIndex}`} className="flex items-center justify-between border border-tertiary/20 bg-surface-bright p-2 text-sm">
+                  <div key={`${node.id}-${choiceIndex}`} className="flex items-center justify-between rounded-xl border border-tertiary/20 bg-surface-bright px-3 py-2 text-sm">
                     <span>{choiceIndex + 1}. {choice.text}</span>
                     <span className="text-[10px] text-tertiary">跳转至: {choice.target}</span>
                   </div>
@@ -356,7 +356,7 @@ function ScriptCommandCard({
             </>
           ) : node.type === 'changeFigure' ? (
             <div className="flex items-center gap-4">
-              <div className="flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded">
+              <div className="flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl">
                 {projectPath && (node.asset || node.content) && (node.asset || node.content) !== 'none' ? (
                   <img
                     src={convertFileSrc(`${projectPath}/game/figure/${node.asset || node.content}`)}
@@ -385,7 +385,7 @@ function ScriptCommandCard({
             type="button"
             ref={onReorderNodes ? drag : undefined}
             onClick={(e) => e.stopPropagation()}
-            className="rounded p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground cursor-grab active:cursor-grabbing"
+            className="rounded-full p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground cursor-grab active:cursor-grabbing"
             title="拖拽排序"
             aria-label="拖拽排序"
           >
@@ -396,7 +396,7 @@ function ScriptCommandCard({
               <button
                 type="button"
                 onClick={(e) => e.stopPropagation()}
-                className="rounded p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground"
+                className="rounded-full p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground"
                 title="更多操作"
                 aria-label="更多操作"
               >
@@ -714,7 +714,7 @@ function ScriptCommandCompactRow({
                           lineSelected ? 'font-semibold text-primary' : 'text-on-surface-variant/80 hover:text-foreground'
                         }`}
                       >
-                        <span className="rounded bg-outline-variant/20 px-1 text-[9px] text-muted-foreground">承上</span>
+                        <span className="rounded-full bg-outline-variant/20 px-1.5 py-0.5 text-[9px] text-muted-foreground">承上</span>
                         <span className="truncate">"{lineNode.content || '……'}"</span>
                       </button>
                     );
@@ -727,12 +727,12 @@ function ScriptCommandCompactRow({
             {(node.voice || node.figureEmotion) && (
               <div className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
                 {node.voice && (
-                  <span className="rounded bg-outline-variant/20 px-1.5 py-0.5">
+                  <span className="rounded-full bg-outline-variant/20 px-2 py-0.5">
                     语音: {node.voice}
                   </span>
                 )}
                 {node.figureEmotion && (
-                  <span className="rounded bg-outline-variant/20 px-1.5 py-0.5">
+                  <span className="rounded-full bg-outline-variant/20 px-2 py-0.5">
                     表情: {node.figureEmotion}
                   </span>
                 )}
@@ -745,7 +745,7 @@ function ScriptCommandCompactRow({
                 type="button"
                 ref={onReorderNodes ? drag : undefined}
                 onClick={(e) => e.stopPropagation()}
-                className="rounded p-1 text-outline-variant/60 hover:bg-surface-container-high hover:text-foreground cursor-grab active:cursor-grabbing"
+                className="rounded-full p-1 text-outline-variant/60 hover:bg-surface-container-high hover:text-foreground cursor-grab active:cursor-grabbing"
                 title="拖拽排序"
                 aria-label="拖拽排序"
               >
@@ -756,7 +756,7 @@ function ScriptCommandCompactRow({
                   <button
                     type="button"
                     onClick={(e) => e.stopPropagation()}
-                    className="rounded p-1 text-outline-variant/60 hover:bg-surface-container-high hover:text-foreground"
+                    className="rounded-full p-1 text-outline-variant/60 hover:bg-surface-container-high hover:text-foreground"
                     title="更多操作"
                     aria-label="更多操作"
                   >
@@ -1326,13 +1326,13 @@ export function ScriptCommandStream({
         {/* Right-click on empty area → paste at the position nearest the cursor */}
         {areaMenu && clipboardNode && onPasteNode && (
           <div
-            className="fixed z-50 min-w-[160px] rounded border border-border bg-surface-container-high p-1 shadow-lg"
+            className="fixed z-50 min-w-[160px] rounded-2xl border border-border bg-popover p-1.5 shadow-[0_12px_32px_-8px_rgba(29,27,34,0.14),0_4px_12px_-2px_rgba(29,27,34,0.06)] backdrop-blur-xl"
             style={{ left: areaMenu.x, top: areaMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs hover:bg-surface-container-low"
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-xs hover:bg-surface-container-low"
               onClick={() => { onPasteNode(areaMenu.atIndex); setAreaMenu(null); }}
             >
               <Clipboard className="h-3.5 w-3.5" />

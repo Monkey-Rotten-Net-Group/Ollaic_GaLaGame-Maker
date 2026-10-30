@@ -14,6 +14,7 @@ vi.mock('../lib/ai-ipc');
 const original: AiConfig = {
   provider: 'test',
   model: 'model-a',
+  models: ['model-a', 'model-b', 'model-c'],
   api_key: 'old-test-key',
   base_url: '',
 };
@@ -29,7 +30,7 @@ function deferred<T>() {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(getAiConfig).mockResolvedValue(original);
-  vi.mocked(listAiProviders).mockResolvedValue({ chat: [], image: [], tts: [], video: [] });
+  vi.mocked(listAiProviders).mockResolvedValue({ chat: [], image: [], tts: [] });
   vi.mocked(setAiConfig).mockResolvedValue(undefined);
 });
 afterEach(cleanup);
@@ -91,6 +92,17 @@ describe('chat model selection', () => {
     expect(setAiConfig).not.toHaveBeenCalled();
     expect(result.current.config).toEqual(latest);
     expect(result.current.error).toContain('供应商配置已更新');
+  });
+
+  it('rejects a model that is not in the configured pool', async () => {
+    const { result } = renderHook(useChatModelSelection);
+    await waitFor(() => expect(result.current.config).toEqual(original));
+    await act(async () => {
+      await result.current.switchModel('preset-only-model');
+    });
+    expect(setAiConfig).not.toHaveBeenCalled();
+    expect(result.current.config?.model).toBe('model-a');
+    expect(result.current.error).toContain('不在模型池中');
   });
 
   it('keeps a failed selection recoverable and allows retrying it', async () => {

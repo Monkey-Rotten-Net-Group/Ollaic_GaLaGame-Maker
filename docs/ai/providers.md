@@ -10,13 +10,13 @@
 
 ### Chat
 
-OpenAI、Anthropic、Gemini、DeepSeek、Groq、xAI、Cohere、Ollama（本地）、custom（OpenAI 兼容）。
+OpenAI、Anthropic、Gemini、DeepSeek、xAI、custom（OpenAI 兼容）。
 
 具备 `chat_tools` 能力的供应商启用多步工具调用，其余走 legacy 单轮补丁。`deepseek-reasoner` 这类推理模型在供应商级别支持工具调用，但模型级别不支持，由 `provider_capability` 单独降级。
 
 ### Image
 
-OpenAI Images、Google Gemini / Imagen、阿里云 DashScope / 通义万相、火山引擎 / 即梦 / 豆包、智谱 CogView、SiliconFlow、Midjourney Proxy（OpenAI 兼容）、Stable Diffusion WebUI（本地）、custom。
+OpenAI Images、Google Gemini / Imagen、阿里云 DashScope / 通义万相、火山引擎 / 即梦 / 豆包、Stable Diffusion WebUI（本地）、custom。
 
 ### TTS
 
@@ -26,14 +26,16 @@ OpenAI TTS、ElevenLabs、阿里云 DashScope / CosyVoice、火山引擎 / 豆�
 
 ## Base URL 与 API Key
 
-- **Base URL 留空**时使用该供应商在 registry 中的内置端点。只有内置端点为空的供应商（custom、Midjourney Proxy）才必须填写，UI 会在提示里注明「必填」。
+- **Base URL 留空**时使用该供应商在 registry 中的内置端点。只有内置端点为空的供应商（custom）才必须填写，UI 会在提示里注明「必填」。
 - 聊天 Base URL 可填写为 `https://host/v1` 或 `https://host/v1/`;客户端会统一补齐末尾斜杠,保留 API 路径前缀,避免底层 SDK 把 `/v1` 替换掉。
 - 输入框里的灰色示例文本只是 placeholder，**不会被写入配置**，因此不会出现「保存了示例地址导致请求失败」。
-- `requires_api_key = false` 的供应商（Ollama、Stable Diffusion WebUI、custom）可以留空 Key，UI 会提示「该供应商通常不需要 Key」。
+- `requires_api_key = false` 的供应商（Stable Diffusion WebUI、custom）可以留空 Key，UI 会提示「该供应商通常不需要 Key」。
 
 ## 配置存储与保存时机
 
 供应商配置是**全局的，不按项目隔离**：存放在用户配置目录 `<config>/ollaic/` 下的 `ai.json`、`ai-image.json`、`ai-tts.json`，所有项目共用同一份。
+
+每个供应商的 Key、Base URL 和模型池另外按供应商记在 `ai-profiles.json`（聊天、图片、语音分开记）。在设置里切换供应商时，会换成该供应商上次保存的那一套；没保存过的供应商 Key 为空，不会沿用上一个供应商的 Key。同一次打开设置时填过但还没保存的值，切走再切回来也会保留。
 
 对话框每次打开都从磁盘重新读取，因此未保存的草稿会被丢弃。为避免"填好、测通、忘了保存"导致配置丢失：
 

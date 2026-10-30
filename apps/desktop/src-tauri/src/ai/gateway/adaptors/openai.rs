@@ -1,8 +1,7 @@
 //! OpenAI-compatible adaptor: `/images/generations` and `/audio/speech`.
 //!
 //! Also covers every provider that speaks the same dialect behind a different
-//! host (Zhipu, SiliconFlow, Volcengine Ark, Midjourney-Proxy, and any
-//! user-supplied `custom` gateway), plus the Volcengine Seedream request
+//! host (Volcengine Ark and any user-supplied `custom` gateway), plus the Volcengine Seedream request
 //! variant, which is OpenAI-shaped but takes different parameters.
 
 use serde::Deserialize;

@@ -10,7 +10,8 @@
 //!
 //! A provider only appears in a modality list when the backend can actually
 //! service that modality. Providers that exist solely to keep an older saved
-//! config resolvable (`comfyui`, `edge-tts`) carry a capability entry but no
+//! config resolvable (`comfyui`, `edge-tts`, `zhipu`, `siliconflow`,
+//! `midjourney`) carry a capability entry but no
 //! modality, so they never show up in a picker.
 
 use serde::Serialize;
@@ -22,7 +23,6 @@ pub enum Modality {
     Chat,
     Image,
     Tts,
-    Video,
 }
 
 /// Chat-semantics capability flags. Media-only providers still carry these
@@ -70,7 +70,6 @@ pub struct ProviderSpec {
     pub chat: Option<ModalitySpec>,
     pub image: Option<ModalitySpec>,
     pub tts: Option<ModalitySpec>,
-    pub video: Option<ModalitySpec>,
 }
 
 impl ProviderSpec {
@@ -79,7 +78,6 @@ impl ProviderSpec {
             Modality::Chat => self.chat.as_ref(),
             Modality::Image => self.image.as_ref(),
             Modality::Tts => self.tts.as_ref(),
-            Modality::Video => self.video.as_ref(),
         }
     }
 }
@@ -106,182 +104,72 @@ const HOSTED_MEDIA: CapabilitySpec = capability(false, false, true, true, 600_00
 /// consumer hardware is slow.
 const LOCAL_MEDIA: CapabilitySpec = capability(false, false, false, false, 900_000);
 
-const OPENAI_CHAT_MODELS: &[&str] = &[
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "gpt-5.3-codex",
-    "gpt-5.2",
-    "gpt-5.1",
-    "gpt-5",
-    "gpt-4.1",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "o3",
-    "o4-mini",
-];
+const OPENAI_CHAT_MODELS: &[&str] = &["gpt-5.5"];
 
 const ANTHROPIC_CHAT_MODELS: &[&str] = &[
     "claude-opus-4-8",
     "claude-opus-4-7",
-    "claude-opus-4-6",
     "claude-sonnet-4-6",
     "claude-haiku-4-5",
-    "claude-3-7-sonnet-latest",
-    "claude-3-5-haiku-latest",
 ];
 
 const GEMINI_CHAT_MODELS: &[&str] = &[
     "gemini-3.5-flash",
     "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview",
     "gemini-3.1-flash-lite",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest",
+    "gemini-3-flash-preview",
 ];
 
-const DEEPSEEK_CHAT_MODELS: &[&str] = &[
-    "deepseek-v4-flash",
-    "deepseek-v4-pro",
-    "deepseek-chat",
-    "deepseek-reasoner",
-];
+const DEEPSEEK_CHAT_MODELS: &[&str] = &["deepseek-flash", "deepseek-v4-pro"];
 
-const GROQ_CHAT_MODELS: &[&str] = &[
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-    "groq/compound",
-    "qwen-2.5-32b",
-    "deepseek-r1-distill-llama-70b",
-];
-
-const XAI_CHAT_MODELS: &[&str] = &["grok-4.3", "grok-4.20", "grok-build-0.1"];
-
-const COHERE_CHAT_MODELS: &[&str] = &["command-a-03-2025", "command-r-plus", "command-r"];
-
-const OLLAMA_CHAT_MODELS: &[&str] = &[
-    "qwen2.5:7b",
-    "qwen2.5:14b",
-    "qwen2.5:32b",
-    "llama3.3:70b",
-    "llama3.2:3b",
-    "deepseek-r1:7b",
-    "deepseek-r1:14b",
-    "gemma2:9b",
-    "mistral:7b",
-    "phi4:14b",
-];
+const XAI_CHAT_MODELS: &[&str] = &["grok-4.6", "grok-4.3"];
 
 const OPENAI_IMAGE_MODELS: &[&str] = &[
-    "gpt-image-1",
-    "gpt-image-1-mini",
-    "gpt-image-1.5",
-    "chatgpt-image-latest",
-    "dall-e-3",
-    "dall-e-2",
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2",
 ];
 
 const GEMINI_IMAGE_MODELS: &[&str] = &[
     "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview",
-    "gemini-2.5-flash-image",
-    "nano-banana-pro-preview",
     "imagen-4.0-ultra-generate-001",
     "imagen-4.0-generate-001",
     "imagen-4.0-fast-generate-001",
 ];
 
+/// Only models served by the async `text2image/image-synthesis` endpoint the
+/// DashScope adaptor calls; newer qwen-image / wan2.6+ models use the
+/// `multimodal-generation` endpoint, which the adaptor does not speak yet.
 const ALIYUN_IMAGE_MODELS: &[&str] = &[
-    "wanx2.1-t2i-turbo",
-    "wanx2.1-t2i-plus",
-    "wanx2.1-imageedit",
-    "wanx-v1",
-    "wan2.2-t2i-flash",
-    "wan2.2-t2i-plus",
     "wan2.5-t2i-preview",
-    "wan2.6-t2i",
-    "wan2.7-image",
-    "wan2.7-image-pro",
+    "wan2.2-t2i-plus",
+    "wan2.2-t2i-flash",
     "qwen-image",
-    "qwen-image-edit",
-    "qwen-image-plus",
-    "qwen-image-max",
-    "qwen-image-2.0-pro",
-    "z-image-turbo",
 ];
 
 const VOLCENGINE_IMAGE_MODELS: &[&str] = &[
-    "doubao-seedream-4-5-251128",
     "doubao-seedream-5-0-lite",
+    "doubao-seedream-4-5-251128",
     "doubao-seedream-4-0-250828",
-    "doubao-seededit-3-0-i2i-250628",
-    "jimeng_high_aes_general_v21_L",
-    "jimeng_high_aes_general_v20_L",
-    "doubao-seedream-3-0-t2i-250415",
 ];
-
-const ZHIPU_IMAGE_MODELS: &[&str] = &["cogview-3-flash", "cogview-3-plus", "cogview-4"];
-
-const SILICONFLOW_IMAGE_MODELS: &[&str] = &[
-    "Kwai-Kolors/Kolors",
-    "black-forest-labs/FLUX.1-schnell",
-    "black-forest-labs/FLUX.1-dev",
-    "stabilityai/stable-diffusion-3-5-large",
-    "stabilityai/stable-diffusion-xl-base-1.0",
-    "Qwen/Qwen-Image",
-    "Qwen/Qwen-Image-Edit",
-];
-
-const MIDJOURNEY_IMAGE_MODELS: &[&str] = &["midjourney", "niji"];
 
 const SD_WEBUI_IMAGE_MODELS: &[&str] = &["local", "sdxl", "sd1.5", "sd3.5-large", "flux", "kolors"];
 
-const OPENAI_TTS_MODELS: &[&str] = &[
-    "gpt-4o-mini-tts",
-    "gpt-4o-mini-tts-2025-03-20",
-    "gpt-4o-mini-tts-2025-12-15",
-    "tts-1",
-    "tts-1-1106",
-    "tts-1-hd",
-    "tts-1-hd-1106",
-];
+const OPENAI_TTS_MODELS: &[&str] = &["gpt-4o-mini-tts", "tts-1-hd", "tts-1"];
 
 const ELEVENLABS_TTS_MODELS: &[&str] = &[
     "eleven_v3",
     "eleven_multilingual_v2",
     "eleven_flash_v2_5",
-    "eleven_flash_v2",
     "eleven_turbo_v2_5",
-    "eleven_turbo_v2",
-    "eleven_multilingual_sts_v2",
-    "eleven_monolingual_v1",
 ];
 
-const ALIYUN_TTS_MODELS: &[&str] = &[
-    "cosyvoice-v2",
-    "cosyvoice-v1",
-    "cosyvoice-v3-flash",
-    "cosyvoice-v3-plus",
-    "qwen3-tts-flash",
-    "qwen-tts",
-    "qwen-tts-latest",
-];
+const ALIYUN_TTS_MODELS: &[&str] = &["cosyvoice-v3-flash", "qwen3-tts-flash"];
 
 const VOLCENGINE_TTS_MODELS: &[&str] = &["seed-tts", "seed-tts-2.0", "mega-tts", "doubao-tts"];
 
-const MINIMAX_VIDEO_MODELS: &[&str] = &[
-    "MiniMax-Hailuo-2.3",
-    "MiniMax-Hailuo-02",
-    "T2V-01-Director",
-    "T2V-01",
-];
-
-const CUSTOM_CHAT_MODELS: &[&str] = &["gpt-4o-mini"];
+const CUSTOM_CHAT_MODELS: &[&str] = &["chat-model"];
 const CUSTOM_IMAGE_MODELS: &[&str] = &["image-model"];
 const CUSTOM_TTS_MODELS: &[&str] = &["tts-model"];
 
@@ -301,7 +189,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: Some(ModalitySpec {
             label: "OpenAI Images",
-            default_model: "gpt-image-1",
+            default_model: "gpt-image-2.5-flare",
             models: OPENAI_IMAGE_MODELS,
             default_base_url: "https://api.openai.com/v1",
             base_url_placeholder: "(默认 https://api.openai.com/v1)",
@@ -313,7 +201,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.openai.com/v1",
             base_url_placeholder: "(默认 https://api.openai.com/v1)",
         }),
-        video: None,
     },
     ProviderSpec {
         id: "anthropic",
@@ -328,7 +215,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         }),
         image: None,
         tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "gemini",
@@ -349,7 +235,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 https://generativelanguage.googleapis.com/v1beta)",
         }),
         tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "deepseek",
@@ -357,29 +242,13 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         capability: capability(true, true, true, false, 180_000),
         chat: Some(ModalitySpec {
             label: "DeepSeek",
-            default_model: "deepseek-v4-flash",
+            default_model: "deepseek-flash",
             models: DEEPSEEK_CHAT_MODELS,
             default_base_url: "https://api.deepseek.com/v1/",
             base_url_placeholder: "(默认 https://api.deepseek.com/v1/)",
         }),
         image: None,
         tts: None,
-        video: None,
-    },
-    ProviderSpec {
-        id: "groq",
-        requires_api_key: true,
-        capability: capability(true, true, true, false, 120_000),
-        chat: Some(ModalitySpec {
-            label: "Groq",
-            default_model: "llama-3.3-70b-versatile",
-            models: GROQ_CHAT_MODELS,
-            default_base_url: "https://api.groq.com/openai/v1/",
-            base_url_placeholder: "(默认 https://api.groq.com/openai/v1/)",
-        }),
-        image: None,
-        tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "xai",
@@ -387,44 +256,13 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         capability: capability(true, true, true, false, 120_000),
         chat: Some(ModalitySpec {
             label: "xAI",
-            default_model: "grok-4.3",
+            default_model: "grok-4.6",
             models: XAI_CHAT_MODELS,
             default_base_url: "https://api.x.ai/v1/",
             base_url_placeholder: "(默认 https://api.x.ai/v1/)",
         }),
         image: None,
         tts: None,
-        video: None,
-    },
-    ProviderSpec {
-        id: "cohere",
-        requires_api_key: true,
-        capability: capability(true, true, true, false, 120_000),
-        chat: Some(ModalitySpec {
-            label: "Cohere",
-            default_model: "command-a-03-2025",
-            models: COHERE_CHAT_MODELS,
-            default_base_url: "https://api.cohere.com/v2/",
-            base_url_placeholder: "(默认 https://api.cohere.com/v2/)",
-        }),
-        image: None,
-        tts: None,
-        video: None,
-    },
-    ProviderSpec {
-        id: "ollama",
-        requires_api_key: false,
-        capability: capability(false, true, false, false, 600_000),
-        chat: Some(ModalitySpec {
-            label: "Ollama (本地)",
-            default_model: "qwen2.5:7b",
-            models: OLLAMA_CHAT_MODELS,
-            default_base_url: "http://localhost:11434/v1/",
-            base_url_placeholder: "(默认 http://localhost:11434/v1/)",
-        }),
-        image: None,
-        tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "aliyun",
@@ -433,19 +271,18 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: Some(ModalitySpec {
             label: "阿里云 DashScope / 通义万相",
-            default_model: "wanx2.1-t2i-turbo",
+            default_model: "wan2.2-t2i-flash",
             models: ALIYUN_IMAGE_MODELS,
             default_base_url: "https://dashscope.aliyuncs.com/api/v1",
             base_url_placeholder: "(默认 https://dashscope.aliyuncs.com/api/v1)",
         }),
         tts: Some(ModalitySpec {
             label: "阿里云 DashScope / CosyVoice",
-            default_model: "cosyvoice-v2",
+            default_model: "cosyvoice-v3-flash",
             models: ALIYUN_TTS_MODELS,
             default_base_url: "https://dashscope.aliyuncs.com/api/v1",
             base_url_placeholder: "(默认 https://dashscope.aliyuncs.com/api/v1)",
         }),
-        video: None,
     },
     ProviderSpec {
         id: "volcengine",
@@ -454,7 +291,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: Some(ModalitySpec {
             label: "火山引擎 / 即梦 / 豆包",
-            default_model: "doubao-seedream-4-5-251128",
+            default_model: "doubao-seedream-5-0-lite",
             models: VOLCENGINE_IMAGE_MODELS,
             default_base_url: "https://ark.cn-beijing.volces.com/api/v3",
             base_url_placeholder: "(默认 https://ark.cn-beijing.volces.com/api/v3)",
@@ -467,37 +304,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder:
                 "(默认 https://openspeech.bytedance.com/api/v3/tts/unidirectional)",
         }),
-        video: None,
-    },
-    ProviderSpec {
-        id: "zhipu",
-        requires_api_key: true,
-        capability: HOSTED_MEDIA,
-        chat: None,
-        image: Some(ModalitySpec {
-            label: "智谱 CogView",
-            default_model: "cogview-3-flash",
-            models: ZHIPU_IMAGE_MODELS,
-            default_base_url: "https://open.bigmodel.cn/api/paas/v4",
-            base_url_placeholder: "(默认 https://open.bigmodel.cn/api/paas/v4)",
-        }),
-        tts: None,
-        video: None,
-    },
-    ProviderSpec {
-        id: "siliconflow",
-        requires_api_key: true,
-        capability: HOSTED_MEDIA,
-        chat: None,
-        image: Some(ModalitySpec {
-            label: "SiliconFlow",
-            default_model: "Kwai-Kolors/Kolors",
-            models: SILICONFLOW_IMAGE_MODELS,
-            default_base_url: "https://api.siliconflow.cn/v1",
-            base_url_placeholder: "(默认 https://api.siliconflow.cn/v1)",
-        }),
-        tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "elevenlabs",
@@ -512,22 +318,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "https://api.elevenlabs.io",
             base_url_placeholder: "(默认 https://api.elevenlabs.io)",
         }),
-        video: None,
-    },
-    ProviderSpec {
-        id: "midjourney",
-        requires_api_key: true,
-        capability: HOSTED_MEDIA,
-        chat: None,
-        image: Some(ModalitySpec {
-            label: "Midjourney Proxy (OpenAI 兼容)",
-            default_model: "midjourney",
-            models: MIDJOURNEY_IMAGE_MODELS,
-            default_base_url: "",
-            base_url_placeholder: "必填，Midjourney-Proxy 的 OpenAI 兼容端点",
-        }),
-        tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "sd-webui",
@@ -542,7 +332,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             base_url_placeholder: "(默认 http://127.0.0.1:7860)",
         }),
         tts: None,
-        video: None,
     },
     ProviderSpec {
         id: "custom",
@@ -550,7 +339,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         capability: capability(false, false, false, false, 180_000),
         chat: Some(ModalitySpec {
             label: "自定义 (OpenAI 兼容)",
-            default_model: "gpt-4o-mini",
+            default_model: "chat-model",
             models: CUSTOM_CHAT_MODELS,
             default_base_url: "",
             base_url_placeholder: "必填，OpenAI 兼容端点（Moonshot/通义/本地 vLLM 等）",
@@ -569,22 +358,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "",
             base_url_placeholder: "必填，OpenAI 兼容的语音接口端点",
         }),
-        video: None,
-    },
-    ProviderSpec {
-        id: "minimax",
-        requires_api_key: true,
-        capability: HOSTED_MEDIA,
-        chat: None,
-        image: None,
-        tts: None,
-        video: Some(ModalitySpec {
-            label: "MiniMax 视频",
-            default_model: "MiniMax-Hailuo-2.3",
-            models: MINIMAX_VIDEO_MODELS,
-            default_base_url: "https://api.minimax.io/v1",
-            base_url_placeholder: "(默认 https://api.minimax.io/v1)",
-        }),
     },
     // Retired from every picker, kept resolvable so an older saved config
     // still loads and reports a useful error instead of "未知 AI 供应商".
@@ -595,7 +368,30 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: None,
         tts: None,
-        video: None,
+    },
+    ProviderSpec {
+        id: "zhipu",
+        requires_api_key: true,
+        capability: HOSTED_MEDIA,
+        chat: None,
+        image: None,
+        tts: None,
+    },
+    ProviderSpec {
+        id: "siliconflow",
+        requires_api_key: true,
+        capability: HOSTED_MEDIA,
+        chat: None,
+        image: None,
+        tts: None,
+    },
+    ProviderSpec {
+        id: "midjourney",
+        requires_api_key: true,
+        capability: HOSTED_MEDIA,
+        chat: None,
+        image: None,
+        tts: None,
     },
     ProviderSpec {
         id: "edge-tts",
@@ -604,7 +400,6 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         chat: None,
         image: None,
         tts: None,
-        video: None,
     },
 ];
 
@@ -670,7 +465,6 @@ pub struct ProviderCatalog {
     pub chat: Vec<ProviderOption>,
     pub image: Vec<ProviderOption>,
     pub tts: Vec<ProviderOption>,
-    pub video: Vec<ProviderOption>,
 }
 
 pub fn options_for(modality: Modality) -> Vec<ProviderOption> {
@@ -697,7 +491,6 @@ pub fn catalog() -> ProviderCatalog {
         chat: options_for(Modality::Chat),
         image: options_for(Modality::Image),
         tts: options_for(Modality::Tts),
-        video: options_for(Modality::Video),
     }
 }
 
@@ -717,12 +510,7 @@ mod tests {
     #[test]
     fn every_modality_entry_offers_its_default_model() {
         for provider in PROVIDERS {
-            for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-                Modality::Video,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -746,12 +534,7 @@ mod tests {
     #[test]
     fn base_url_requirement_matches_the_built_in_default() {
         for provider in PROVIDERS {
-            for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-                Modality::Video,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -776,12 +559,7 @@ mod tests {
     #[test]
     fn placeholders_never_contain_the_rejected_example_host() {
         for provider in PROVIDERS {
-            for modality in [
-                Modality::Chat,
-                Modality::Image,
-                Modality::Tts,
-                Modality::Video,
-            ] {
+            for modality in [Modality::Chat, Modality::Image, Modality::Tts] {
                 let Some(spec) = provider.modality(modality) else {
                     continue;
                 };
@@ -810,7 +588,7 @@ mod tests {
 
     #[test]
     fn retired_providers_resolve_but_are_never_selectable() {
-        for retired in ["comfyui", "edge-tts"] {
+        for retired in ["comfyui", "edge-tts", "zhipu", "siliconflow", "midjourney"] {
             assert!(
                 find(retired).is_some(),
                 "{retired} must stay resolvable for older saved configs"
@@ -828,12 +606,24 @@ mod tests {
     fn catalog_lists_every_provider_that_serves_the_modality() {
         let catalog = catalog();
         let chat_ids: Vec<&str> = catalog.chat.iter().map(|o| o.value.as_str()).collect();
-        assert!(chat_ids.contains(&"cohere"), "cohere must be selectable");
+        assert!(chat_ids.contains(&"xai"), "xai must be selectable");
+        for removed in ["groq", "cohere", "ollama"] {
+            assert!(
+                !chat_ids.contains(&removed),
+                "{removed} must not be selectable"
+            );
+        }
         let image_ids: Vec<&str> = catalog.image.iter().map(|o| o.value.as_str()).collect();
         assert!(
-            image_ids.contains(&"midjourney"),
-            "midjourney must be selectable"
+            image_ids.contains(&"volcengine"),
+            "volcengine must be selectable"
         );
+        for removed in ["zhipu", "siliconflow", "midjourney"] {
+            assert!(
+                !image_ids.contains(&removed),
+                "{removed} must not be selectable"
+            );
+        }
         assert!(!catalog.tts.is_empty());
     }
 }

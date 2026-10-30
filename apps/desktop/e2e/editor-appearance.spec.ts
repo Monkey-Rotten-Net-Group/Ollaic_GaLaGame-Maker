@@ -44,7 +44,8 @@ for (const width of [390, 1100, 1280, 1440]) {
 test('global navigation preserves the unsaved-edit confirmation', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
   await page.getByRole('switch', { name: '自动保存' }).uncheck();
-  await page.getByLabel('编辑器视图模式').selectOption('script');
+  await page.getByLabel('编辑器视图模式').click();
+  await page.getByRole('menuitem', { name: '脚本源码', exact: true }).click();
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:保留未保存的内容。;');
   await page
     .getByRole('navigation', { name: '核心视图' })
@@ -59,12 +60,33 @@ test('global navigation preserves the unsaved-edit confirmation', async ({ page 
   await expect(page).toHaveURL(/\/#\/$/);
 });
 
+test('scene and view mode dropdown menus use rounded popovers', async ({ page }) => {
+  await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
+  for (const label of ['当前场景', '编辑器视图模式']) {
+    await page.getByLabel(label).click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const menuRadius = await menu.evaluate((el) =>
+      parseFloat(getComputedStyle(el).borderTopLeftRadius),
+    );
+    expect(menuRadius).toBeGreaterThanOrEqual(12);
+    const firstItem = menu.getByRole('menuitem').first();
+    const itemRadius = await firstItem.evaluate((el) =>
+      parseFloat(getComputedStyle(el).borderTopLeftRadius),
+    );
+    expect(itemRadius).toBeGreaterThanOrEqual(8);
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+  }
+});
+
 for (const width of [1100, 1280, 1440, 1599, 1600]) {
   test(`command search filters characters and content at ${width}px`, async ({
     page,
   }, testInfo) => {
     await openFlowBoard(page, { width, height: 900 }, 'draft');
-    await page.getByLabel('编辑器视图模式').selectOption('stream');
+    await page.getByLabel('编辑器视图模式').click();
+    await page.getByRole('menuitem', { name: '指令卡片', exact: true }).click();
     const search = page.getByRole('textbox', { name: '搜索', exact: true });
     await expect(search).toBeVisible();
     const commands = page.locator('[data-cmd-card]');
@@ -271,13 +293,10 @@ test('settings stay inside narrow and short windows', async ({ page }, testInfo)
   await expectFits(appSettings);
   await expect(appSettings.getByRole('button', { name: '保存', exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('app-settings-narrow.png') });
-  await appSettings.getByRole('button', { name: '常规工程', exact: true }).click();
-  await appSettings.getByRole('button', { name: '打开 AI 设置' }).click();
-  const aiSettings = page.locator('div.bg-card').filter({
-    has: page.getByRole('heading', { name: 'AI 设置', exact: true }),
-  });
+  await appSettings.getByRole('button', { name: 'AI 模型服务', exact: true }).click();
+  const aiSettings = appSettings;
   await expect(aiSettings.getByRole('button', { name: '测试连接' })).toBeVisible();
   await expectFits(aiSettings);
-  await expect(aiSettings.getByRole('button', { name: '保存 AI 配置' })).toBeInViewport();
+  await expect(aiSettings.getByRole('button', { name: '保存', exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('ai-settings-narrow.png') });
 });
