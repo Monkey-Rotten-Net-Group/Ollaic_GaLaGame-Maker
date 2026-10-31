@@ -60,8 +60,17 @@ export function estimateContextTokens(value: string): number {
 }
 
 function block(kind: ContextBlockTrace['kind'], id: string, messages: AiChatMessage[]): ContextBlockTrace {
-  const characters = messages.reduce((total, message) => total + message.content.length, 0);
-  const estimatedTokens = messages.reduce((total, message) => total + estimateContextTokens(message.content) + 4, 0);
+  let characters = 0;
+  let estimatedTokens = 0;
+  for (const message of messages) {
+    const toolCallsPayload = message.toolCalls && message.toolCalls.length > 0
+      ? JSON.stringify(message.toolCalls)
+      : '';
+    characters += message.content.length + toolCallsPayload.length;
+    estimatedTokens += estimateContextTokens(message.content)
+      + (toolCallsPayload ? estimateContextTokens(toolCallsPayload) + message.toolCalls!.length * 4 : 0)
+      + 4;
+  }
   return { id, kind, messageCount: messages.length, characters, estimatedTokens };
 }
 

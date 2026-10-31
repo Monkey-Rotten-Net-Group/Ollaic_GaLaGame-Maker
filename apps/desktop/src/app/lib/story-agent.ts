@@ -143,21 +143,6 @@ export function createLineDiff(beforeContent: string, afterContent: string): Dif
   return compact;
 }
 
-export function truncateContextMessages(
-  history: Array<{ id: string; role: 'user' | 'assistant'; content: string }>,
-  maxMessages: number,
-): AiChatMessage[] {
-  return history
-    .filter((message) => message.id !== '1')
-    .slice(-maxMessages)
-    .map((message) => ({
-      role: message.role,
-      content: message.role === 'assistant'
-        ? summarizeAssistantHistory(message.content)
-        : message.content,
-    }));
-}
-
 /**
  * Replays the complete persisted conversation without imposing a message
  * count limit. Tool activity is flattened into bounded assistant context so
