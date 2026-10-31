@@ -200,6 +200,105 @@ function summarizeCharacterForAi(character: Character, figureAssets: AssetInfo[]
 // Read tools
 // ---------------------------------------------------------------------------
 
+function inferSceneMetadata(content: string): {
+  inferredChapter: string;
+  totalLines: number;
+  nextScenes: string[];
+} {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  let inferredChapter = '';
+  const nextScenes: string[] = [];
+  const pushTarget = (raw: string) => {
+    const cleaned = raw.trim().replace(/;+\s*$/, '').trim();
+    if (!cleaned) return;
+    const normalized = cleaned.endsWith('.txt') ? cleaned : `${cleaned}.txt`;
+    if (!nextScenes.includes(normalized)) nextScenes.push(normalized);
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (!inferredChapter && line.startsWith(';')) {
+      const comment = line.slice(1).trim();
+      const match = /^ollaic\s+agent\s+scene\s*:\s*(.+)$/i.exec(comment);
+      if (match?.[1]?.trim()) inferredChapter = match[1].trim();
+      continue;
+    }
+    if (!inferredChapter && line.startsWith('intro:')) {
+      const introText = line
+        .slice('intro:'.length)
+        .replace(/\s*-[a-zA-Z0-9_]+(?:=[^\s;]+)?/g, '')
+        .replace(/;+\s*$/, '')
+        .split('|')[0]
+        ?.trim();
+      if (introText) inferredChapter = introText;
+    }
+    if (line.startsWith('changeScene:')) {
+      const rest = line
+        .slice('changeScene:'.length)
+        .split(/\s+-[a-zA-Z0-9_]/)[0] ?? '';
+      pushTarget(rest);
+    } else if (line.startsWith('choose:')) {
+      const rest = line
+        .slice('choose:'.length)
+        .replace(/;+\s*$/, '');
+      for (const option of rest.split('|')) {
+        const colon = option.lastIndexOf(':');
+        if (colon !== -1) pushTarget(option.slice(colon + 1));
+      }
+    }
+  }
+
+  return {
+    inferredChapter,
+    totalLines: lines.length,
+    nextScenes,
+  };
+}
+
+function orderSceneSummaries<
+  T extends { file: string; nextScenes: string[] },
+>(scenes: T[]): T[] {
+  if (scenes.length <= 1) return scenes;
+  const byFile = new Map(scenes.map((scene) => [scene.file, scene]));
+  const incomingCount = new Map<string, number>();
+  for (const scene of scenes) incomingCount.set(scene.file, 0);
+  for (const scene of scenes) {
+    for (const next of scene.nextScenes) {
+      if (byFile.has(next) && next !== scene.file) {
+        incomingCount.set(next, (incomingCount.get(next) ?? 0) + 1);
+      }
+    }
+  }
+
+  const ordered: T[] = [];
+  const visited = new Set<string>();
+  const visitBfs = (startFile: string) => {
+    const queue = [startFile];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      const item = byFile.get(current);
+      if (!item) continue;
+      visited.add(current);
+      ordered.push(item);
+      for (const next of item.nextScenes) {
+        if (!visited.has(next) && byFile.has(next)) queue.push(next);
+      }
+    }
+  };
+
+  if (byFile.has('start.txt')) visitBfs('start.txt');
+  const roots = scenes
+    .filter((scene) => !visited.has(scene.file) && (incomingCount.get(scene.file) ?? 0) === 0)
+    .sort((a, b) => a.file.localeCompare(b.file));
+  for (const root of roots) visitBfs(root.file);
+  for (const scene of scenes) {
+    if (!visited.has(scene.file)) visitBfs(scene.file);
+  }
+  return ordered;
+}
+
 const readTools: AgentTool[] = [
   {
     name: 'list_scenes',
@@ -209,16 +308,35 @@ const readTools: AgentTool[] = [
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
       const files = await listScenes(sceneDir(projectPath));
-      // Pair each filename with its chapter/outline header for comprehension.
-      const scenes = await Promise.all(files.map(async (file) => {
+      // Pair each filename with its chapter/outline header, inferred title, line count, and outgoing transitions.
+      const rawScenes = await Promise.all(files.map(async (file) => {
         try {
-          const header = parseSceneHeader(await readFileText(await getScenePath(projectPath, file)));
-          return { file, chapter: header.chapter ?? '', outline: header.outline ?? '' };
+          const content = await readFileText(await getScenePath(projectPath, file));
+          const header = parseSceneHeader(content);
+          const meta = inferSceneMetadata(content);
+          return {
+            file,
+            chapter: header.chapter || meta.inferredChapter || '',
+            outline: header.outline ?? '',
+            totalLines: meta.totalLines,
+            nextScenes: meta.nextScenes,
+            ...(file === ctx.currentSceneName ? { current: true } : {}),
+          };
         } catch {
-          return { file, chapter: '', outline: '' };
+          return {
+            file,
+            chapter: '',
+            outline: '',
+            totalLines: 0,
+            nextScenes: [],
+            ...(file === ctx.currentSceneName ? { current: true } : {}),
+          };
         }
       }));
-      return { scenes };
+      return {
+        currentScene: ctx.currentSceneName || undefined,
+        scenes: orderSceneSummaries(rawScenes),
+      };
     },
   },
   {
@@ -241,7 +359,18 @@ const readTools: AgentTool[] = [
       if (!name) throw new Error('read_scene 需要场景文件名 name。');
       const path = await getScenePath(projectPath, name);
       const content = await readFileText(path);
-      const numbered = numberScript(content, asInt(args.fromLine) ?? 1, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
+      const fromLine = asInt(args.fromLine) ?? 1;
+      const lines = content.replace(/\r\n/g, '\n').split('\n');
+      if (ctx.currentSceneName && name === ctx.currentSceneName && fromLine <= 1 && lines.length <= 9999) {
+        return {
+          name,
+          alreadyInSystemContext: true,
+          totalLines: lines.length,
+          truncated: false,
+          note: `场景 ${name}（共 ${lines.length} 行）的完整带行号脚本已在系统提示词「当前场景脚本」中提供，请直接引用其中的行号与内容，无需重复读取。`,
+        };
+      }
+      const numbered = numberScript(content, fromLine, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
       return { name, ...numbered };
     },
   },

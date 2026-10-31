@@ -732,10 +732,17 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
+    const historyMessages = historyOverride ?? messages;
+    const hasCrossSceneHistory = historyMessages.some(
+      (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
+    );
+    const userTurnContent = hasCrossSceneHistory
+      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
+      : text;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildAgentSystemContext(attachedUploadIds, latestMemory) },
-      ...buildConversationMessages(historyOverride ?? messages, digestOverride === undefined ? digest : digestOverride),
-      { role: 'user', content: text },
+      ...buildConversationMessages(historyMessages, digestOverride === undefined ? digest : digestOverride),
+      { role: 'user', content: userTurnContent },
     ];
     const contextBudget = contextBudgetForCapability(capability);
     trace.context = buildContextTrace(convo, toolDefs(), contextBudget);
@@ -985,10 +992,17 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
+    const historyMessages = historyOverride ?? messages;
+    const hasCrossSceneHistory = historyMessages.some(
+      (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
+    );
+    const userTurnContent = hasCrossSceneHistory
+      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
+      : text;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory) },
-      ...buildConversationMessages(historyOverride ?? messages, digestOverride === undefined ? digest : digestOverride),
-      { role: 'user', content: text },
+      ...buildConversationMessages(historyMessages, digestOverride === undefined ? digest : digestOverride),
+      { role: 'user', content: userTurnContent },
     ];
     const contextBudget = contextBudgetForCapability(capability);
     trace.context = buildContextTrace(convo, [], contextBudget);
