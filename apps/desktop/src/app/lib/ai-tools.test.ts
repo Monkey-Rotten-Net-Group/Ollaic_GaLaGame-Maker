@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { getTool } from './ai-tools';
+import { isSessionDigest } from '../hooks/useChatSession';
 
 describe('plan_assets tool', () => {
   it('stages missing background/CG asset cards instead of script commands', async () => {
@@ -157,5 +158,66 @@ describe('list_scenes and read_scene tools', () => {
       truncated: false,
       text: '1: intro:山路尽头的钟声;\n2: :第二行;',
     });
+  });
+
+  it('returns staged scene contents instead of short-circuiting or reading stale disk files', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
+      if (cmd === 'list_scenes') return ['start.txt'];
+      if (cmd === 'get_scene_path') return `/tmp/project/game/scene/${args.sceneName}`;
+      if (cmd === 'read_file_text') {
+        if (args.path.endsWith('start.txt')) return 'intro:旧内容;';
+        throw new Error('File not found');
+      }
+      return undefined;
+    });
+
+    const stagedSceneContents = new Map<string, string>([
+      ['start.txt', 'intro:新章节;\n:已暂存的第二行;\nchangeScene:branch.txt;'],
+      ['branch.txt', 'intro:新分支;\n:分支正文;\nend;'],
+    ]);
+
+    const readEditedCurrent = (await getTool('read_scene')!.run(
+      { name: 'start.txt', maxLines: 100 },
+      { projectPath: '/tmp/project', currentSceneName: 'start.txt', stagedSceneContents },
+    )) as Record<string, unknown>;
+    expect(readEditedCurrent.alreadyInSystemContext).toBeUndefined();
+    expect(readEditedCurrent.text).toBe(
+      '1: intro:新章节;\n2: :已暂存的第二行;\n3: changeScene:branch.txt;',
+    );
+
+    const readNewBranch = (await getTool('read_scene')!.run(
+      { name: 'branch.txt', maxLines: 100 },
+      { projectPath: '/tmp/project', currentSceneName: 'start.txt', stagedSceneContents },
+    )) as Record<string, unknown>;
+    expect(readNewBranch.text).toBe('1: intro:新分支;\n2: :分支正文;\n3: end;');
+
+    const listed = (await getTool('list_scenes')!.run(
+      {},
+      { projectPath: '/tmp/project', currentSceneName: 'start.txt', stagedSceneContents },
+    )) as { scenes: Array<{ file: string; chapter: string; nextScenes: string[] }> };
+    expect(listed.scenes.map((scene) => scene.file)).toEqual(['start.txt', 'branch.txt']);
+    expect(listed.scenes[1]).toMatchObject({
+      file: 'branch.txt',
+      chapter: '新分支',
+      nextScenes: [],
+    });
+  });
+});
+
+describe('isSessionDigest', () => {
+  it('accepts valid string-array digests and rejects malformed array elements', () => {
+    const valid = {
+      version: 1,
+      goal: '扩写雾钟镇开篇',
+      decisions: ['保留沙耶视角'],
+      completed: ['edit_scene: 完成'],
+      openQuestions: [],
+      nextStep: '继续写集市调查',
+      sourceMessageIds: ['m1', 'm2'],
+      updatedAt: '2026-10-31T09:00:00.000Z',
+    };
+    expect(isSessionDigest(valid)).toBe(true);
+    expect(isSessionDigest({ ...valid, decisions: [{ text: 'bad' }] })).toBe(false);
+    expect(isSessionDigest(null)).toBe(false);
   });
 });

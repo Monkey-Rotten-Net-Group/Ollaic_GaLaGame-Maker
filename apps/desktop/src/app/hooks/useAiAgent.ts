@@ -224,8 +224,16 @@ function parseDigestResponse(text: string, sourceMessageIds: string[]): SessionD
   const raw = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isSessionDigest(parsed)) return null;
-    return { ...parsed, sourceMessageIds, updatedAt: new Date().toISOString() };
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const candidate = {
+      openQuestions: [],
+      ...parsed,
+      version: 1 as const,
+      sourceMessageIds,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!isSessionDigest(candidate)) return null;
+    return candidate;
   } catch {
     return null;
   }
@@ -840,7 +848,19 @@ export function useAiAgent(params: UseAiAgentParams) {
           }
         } else {
           try {
-            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
+            const stagedSceneContents = new Map<string, string>();
+            for (const [file, edit] of createSceneEdits) {
+              stagedSceneContents.set(file, edit.initialContent ?? '');
+            }
+            for (const [file, edit] of sceneEdits) {
+              stagedSceneContents.set(file, edit.afterContent);
+            }
+            resultPayload = await tool.run(call.arguments, {
+              projectPath,
+              currentSceneName,
+              attachedUploadIds,
+              stagedSceneContents,
+            });
             if (!ownsRun(runId)) return;
             if (tool.kind === 'memory') setMemory(resultPayload as ProjectMemory);
             content = JSON.stringify(resultPayload);
@@ -1149,6 +1169,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         ...olderConversation,
         { role: 'user', content: '请把以上会话压缩为结构化 SessionDigest JSON。' },
       ], []);
+      if (!ownsRun(runId) || cancelledRef.current) return null;
       if (result.text) {
         const parsed = parseDigestResponse(result.text, sourceMessageIds);
         if (parsed) {
@@ -1157,8 +1178,10 @@ export function useAiAgent(params: UseAiAgentParams) {
         }
       }
     } catch {
+      if (!ownsRun(runId) || cancelledRef.current) return null;
       // The local digest is the intentional fallback when summary generation fails.
     }
+    if (!ownsRun(runId) || cancelledRef.current) return null;
     setDigest(fallback);
     return { digest: fallback, compactedIds, retainedMessages };
   }, [buildAgentSystemContext, buildLegacySystemContext, digest, memory, messages, ownsRun, projectPath, setDigest, uploads]);
@@ -1219,10 +1242,10 @@ export function useAiAgent(params: UseAiAgentParams) {
       if (!ownsRun(myRunId)) return;
       if (cancelledRef.current) return;
       const summarized = await summarizeSessionIfNeeded(myRunId, text, sentIds, capability);
+      if (!ownsRun(myRunId) || cancelledRef.current) return;
       if (summarized) compactMessages(summarized.compactedIds);
       const sessionDigest = summarized ? summarized.digest : digest;
       const historyForTurn = summarized ? summarized.retainedMessages : messages;
-      if (!ownsRun(myRunId)) return;
       if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
       else await runLegacyTurn(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
       setRetryCount(0);
@@ -1252,7 +1275,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         if (currentRunIdRef.current === myRunId) currentRunIdRef.current = null;
       }
     }
-  }, [attachedIds, busy, compactMessages, digest, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, summarizeSessionIfNeeded, uploads]);
+  }, [attachedIds, busy, compactMessages, currentSceneName, digest, ensureTitleFromFirstMessage, messages, ownsRun, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, summarizeSessionIfNeeded, uploads]);
 
   const retry = useCallback(() => {
     if (!lastRequest || busy || cooldown > 0) return;
