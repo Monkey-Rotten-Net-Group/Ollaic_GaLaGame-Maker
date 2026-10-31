@@ -241,7 +241,9 @@ export function AppSettingsDialog({
         currentConfig.provider === testedConfig.provider &&
         currentConfig.model === testedConfig.model &&
         currentConfig.api_key === testedConfig.api_key &&
-        currentConfig.base_url === testedConfig.base_url;
+        currentConfig.base_url === testedConfig.base_url &&
+        (currentConfig.capabilities?.chat_tools ?? true) ===
+          (testedConfig.capabilities?.chat_tools ?? true);
       if (!unchanged) return;
       setValidation(result);
       if (result.ok) {
@@ -643,6 +645,7 @@ export function AppSettingsDialog({
                         <ConfigFields
                           config={chatConfig}
                           options={catalog.chat}
+                          allowToolToggle
                           onProviderChange={(value) =>
                             handleProviderChange(value, chatConfig, catalog.chat, updateChat, 'chat')
                           }
