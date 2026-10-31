@@ -323,6 +323,7 @@ mod tests {
                 Ok(AiTurnResult {
                     text: Some("pong".into()),
                     tool_calls: Vec::new(),
+                    usage: None,
                 })
             })
             .await
