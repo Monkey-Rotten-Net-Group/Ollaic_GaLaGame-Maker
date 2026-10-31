@@ -12,11 +12,24 @@ export type AiProvider =
   | 'cohere'
   | 'custom';
 
+export interface ProviderCapabilityDeclaration {
+  chat_tools?: boolean;
+  json_mode?: boolean;
+  streaming_cancellation?: boolean;
+  media_url_output?: boolean;
+  chat_deadline_ms?: number;
+  flow_step_deadline_ms?: number;
+  media_fetch_deadline_ms?: number;
+  context_window_tokens?: number;
+  max_output_tokens?: number;
+}
+
 export interface AiConfig {
   provider: AiProvider | string;
   model: string;
   api_key: string;
   base_url: string;
+  capabilities?: ProviderCapabilityDeclaration;
 }
 
 export type AiProviderConfig = AiConfig;

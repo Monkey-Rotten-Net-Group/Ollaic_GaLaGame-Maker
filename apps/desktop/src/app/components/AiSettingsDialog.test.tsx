@@ -119,4 +119,49 @@ describe('AiSettingsDialog', () => {
       expect(onClose).toHaveBeenCalled();
     });
   });
+
+  it('defaults custom chat provider tool calling to enabled and persists toggling it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(listAiProviders).mockResolvedValue({
+      ...mockCatalog,
+      chat: [
+        ...mockCatalog.chat,
+        {
+          value: 'custom',
+          label: '自定义 (OpenAI 兼容)',
+          defaultModel: 'gpt-4o-mini',
+          models: ['gpt-4o-mini'],
+          requiresApiKey: false,
+          needsBaseUrl: true,
+          defaultBaseUrl: '',
+          baseUrlPlaceholder: '',
+        },
+      ],
+    } as any);
+
+    render(<AiSettingsDialog open={true} onClose={vi.fn()} />);
+    await screen.findByLabelText('选择 AI 供应商');
+    expect(
+      screen.queryByRole('checkbox', { name: '启用 Function Calling 工具调用' }),
+    ).not.toBeInTheDocument();
+
+    const providerSelect = screen.getByLabelText('选择 AI 供应商');
+    await user.selectOptions(providerSelect, 'custom');
+
+    const checkbox = screen.getByRole('checkbox', { name: '启用 Function Calling 工具调用' });
+    expect(checkbox).toBeChecked();
+
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: '保存 AI 配置' }));
+    await waitFor(() => {
+      expect(setAiConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: 'custom',
+          capabilities: { chat_tools: false },
+        }),
+      );
+    });
+  });
 });

@@ -135,7 +135,9 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
 
     // Reasoning-only DeepSeek models do not accept tool definitions even
     // though the provider's chat endpoint does for its general chat models.
-    if provider == "deepseek" && model.contains("reasoner") {
+    if (provider == "deepseek" || (provider == "custom" && config.capabilities.is_none()))
+        && model.contains("reasoner")
+    {
         capability.chat_tools = false;
     }
     validate_deadlines(capability)?;
@@ -316,8 +318,16 @@ mod tests {
     #[test]
     fn custom_declaration_is_resolved_and_legacy_config_is_conservative() {
         let legacy = capability_for_config(&config("custom", "legacy-model")).unwrap();
-        assert!(!legacy.chat_tools);
+        assert!(legacy.chat_tools);
         assert!(!legacy.json_mode);
+        assert!(!legacy.media_url_output);
+
+        let mut disabled_tools = config("custom", "legacy-model");
+        disabled_tools.capabilities = Some(ProviderCapabilityDeclaration {
+            chat_tools: false,
+            ..Default::default()
+        });
+        assert!(!capability_for_config(&disabled_tools).unwrap().chat_tools);
 
         let mut declared = config("custom", "tool-model");
         declared.capabilities = Some(ProviderCapabilityDeclaration {

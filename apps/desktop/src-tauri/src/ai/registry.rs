@@ -553,7 +553,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "custom",
         requires_api_key: false,
-        capability: capability(false, false, false, false, 180_000, 128_000, 8_192),
+        capability: capability(true, false, false, false, 180_000, 128_000, 8_192),
         chat: Some(ModalitySpec {
             label: "自定义 (OpenAI 兼容)",
             default_model: "gpt-4o-mini",
