@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { projectAiRef, useProjectAiState } from '../lib/project-ai-runtime';
 import { useNavigate } from 'react-router';
-import { aiChatTurn, aiChatCancel, appendAiAgentTrace, getAiProviderCapability, type AiChatMessage } from '../lib/ai-ipc';
+import {
+  aiChatTurn,
+  aiChatCancel,
+  appendAiAgentTrace,
+  getAiProviderCapability,
+  type AiChatMessage,
+  type ProviderCapability,
+  type AiTurnUsage,
+} from '../lib/ai-ipc';
 import {
   buildInlineUploadContext,
   buildUploadContext,
@@ -45,6 +53,12 @@ import { extractEditorResponse } from '../lib/editor-patch';
 import { EditorPatchError } from '../lib/editor-executor';
 import { getTool, toolDefs, type StagedWrite } from '../lib/ai-tools';
 import {
+  buildContextTrace,
+  DEFAULT_CONTEXT_BUDGET,
+  type ContextBudgetConfig,
+  type ContextTrace,
+} from '../lib/agent-context-budget';
+import {
   buildMemoryContext,
   emptyProjectMemory,
   readProjectMemory,
@@ -54,13 +68,22 @@ import {
 import {
   buildAssetContext,
   buildNumberedScriptContext,
+  buildConversationMessages,
   hasAssetContextTruncation,
-  truncateContextMessages,
   type MissingAssetIssue,
 } from '../lib/story-agent';
 import { getScenePath, listScenes, readFileText, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
-import { useChatSession, type AssistantStep, type ChatAttachment, type ChatMessage, type StepToolCall } from './useChatSession';
+import {
+  buildLocalSessionDigest,
+  isSessionDigest,
+  useChatSession,
+  type AssistantStep,
+  type ChatAttachment,
+  type ChatMessage,
+  type SessionDigest,
+  type StepToolCall,
+} from './useChatSession';
 
 export type AiPanelStatus =
   | 'idle'
@@ -100,6 +123,8 @@ interface AiAgentTraceTurn {
   turn: number;
   modelText: string;
   toolCalls: AiAgentTraceTool[];
+  context?: ContextTrace;
+  usage?: AiTurnUsage;
   validationError?: string;
 }
 
@@ -117,6 +142,7 @@ interface AiAgentTrace {
   edits?: string[];
   error?: string;
   assetCount?: number;
+  context?: ContextTrace;
 }
 
 export const INITIAL_AI_MESSAGE: ChatMessage = {
@@ -166,6 +192,62 @@ function buildCharacterContext(chars: Character[]): string {
     if (c.dialogueStyle) parts.push(`  对话风格: ${c.dialogueStyle}`);
     return parts.join('\n');
   }).join('\n');
+}
+
+function summarizeToolResult(value: unknown, maxChars = 1_200): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!text) return '';
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+function recordActualUsage(trace: AiAgentTrace, usage: AiTurnUsage | undefined): void {
+  if (!usage || !trace.context) return;
+  const estimated = trace.context.estimatedInputTokens;
+  const promptTokens = usage.promptTokens;
+  trace.context = {
+    ...trace.context,
+    ...(promptTokens === undefined ? {} : {
+      actualPromptTokens: promptTokens,
+      estimationErrorTokens: promptTokens - estimated,
+      estimationRatio: estimated > 0 ? promptTokens / estimated : undefined,
+    }),
+    ...(usage.completionTokens === undefined ? {} : {
+      actualCompletionTokens: usage.completionTokens,
+    }),
+    ...(usage.cachedPromptTokens === undefined ? {} : {
+      cachedPromptTokens: usage.cachedPromptTokens,
+    }),
+  };
+}
+
+function parseDigestResponse(text: string, sourceMessageIds: string[]): SessionDigest | null {
+  const raw = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const candidate = {
+      openQuestions: [],
+      ...parsed,
+      version: 1 as const,
+      sourceMessageIds,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!isSessionDigest(candidate)) return null;
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+function contextBudgetForCapability(capability: ProviderCapability): ContextBudgetConfig {
+  return {
+    ...DEFAULT_CONTEXT_BUDGET,
+    contextWindowTokens: capability.contextWindowTokens ?? DEFAULT_CONTEXT_BUDGET.contextWindowTokens,
+    reservedOutputTokens: capability.maxOutputTokens ?? DEFAULT_CONTEXT_BUDGET.reservedOutputTokens,
+    source: capability.contextWindowTokens !== undefined && capability.maxOutputTokens !== undefined
+      ? 'provider'
+      : 'default',
+  };
 }
 
 function classifyAiError(raw: string): AiErrorState {
@@ -301,6 +383,9 @@ export function useAiAgent(params: UseAiAgentParams) {
 
   const {
     messages,
+    digest,
+    setDigest,
+    compactMessages,
     setMessages,
     sessions,
     activeId,
@@ -465,6 +550,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       `当前场景脚本（行号为 txt 行号）：\n${buildNumberedScriptContext(scriptSource, 9999)}`,
       buildUploadContext(uploads, attachedUploadIds),
       buildMemoryContext(currentMemory),
+      '以下对话历史可能来自不同场景。每条历史消息带有“对话关联场景”标签，仅用于了解作者已经做过的决定；修改和续写必须以本次请求前面提供的“当前场景”和“当前脚本”为唯一事实来源，不要把其他场景的行号、文件名或正文当作当前场景内容。',
       '———— 以下为用户对话 ————',
     ].filter(Boolean).join('\n\n');
   }, [currentSceneName, sceneHeaders, scriptSource, uploads]);
@@ -488,6 +574,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       buildMemoryContext(currentMemory),
       buildUploadContext(uploads, attachedUploadIds),
       inlineUploads,
+      '以下对话历史可能来自不同场景。每条历史消息带有“对话关联场景”标签，仅用于了解作者已经做过的决定；修改和续写必须以本次请求前面提供的“当前场景”和“当前脚本”为唯一事实来源，不要把其他场景的行号、文件名或正文当作当前场景内容。',
       `当前场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}）`,
       `当前脚本（左侧数字是 txt 行号）：\n${buildNumberedScriptContext(scriptSource)}`,
     ].filter(Boolean).join('\n\n');
@@ -541,7 +628,15 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runAgentLoop = useCallback(async (
+    runId: string,
+    text: string,
+    assistantId: string,
+    attachedUploadIds: string[],
+    capability: ProviderCapability,
+    digestOverride?: SessionDigest | null,
+    historyOverride?: ChatMessage[],
+  ) => {
     const trace: AiAgentTrace = {
       traceId: runId,
       createdAt: new Date().toISOString(),
@@ -645,11 +740,20 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
+    const historyMessages = historyOverride ?? messages;
+    const hasCrossSceneHistory = historyMessages.some(
+      (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
+    );
+    const userTurnContent = hasCrossSceneHistory
+      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
+      : text;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildAgentSystemContext(attachedUploadIds, latestMemory) },
-      ...truncateContextMessages(messages, 8),
-      { role: 'user', content: text },
+      ...buildConversationMessages(historyMessages, digestOverride === undefined ? digest : digestOverride),
+      { role: 'user', content: userTurnContent },
     ];
+    const contextBudget = contextBudgetForCapability(capability);
+    trace.context = buildContextTrace(convo, toolDefs(), contextBudget);
 
     // Append a finished turn (its text + tool calls) as a step on the assistant
     // message so text is never discarded and tool activity is shown inline.
@@ -669,6 +773,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       if (cancelledRef.current) return;
       setStatus(turn === 0 ? 'generating' : 'tooling');
       setStepLabel(turn === 0 ? '思考中…' : '继续分析…');
+      trace.context = buildContextTrace(convo, toolDefs(), contextBudget);
       let res: Awaited<ReturnType<typeof aiChatTurn>>;
       try {
         res = await aiChatTurn(runId, convo, toolDefs());
@@ -691,7 +796,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         turn,
         modelText: turnText,
         toolCalls: [],
+        context: trace.context,
+        usage: res.usage,
       };
+      recordActualUsage(trace, res.usage);
+      turnTrace.context = trace.context;
       trace.turns.push(turnTrace);
 
       // No tool calls → this turn's text is the final answer.
@@ -739,7 +848,19 @@ export function useAiAgent(params: UseAiAgentParams) {
           }
         } else {
           try {
-            resultPayload = await tool.run(call.arguments, { projectPath, currentSceneName, attachedUploadIds });
+            const stagedSceneContents = new Map<string, string>();
+            for (const [file, edit] of createSceneEdits) {
+              stagedSceneContents.set(file, edit.initialContent ?? '');
+            }
+            for (const [file, edit] of sceneEdits) {
+              stagedSceneContents.set(file, edit.afterContent);
+            }
+            resultPayload = await tool.run(call.arguments, {
+              projectPath,
+              currentSceneName,
+              attachedUploadIds,
+              stagedSceneContents,
+            });
             if (!ownsRun(runId)) return;
             if (tool.kind === 'memory') setMemory(resultPayload as ProjectMemory);
             content = JSON.stringify(resultPayload);
@@ -762,7 +883,14 @@ export function useAiAgent(params: UseAiAgentParams) {
           result: resultPayload,
           error: errMsg,
         });
-        stepCalls.push({ name: call.name, label, ok, error: errMsg });
+        stepCalls.push({
+          name: call.name,
+          label,
+          ok,
+          error: errMsg,
+          arguments: call.arguments,
+          resultSummary: summarizeToolResult(resultPayload),
+        });
         traceSummary.push(`${call.name}: ${ok ? 'ok' : `失败（${errMsg}）`}`);
         convo.push({ role: 'tool', content, toolCallId: call.id });
       }
@@ -847,10 +975,18 @@ export function useAiAgent(params: UseAiAgentParams) {
       trace.outcome = 'pending_preview';
     }
     void writeAgentTrace(trace);
-  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
+  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, digest, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- JSON patch fallback for providers without function calling ---------
-  const runLegacyTurn = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[]) => {
+  const runLegacyTurn = useCallback(async (
+    runId: string,
+    text: string,
+    assistantId: string,
+    attachedUploadIds: string[],
+    capability: ProviderCapability,
+    digestOverride?: SessionDigest | null,
+    historyOverride?: ChatMessage[],
+  ) => {
     const trace: AiAgentTrace = {
       traceId: runId,
       createdAt: new Date().toISOString(),
@@ -876,15 +1012,25 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
+    const historyMessages = historyOverride ?? messages;
+    const hasCrossSceneHistory = historyMessages.some(
+      (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
+    );
+    const userTurnContent = hasCrossSceneHistory
+      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
+      : text;
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory) },
-      ...truncateContextMessages(messages, 8),
-      { role: 'user', content: text },
+      ...buildConversationMessages(historyMessages, digestOverride === undefined ? digest : digestOverride),
+      { role: 'user', content: userTurnContent },
     ];
+    const contextBudget = contextBudgetForCapability(capability);
+    trace.context = buildContextTrace(convo, [], contextBudget);
     for (let attempt = 0; attempt <= MAX_LEGACY_REPAIRS; attempt += 1) {
       if (!ownsRun(runId)) return;
       setStatus(attempt === 0 ? 'generating' : 'tooling');
       setStepLabel(attempt === 0 ? '思考中…' : '正在修正脚本格式…');
+      trace.context = buildContextTrace(convo, [], contextBudget);
       let res: Awaited<ReturnType<typeof aiChatTurn>>;
       try {
         res = await aiChatTurn(runId, convo, []);
@@ -896,7 +1042,15 @@ export function useAiAgent(params: UseAiAgentParams) {
         throw e;
       }
       if (!ownsRun(runId)) return;
-      const turnTrace: AiAgentTraceTurn = { turn: attempt, modelText: res.text ?? '', toolCalls: [] };
+      const turnTrace: AiAgentTraceTurn = {
+        turn: attempt,
+        modelText: res.text ?? '',
+        toolCalls: [],
+        context: trace.context,
+        usage: res.usage,
+      };
+      recordActualUsage(trace, res.usage);
+      turnTrace.context = trace.context;
       trace.turns.push(turnTrace);
       const parsed = res.text ? extractEditorResponse(res.text) : null;
       let failure: { message: string; missingAssets?: MissingAssetIssue[] };
@@ -973,7 +1127,64 @@ export function useAiAgent(params: UseAiAgentParams) {
         setError({ kind: 'other', retryable: true, message: `自动修正 ${MAX_LEGACY_REPAIRS} 次后仍未通过校验：\n${failure.message}` });
       }
     }
-  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
+  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, digest, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
+
+  const summarizeSessionIfNeeded = useCallback(async (
+    runId: string,
+    text: string,
+    attachedUploadIds: string[],
+    capability: ProviderCapability,
+  ): Promise<{ digest: SessionDigest; compactedIds: Set<string>; retainedMessages: ChatMessage[] } | null> => {
+    const meaningful = messages.filter((message) => message.id !== INITIAL_AI_MESSAGE.id);
+    const compactable = meaningful.slice(0, -24);
+    if (compactable.length === 0) return null;
+    const budget = contextBudgetForCapability(capability);
+    const currentMemory = projectPath ? await readProjectMemory(projectPath).catch(() => memory) : memory;
+    if (!ownsRun(runId)) return null;
+    const inlineUploads = !capability.chatTools && projectPath && attachedUploadIds.length > 0
+      ? await buildInlineUploadContext(projectPath, uploads, attachedUploadIds).catch(() => '')
+      : '';
+    if (!ownsRun(runId)) return null;
+    const system = capability.chatTools
+      ? buildAgentSystemContext(attachedUploadIds, currentMemory)
+      : buildLegacySystemContext(attachedUploadIds, inlineUploads, currentMemory);
+    const requestMessages: AiChatMessage[] = [
+      { role: 'system', content: system },
+      ...buildConversationMessages(messages, digest),
+      { role: 'user', content: text },
+    ];
+    const fullTrace = buildContextTrace(requestMessages, capability.chatTools ? toolDefs() : [], budget);
+    if (!fullTrace.shouldCompact && meaningful.length < 180) return null;
+    const sourceMessageIds = compactable.map((message) => message.id);
+    const compactedIds = new Set(sourceMessageIds);
+    const retainedMessages = messages.filter((message) => !compactedIds.has(message.id));
+    const fallback = buildLocalSessionDigest(digest, compactable);
+    const olderConversation = buildConversationMessages(compactable, digest);
+    try {
+      const result = await aiChatTurn(runId, [
+        {
+          role: 'system',
+          content: '你是编辑会话摘要器。只输出 JSON，不要 Markdown。保留用户明确确认的剧情事实、写作决定、已完成操作、待确认事项和下一步。不要编造，不要把模型推测写成事实。字段必须是 version=1、goal、decisions、completed、openQuestions、nextStep、sourceMessageIds、updatedAt。',
+        },
+        ...olderConversation,
+        { role: 'user', content: '请把以上会话压缩为结构化 SessionDigest JSON。' },
+      ], []);
+      if (!ownsRun(runId) || cancelledRef.current) return null;
+      if (result.text) {
+        const parsed = parseDigestResponse(result.text, sourceMessageIds);
+        if (parsed) {
+          setDigest(parsed);
+          return { digest: parsed, compactedIds, retainedMessages };
+        }
+      }
+    } catch {
+      if (!ownsRun(runId) || cancelledRef.current) return null;
+      // The local digest is the intentional fallback when summary generation fails.
+    }
+    if (!ownsRun(runId) || cancelledRef.current) return null;
+    setDigest(fallback);
+    return { digest: fallback, compactedIds, retainedMessages };
+  }, [buildAgentSystemContext, buildLegacySystemContext, digest, memory, messages, ownsRun, projectPath, setDigest, uploads]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
@@ -1013,8 +1224,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     });
     setMessages([
       ...messages,
-      { id: userId, role: 'user', content: text, ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}) },
-      { id: assistantId, role: 'assistant', content: '' },
+      { id: userId, role: 'user', content: text, sceneName: currentSceneName, ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}) },
+      { id: assistantId, role: 'assistant', content: '', sceneName: currentSceneName },
     ]);
     setAttachedIds([]);
     ensureTitleFromFirstMessage(text);
@@ -1030,8 +1241,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       const capability = await getAiProviderCapability();
       if (!ownsRun(myRunId)) return;
       if (cancelledRef.current) return;
-      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds);
-      else await runLegacyTurn(myRunId, text, assistantId, sentIds);
+      const summarized = await summarizeSessionIfNeeded(myRunId, text, sentIds, capability);
+      if (!ownsRun(myRunId) || cancelledRef.current) return;
+      if (summarized) compactMessages(summarized.compactedIds);
+      const sessionDigest = summarized ? summarized.digest : digest;
+      const historyForTurn = summarized ? summarized.retainedMessages : messages;
+      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
+      else await runLegacyTurn(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
       setRetryCount(0);
     } catch (e) {
       if (!ownsRun(myRunId)) return;
@@ -1059,7 +1275,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         if (currentRunIdRef.current === myRunId) currentRunIdRef.current = null;
       }
     }
-  }, [attachedIds, busy, ensureTitleFromFirstMessage, messages, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, uploads]);
+  }, [attachedIds, busy, compactMessages, currentSceneName, digest, ensureTitleFromFirstMessage, messages, ownsRun, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, summarizeSessionIfNeeded, uploads]);
 
   const retry = useCallback(() => {
     if (!lastRequest || busy || cooldown > 0) return;

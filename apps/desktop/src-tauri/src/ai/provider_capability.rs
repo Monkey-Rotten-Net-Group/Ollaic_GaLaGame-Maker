@@ -15,6 +15,8 @@ use super::registry::{self, Modality};
 const DEFAULT_CHAT_DEADLINE_MS: u64 = 120_000;
 const DEFAULT_FLOW_DEADLINE_MS: u64 = 180_000;
 const DEFAULT_MEDIA_FETCH_DEADLINE_MS: u64 = 30_000;
+const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 128_000;
+const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 8_192;
 /// Maximum allowed deadline. Anything larger is almost certainly a typo and
 /// must surface as a config error rather than silently disable back-pressure.
 pub const MAX_DEADLINE_MS: u64 = 3_600_000;
@@ -32,6 +34,8 @@ pub struct ProviderCapability {
     pub chat_deadline_ms: u64,
     pub flow_step_deadline_ms: u64,
     pub media_fetch_deadline_ms: u64,
+    pub context_window_tokens: u32,
+    pub max_output_tokens: u32,
 }
 
 /// What a caller intends to use. `require` returns a localized error when
@@ -131,10 +135,13 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
 
     // Reasoning-only DeepSeek models do not accept tool definitions even
     // though the provider's chat endpoint does for its general chat models.
-    if provider == "deepseek" && model.contains("reasoner") {
+    if (provider == "deepseek" || (provider == "custom" && config.capabilities.is_none()))
+        && model.contains("reasoner")
+    {
         capability.chat_tools = false;
     }
     validate_deadlines(capability)?;
+    validate_token_limits(capability)?;
     Ok(capability)
 }
 
@@ -147,6 +154,8 @@ fn builtin(spec: &registry::CapabilitySpec) -> ProviderCapability {
         chat_deadline_ms: DEFAULT_CHAT_DEADLINE_MS,
         flow_step_deadline_ms: spec.flow_step_deadline_ms,
         media_fetch_deadline_ms: DEFAULT_MEDIA_FETCH_DEADLINE_MS,
+        context_window_tokens: spec.context_window_tokens,
+        max_output_tokens: spec.max_output_tokens,
     }
 }
 
@@ -166,6 +175,12 @@ fn from_custom(declaration: Option<&ProviderCapabilityDeclaration>) -> ProviderC
         media_fetch_deadline_ms: declaration
             .media_fetch_deadline_ms
             .unwrap_or(DEFAULT_MEDIA_FETCH_DEADLINE_MS),
+        context_window_tokens: declaration
+            .context_window_tokens
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS),
+        max_output_tokens: declaration
+            .max_output_tokens
+            .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS),
     }
 }
 
@@ -186,6 +201,26 @@ fn validate_deadlines(capability: ProviderCapability) -> Result<(), String> {
         if value > MAX_DEADLINE_MS {
             return Err(format!("{name} 不能超过 {MAX_DEADLINE_MS} 毫秒"));
         }
+    }
+    Ok(())
+}
+
+fn validate_token_limits(capability: ProviderCapability) -> Result<(), String> {
+    for (name, value) in [
+        ("context_window_tokens", capability.context_window_tokens),
+        ("max_output_tokens", capability.max_output_tokens),
+    ] {
+        if value == 0 {
+            return Err(format!(
+                "{name} 不能为 0；如果不需要自定义限制，请在自定义能力声明里省略该字段（将使用默认值）"
+            ));
+        }
+    }
+    if capability.max_output_tokens >= capability.context_window_tokens {
+        return Err(
+            "max_output_tokens 必须小于 context_window_tokens，否则将没有可用的输入上下文空间"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -283,8 +318,16 @@ mod tests {
     #[test]
     fn custom_declaration_is_resolved_and_legacy_config_is_conservative() {
         let legacy = capability_for_config(&config("custom", "legacy-model")).unwrap();
-        assert!(!legacy.chat_tools);
+        assert!(legacy.chat_tools);
         assert!(!legacy.json_mode);
+        assert!(!legacy.media_url_output);
+
+        let mut disabled_tools = config("custom", "legacy-model");
+        disabled_tools.capabilities = Some(ProviderCapabilityDeclaration {
+            chat_tools: false,
+            ..Default::default()
+        });
+        assert!(!capability_for_config(&disabled_tools).unwrap().chat_tools);
 
         let mut declared = config("custom", "tool-model");
         declared.capabilities = Some(ProviderCapabilityDeclaration {
@@ -315,6 +358,25 @@ mod tests {
         assert!(capability_for_config(&invalid)
             .unwrap_err()
             .contains("chat_deadline_ms"));
+
+        let mut zero_context = config("custom", "model");
+        zero_context.capabilities = Some(ProviderCapabilityDeclaration {
+            context_window_tokens: Some(0),
+            ..Default::default()
+        });
+        assert!(capability_for_config(&zero_context)
+            .unwrap_err()
+            .contains("context_window_tokens"));
+
+        let mut inverted_tokens = config("custom", "model");
+        inverted_tokens.capabilities = Some(ProviderCapabilityDeclaration {
+            context_window_tokens: Some(8_192),
+            max_output_tokens: Some(8_192),
+            ..Default::default()
+        });
+        assert!(capability_for_config(&inverted_tokens)
+            .unwrap_err()
+            .contains("max_output_tokens 必须小于 context_window_tokens"));
     }
 
     #[test]

@@ -10,16 +10,44 @@ const VIDEO_CONFIG_FILE: &str = "ai-video.json";
 const LOG_FILE: &str = "ai-log.jsonl";
 const AGENT_TRACE_FILE: &str = "ai-agent-trace.jsonl";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_custom_chat_tools() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ProviderCapabilityDeclaration {
+    #[serde(default = "default_custom_chat_tools")]
     pub chat_tools: bool,
     pub json_mode: bool,
     pub streaming_cancellation: bool,
     pub media_url_output: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_deadline_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_step_deadline_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub media_fetch_deadline_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+}
+
+impl Default for ProviderCapabilityDeclaration {
+    fn default() -> Self {
+        Self {
+            chat_tools: default_custom_chat_tools(),
+            json_mode: false,
+            streaming_cancellation: false,
+            media_url_output: false,
+            chat_deadline_ms: None,
+            flow_step_deadline_ms: None,
+            media_fetch_deadline_ms: None,
+            context_window_tokens: None,
+            max_output_tokens: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,8 +58,9 @@ pub struct AiConfig {
     pub api_key: String,
     pub base_url: String,
     /// Optional user declaration of capabilities for the `custom` provider.
-    /// When absent, `provider_capability::from_custom` returns conservative
-    /// defaults so legacy configs keep working.
+    /// When absent, `provider_capability::from_custom` enables `chat_tools`
+    /// for OpenAI-compatible endpoints and keeps non-chat flags conservative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<ProviderCapabilityDeclaration>,
 }
 

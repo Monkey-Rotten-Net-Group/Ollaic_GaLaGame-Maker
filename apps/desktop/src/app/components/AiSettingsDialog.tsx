@@ -190,7 +190,9 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
         currentConfig.provider === testedConfig.provider &&
         currentConfig.model === testedConfig.model &&
         currentConfig.api_key === testedConfig.api_key &&
-        currentConfig.base_url === testedConfig.base_url;
+        currentConfig.base_url === testedConfig.base_url &&
+        (currentConfig.capabilities?.chat_tools ?? true) ===
+          (testedConfig.capabilities?.chat_tools ?? true);
       if (!unchanged) return;
       setValidation(result);
       // A successful trial connection is an unambiguous "use this config".
@@ -317,6 +319,7 @@ export function AiSettingsDialog({ open, onClose, onSaved }: Props) {
                       config={config}
                       options={catalog.chat}
                       multiModel={false}
+                      allowToolToggle
                       onProviderChange={(value) =>
                         handleProviderChange(value, config, catalog.chat, updateChat)
                       }
@@ -556,12 +559,14 @@ export function ConfigFields({
   config,
   options,
   multiModel = false,
+  allowToolToggle = false,
   onProviderChange,
   onUpdate,
 }: {
   config: AiConfig;
   options: ProviderOption[];
   multiModel?: boolean;
+  allowToolToggle?: boolean;
   onProviderChange: (value: string) => void;
   onUpdate: (patch: Partial<AiConfig>) => void;
 }) {
@@ -641,6 +646,30 @@ export function ConfigFields({
           className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
         />
       </Field>
+
+      {allowToolToggle && config.provider === 'custom' && (
+        <Field
+          label="工具调用"
+          hint="允许编辑助手调用读写场景、管理角色与检索素材等工具。若所连模型不支持 tools 参数可关闭。"
+        >
+          <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={config.capabilities?.chat_tools ?? true}
+              onChange={(e) =>
+                onUpdate({
+                  capabilities: {
+                    ...config.capabilities,
+                    chat_tools: e.target.checked,
+                  },
+                })
+              }
+              className="h-4 w-4 rounded border-border text-primary focus:ring-primary/50"
+            />
+            <span>启用 Function Calling 工具调用</span>
+          </label>
+        </Field>
+      )}
     </div>
   );
 }

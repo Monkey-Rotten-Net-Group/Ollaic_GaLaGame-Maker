@@ -12,6 +12,8 @@ export interface StepToolCall {
   label: string;
   ok?: boolean;
   error?: string;
+  arguments?: Record<string, unknown>;
+  resultSummary?: string;
 }
 
 /** One turn of the agent loop: the model's text and/or the tools it called. */
@@ -32,12 +34,42 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Scene snapshot this message was created against. */
+  sceneName?: string;
   /** Per-turn blocks (text + tool calls) for rich rendering of multi-step replies. */
   steps?: AssistantStep[];
   stopped?: boolean;
   diff?: ChatDiffLine[];
   /** role === 'user': reference files sent along with this message. */
   attachments?: ChatAttachment[];
+}
+
+export interface SessionDigest {
+  version: 1;
+  goal: string;
+  decisions: string[];
+  completed: string[];
+  openQuestions: string[];
+  nextStep: string;
+  sourceMessageIds: string[];
+  updatedAt: string;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+export function isSessionDigest(value: unknown): value is SessionDigest {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<SessionDigest>;
+  return item.version === 1
+    && typeof item.goal === 'string'
+    && isStringArray(item.decisions)
+    && isStringArray(item.completed)
+    && isStringArray(item.openQuestions)
+    && typeof item.nextStep === 'string'
+    && isStringArray(item.sourceMessageIds)
+    && typeof item.updatedAt === 'string';
 }
 
 export interface SessionMeta {
@@ -54,10 +86,12 @@ interface SessionIndex {
 
 interface PersistedChatSession {
   messages: ChatMessage[];
+  digest?: SessionDigest;
   lastUpdatedAt: string;
 }
 
-const MAX_PERSISTED_MESSAGES = 40;
+const MAX_PERSISTED_MESSAGES = 200;
+const RECENT_MESSAGES_AFTER_COMPACTION = 24;
 const DEFAULT_TITLE = '新对话';
 
 function indexKey(projectId: string | undefined): string {
@@ -84,6 +118,31 @@ function nowIso(): string {
 
 function trimMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.slice(-MAX_PERSISTED_MESSAGES);
+}
+
+function digestText(message: ChatMessage): string {
+  const text = message.content.trim().replace(/\s+/g, ' ');
+  return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+}
+
+export function buildLocalSessionDigest(previous: SessionDigest | null, messages: ChatMessage[]): SessionDigest {
+  const meaningful = messages.filter((message) => message.id !== '1' && message.content.trim());
+  const users = meaningful.filter((message) => message.role === 'user');
+  const assistants = meaningful.filter((message) => message.role === 'assistant');
+  const decisions = assistants.slice(-8).map(digestText).filter(Boolean);
+  const completed = assistants
+    .flatMap((message) => (message.steps ?? []).flatMap((step) => (step.toolCalls ?? []).map((call) => `${call.name}: ${call.ok === false ? '失败' : '完成'}`)))
+    .slice(-12);
+  return {
+    version: 1,
+    goal: digestText(users[0] ?? meaningful[0] ?? { id: '', role: 'user', content: '' }),
+    decisions: [...(previous?.decisions ?? []), ...decisions].slice(-12),
+    completed: [...(previous?.completed ?? []), ...completed].slice(-16),
+    openQuestions: previous?.openQuestions ?? [],
+    nextStep: digestText(users[users.length - 1] ?? { id: '', role: 'user', content: '' }),
+    sourceMessageIds: [...(previous?.sourceMessageIds ?? []), ...meaningful.map((message) => message.id)].slice(-40),
+    updatedAt: nowIso(),
+  };
 }
 
 function makeMeta(title = DEFAULT_TITLE): SessionMeta {
@@ -162,10 +221,21 @@ function loadSessionMessages(
   try {
     const raw = localStorage.getItem(sessionKey(projectId, sessionId));
     if (!raw) return [initialMessage];
-    const parsed = JSON.parse(raw) as PersistedChatSession;
-    return [initialMessage, ...trimMessages(parsed.messages ?? [])];
+    const parsed = JSON.parse(raw) as Partial<PersistedChatSession> | null;
+    const persisted = Array.isArray(parsed?.messages) ? parsed.messages : [];
+    return [initialMessage, ...trimMessages(persisted)];
   } catch {
     return [initialMessage];
+  }
+}
+
+function loadSessionDigest(projectId: string | undefined, sessionId: string): SessionDigest | null {
+  try {
+    const raw = localStorage.getItem(sessionKey(projectId, sessionId));
+    const parsed = raw ? JSON.parse(raw) as PersistedChatSession : null;
+    return isSessionDigest(parsed?.digest) ? parsed.digest : null;
+  } catch {
+    return null;
   }
 }
 
@@ -189,31 +259,71 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
   const [messages, setMessagesState] = useProjectAiState<ChatMessage[]>(projectKey, 'messages', () =>
     loadSessionMessages(projectId, index.activeId, initialMessage),
   );
+  const [digest, setDigestState] = useProjectAiState<SessionDigest | null>(projectKey, 'digest', () =>
+    loadSessionDigest(projectId, index.activeId),
+  );
 
   const activeIdRef = projectAiRef(projectKey, 'activeId', index.activeId);
+  const digestRef = projectAiRef<SessionDigest | null>(projectKey, 'digest', digest);
   activeIdRef.current = index.activeId;
+  digestRef.current = digest;
 
-  const persistMessages = useCallback((sessionId: string, next: ChatMessage[]) => {
-    const body = trimMessages(next.filter((m) => m.id !== initialMessage.id));
+  const persistMessages = useCallback((sessionId: string, next: ChatMessage[]): ChatMessage[] => {
+    const greeting = next.filter((m) => m.id === initialMessage.id);
+    const all = next.filter((m) => m.id !== initialMessage.id);
+    const body = all.length > MAX_PERSISTED_MESSAGES
+      ? all.slice(-RECENT_MESSAGES_AFTER_COMPACTION)
+      : trimMessages(all);
+    const nextDigest = all.length > MAX_PERSISTED_MESSAGES
+      ? buildLocalSessionDigest(digestRef.current, all.slice(0, -RECENT_MESSAGES_AFTER_COMPACTION))
+      : digestRef.current;
+    if (nextDigest !== digestRef.current) {
+      digestRef.current = nextDigest;
+      setDigestState(nextDigest);
+    }
     const ts = nowIso();
     safeSetItem(
       sessionKey(projectId, sessionId),
-      JSON.stringify({ messages: body, lastUpdatedAt: ts } satisfies PersistedChatSession),
+      JSON.stringify({ messages: body, digest: nextDigest ?? undefined, lastUpdatedAt: ts } satisfies PersistedChatSession),
     );
     setIndex((prev) => {
       const updated = { ...prev, sessions: prev.sessions.map((s) => (s.id === sessionId ? { ...s, updatedAt: ts } : s)) };
       writeIndex(projectId, updated);
       return updated;
     });
-  }, [initialMessage.id, projectId]);
+    return [...greeting, ...body];
+  }, [initialMessage.id, projectId, setDigestState]);
 
   const setMessages = useCallback((next: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessagesState((prev) => {
       const resolved = typeof next === 'function' ? next(prev) : next;
-      persistMessages(activeIdRef.current, resolved);
-      return resolved;
+      return persistMessages(activeIdRef.current, resolved);
     });
   }, [persistMessages]);
+
+  const setDigest = useCallback((next: SessionDigest | null) => {
+    digestRef.current = next;
+    setDigestState(next);
+    const sessionId = activeIdRef.current;
+    const current = loadSessionMessages(projectId, sessionId, initialMessage).filter((message) => message.id !== initialMessage.id);
+    safeSetItem(sessionKey(projectId, sessionId), JSON.stringify({
+      messages: trimMessages(current),
+      digest: next ?? undefined,
+      lastUpdatedAt: nowIso(),
+    } satisfies PersistedChatSession));
+  }, [initialMessage, projectId, setDigestState]);
+
+  const compactMessages = useCallback((compactedIds?: ReadonlySet<string>) => {
+    setMessagesState((prev) => {
+      const retained = compactedIds && compactedIds.size > 0
+        ? prev.filter((message) => message.id === initialMessage.id || !compactedIds.has(message.id))
+        : [
+          ...prev.filter((message) => message.id === initialMessage.id),
+          ...prev.filter((message) => message.id !== initialMessage.id).slice(-RECENT_MESSAGES_AFTER_COMPACTION),
+        ];
+      return persistMessages(activeIdRef.current, retained);
+    });
+  }, [initialMessage.id, persistMessages]);
 
   const switchSession = useCallback((id: string) => {
     if (id === activeIdRef.current) return;
@@ -224,6 +334,9 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
       return updated;
     });
     setMessagesState(loadSessionMessages(projectId, id, initialMessage));
+    const nextDigest = loadSessionDigest(projectId, id);
+    digestRef.current = nextDigest;
+    setDigestState(nextDigest);
   }, [initialMessage, projectId]);
 
   const newSession = useCallback(() => {
@@ -234,6 +347,8 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
       return updated;
     });
     setMessagesState([initialMessage]);
+    digestRef.current = null;
+    setDigestState(null);
   }, [initialMessage, projectId]);
 
   const deleteSession = useCallback((id: string) => {
@@ -245,12 +360,19 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
         const fresh: SessionIndex = { activeId: meta.id, sessions: [meta] };
         writeIndex(projectId, fresh);
         setMessagesState([initialMessage]);
+        digestRef.current = null;
+        setDigestState(null);
         return fresh;
       }
       const nextActive = prev.activeId === id ? remaining[0].id : prev.activeId;
       const updated: SessionIndex = { activeId: nextActive, sessions: remaining };
       writeIndex(projectId, updated);
-      if (prev.activeId === id) setMessagesState(loadSessionMessages(projectId, nextActive, initialMessage));
+      if (prev.activeId === id) {
+        setMessagesState(loadSessionMessages(projectId, nextActive, initialMessage));
+        const nextDigest = loadSessionDigest(projectId, nextActive);
+        digestRef.current = nextDigest;
+        setDigestState(nextDigest);
+      }
       return updated;
     });
   }, [initialMessage, projectId]);
@@ -285,6 +407,9 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
 
   return {
     messages,
+    digest,
+    setDigest,
+    compactMessages,
     setMessages,
     sessions,
     activeId: index.activeId,

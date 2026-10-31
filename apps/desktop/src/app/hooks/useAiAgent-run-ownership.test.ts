@@ -103,7 +103,7 @@ vi.mock('../lib/ai-uploads-ipc', () => ({
 vi.mock('../lib/story-agent', () => ({
   buildAssetContext: vi.fn(() => ''),
   buildNumberedScriptContext: vi.fn(() => ''),
-  truncateContextMessages: vi.fn((messages: unknown[]) => messages),
+  buildConversationMessages: vi.fn((messages: unknown[]) => messages),
   hasAssetContextTruncation: vi.fn(() => false),
 }));
 

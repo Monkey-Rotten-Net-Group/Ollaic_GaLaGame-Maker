@@ -31,6 +31,28 @@ describe('resolveLineWithAnchor', () => {
     expect(() => resolveLineWithAnchor(['x;', 'x;', 'y;'], 1, 'x;')).not.toThrow(); // exact match at 1
     expect(() => resolveLineWithAnchor(['p;', 'x;', 'q;', 'x;'], 9, 'x;')).toThrow();
   });
+
+  it('tolerates line number prefixes and missing trailing semicolons in anchorText', () => {
+    const scriptLines = [
+      'intro:誓约松开的夜晚;',
+      '沙耶:我会留下来陪着大家。今晚先让每个人找到能安稳待着的地方。;',
+      ':夜色落下;',
+    ];
+    expect(
+      resolveLineWithAnchor(
+        scriptLines,
+        2,
+        '22: 沙耶:我会留下来陪着大家。今晚先让每个人找到能安稳待着的地方。',
+      ),
+    ).toEqual({ line: 2, corrected: false });
+    expect(
+      resolveLineWithAnchor(
+        scriptLines,
+        1,
+        '22: 沙耶:我会留下来陪着大家。今晚先让每个人找到能安稳待着的地方。',
+      ),
+    ).toEqual({ line: 2, corrected: true });
+  });
 });
 
 describe('applyEditorPatch', () => {

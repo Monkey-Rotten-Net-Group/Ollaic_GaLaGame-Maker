@@ -1,5 +1,6 @@
 import type { AssetInfo } from './assets-ipc';
 import type { AiChatMessage } from './ai-ipc';
+import type { SessionDigest } from '../hooks/useChatSession';
 
 export interface MissingAssetIssue {
   command: string;
@@ -142,19 +143,73 @@ export function createLineDiff(beforeContent: string, afterContent: string): Dif
   return compact;
 }
 
-export function truncateContextMessages(
-  history: Array<{ id: string; role: 'user' | 'assistant'; content: string }>,
-  maxMessages: number,
+/**
+ * Replays the complete persisted conversation without imposing a message
+ * count limit. Tool activity is flattened into bounded assistant context so
+ * a later request can remember what was searched or staged. The token budget
+ * layer decides when this needs compaction.
+ */
+export function buildConversationMessages(
+  history: Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    sceneName?: string;
+    steps?: Array<{
+      text?: string;
+      toolCalls?: Array<{
+        name: string;
+        ok?: boolean;
+        error?: string;
+        arguments?: Record<string, unknown>;
+        resultSummary?: string;
+      }>;
+    }>;
+  }>,
+  digest: SessionDigest | null = null,
 ): AiChatMessage[] {
-  return history
+  const replay = history
     .filter((message) => message.id !== '1')
-    .slice(-maxMessages)
-    .map((message) => ({
-      role: message.role,
-      content: message.role === 'assistant'
-        ? summarizeAssistantHistory(message.content)
-        : message.content,
-    }));
+    .map((message) => {
+      if (message.role !== 'assistant' || !message.steps?.length) {
+        return {
+          role: message.role,
+          content: formatConversationMessage(message.content, message.sceneName),
+        } satisfies AiChatMessage;
+      }
+      const toolContext = message.steps.flatMap((step) => (step.toolCalls ?? []).map((call) => {
+        const args = call.arguments ? ` args=${JSON.stringify(call.arguments)}` : '';
+        const result = call.resultSummary ? ` result=${call.resultSummary}` : '';
+        const status = call.ok === false ? ` error=${call.error ?? 'failed'}` : ' ok';
+        return `- ${call.name}${status}${args}${result}`;
+      }));
+      const stepText = message.steps.map((step) => step.text?.trim()).filter(Boolean);
+      const text = formatConversationMessage(summarizeAssistantHistory(message.content), message.sceneName);
+      return {
+        role: 'assistant',
+        content: [
+          text,
+          stepText.length > 0 ? `处理记录:\n${stepText.join('\n')}` : '',
+          toolContext.length > 0 ? `工具上下文:\n${toolContext.join('\n')}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      } satisfies AiChatMessage;
+    });
+  if (!digest) return replay;
+  const digestText = [
+    '【会话摘要】这是较早对话的结构化工作状态，不是当前场景正文。',
+    digest.goal ? `当前目标：${digest.goal}` : '',
+    digest.decisions.length > 0 ? `已确认/已讨论：\n${digest.decisions.map((item) => `- ${item}`).join('\n')}` : '',
+    digest.completed.length > 0 ? `已完成操作：\n${digest.completed.map((item) => `- ${item}`).join('\n')}` : '',
+    digest.openQuestions.length > 0 ? `待确认事项：\n${digest.openQuestions.map((item) => `- ${item}`).join('\n')}` : '',
+    digest.nextStep ? `最近目标：${digest.nextStep}` : '',
+  ].filter(Boolean).join('\n');
+  return [{ role: 'system', content: digestText }, ...replay];
+}
+
+function formatConversationMessage(content: string, sceneName?: string): string {
+  return sceneName ? `[对话关联场景: ${sceneName}]\n${content}` : content;
 }
 
 function summarizeAssistantHistory(content: string): string {
