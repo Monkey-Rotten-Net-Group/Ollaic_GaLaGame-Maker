@@ -957,6 +957,26 @@ fn parse_ai_log_line(line: &str) -> Option<AiLogOutput> {
     })
 }
 
+fn is_secret_trace_key(key: &str) -> bool {
+    let key_lower = key.trim().to_ascii_lowercase();
+    if key_lower.contains("apikey")
+        || key_lower.contains("api_key")
+        || key_lower == "key"
+        || key_lower.contains("authorization")
+        || key_lower.contains("secret")
+        || key_lower.contains("password")
+    {
+        return true;
+    }
+    if key_lower.contains("token") {
+        let is_token_count_metric = key_lower.ends_with("tokens")
+            || key_lower.ends_with("_tokens")
+            || key_lower == "tokens";
+        return !is_token_count_metric;
+    }
+    false
+}
+
 fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::String(s) => serde_json::Value::String(sanitize_trace_field(&s)),
@@ -967,13 +987,7 @@ fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
             let sanitized = map
                 .into_iter()
                 .map(|(key, value)| {
-                    let key_lower = key.to_ascii_lowercase();
-                    let value = if key_lower.contains("apikey")
-                        || key_lower.contains("api_key")
-                        || key_lower == "key"
-                        || key_lower.contains("token")
-                        || key_lower.contains("authorization")
-                    {
+                    let value = if is_secret_trace_key(&key) {
                         serde_json::Value::String("[REDACTED]".to_string())
                     } else {
                         sanitize_trace_value(value)

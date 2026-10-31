@@ -174,12 +174,26 @@ fn ai_agent_trace_sanitizes_secrets_without_log_truncation() {
     let long_text = "x".repeat(MAX_LOG_FIELD_CHARS + 50);
     let trace = serde_json::json!({
         "apiKey": "secret-key",
+        "accessToken": "secret-access-token",
+        "contextWindowTokens": 128000,
+        "estimatedInputTokens": 15038,
+        "usage": {
+            "promptTokens": 18802,
+            "completionTokens": 412,
+            "cachedPromptTokens": 4096,
+        },
         "modelText": format!("response api_key=secret-token {long_text}"),
         "nested": [{ "authorization": "Bearer secret-token" }],
     });
 
     let sanitized = sanitize_trace_value(trace);
     assert_eq!(sanitized["apiKey"], "[REDACTED]");
+    assert_eq!(sanitized["accessToken"], "[REDACTED]");
+    assert_eq!(sanitized["contextWindowTokens"], 128000);
+    assert_eq!(sanitized["estimatedInputTokens"], 15038);
+    assert_eq!(sanitized["usage"]["promptTokens"], 18802);
+    assert_eq!(sanitized["usage"]["completionTokens"], 412);
+    assert_eq!(sanitized["usage"]["cachedPromptTokens"], 4096);
     assert_eq!(sanitized["nested"][0]["authorization"], "[REDACTED]");
     let model_text = sanitized["modelText"].as_str().unwrap();
     assert!(model_text.contains("api_key=[REDACTED]"));
