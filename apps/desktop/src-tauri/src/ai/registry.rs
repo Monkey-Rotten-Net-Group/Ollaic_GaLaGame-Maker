@@ -375,7 +375,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "groq",
         requires_api_key: true,
-        capability: capability(true, true, true, false, 120_000),
+        capability: capability(true, true, true, false, 120_000, 128_000, 8_192),
         chat: Some(ModalitySpec {
             label: "Groq",
             default_model: "llama-3.3-70b-versatile",
@@ -405,7 +405,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "cohere",
         requires_api_key: true,
-        capability: capability(true, true, true, false, 120_000),
+        capability: capability(true, true, true, false, 120_000, 128_000, 8_192),
         chat: Some(ModalitySpec {
             label: "Cohere",
             default_model: "command-a-03-2025",
@@ -420,7 +420,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "ollama",
         requires_api_key: false,
-        capability: capability(false, true, false, false, 600_000),
+        capability: capability(false, true, false, false, 600_000, 32_768, 4_096),
         chat: Some(ModalitySpec {
             label: "Ollama (本地)",
             default_model: "qwen2.5:7b",

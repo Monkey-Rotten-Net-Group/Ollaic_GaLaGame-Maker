@@ -263,7 +263,8 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
   activeIdRef.current = index.activeId;
   digestRef.current = digest;
 
-  const persistMessages = useCallback((sessionId: string, next: ChatMessage[]) => {
+  const persistMessages = useCallback((sessionId: string, next: ChatMessage[]): ChatMessage[] => {
+    const greeting = next.filter((m) => m.id === initialMessage.id);
     const all = next.filter((m) => m.id !== initialMessage.id);
     const body = all.length > MAX_PERSISTED_MESSAGES
       ? all.slice(-RECENT_MESSAGES_AFTER_COMPACTION)
@@ -285,13 +286,13 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
       writeIndex(projectId, updated);
       return updated;
     });
+    return [...greeting, ...body];
   }, [initialMessage.id, projectId, setDigestState]);
 
   const setMessages = useCallback((next: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessagesState((prev) => {
       const resolved = typeof next === 'function' ? next(prev) : next;
-      persistMessages(activeIdRef.current, resolved);
-      return resolved;
+      return persistMessages(activeIdRef.current, resolved);
     });
   }, [persistMessages]);
 
@@ -307,14 +308,15 @@ export function useChatSession(projectId: string | undefined, initialMessage: Ch
     } satisfies PersistedChatSession));
   }, [initialMessage, projectId, setDigestState]);
 
-  const compactMessages = useCallback(() => {
+  const compactMessages = useCallback((compactedIds?: ReadonlySet<string>) => {
     setMessagesState((prev) => {
-      const retained = [
-        ...prev.filter((message) => message.id === initialMessage.id),
-        ...prev.filter((message) => message.id !== initialMessage.id).slice(-RECENT_MESSAGES_AFTER_COMPACTION),
-      ];
-      persistMessages(activeIdRef.current, retained);
-      return retained;
+      const retained = compactedIds && compactedIds.size > 0
+        ? prev.filter((message) => message.id === initialMessage.id || !compactedIds.has(message.id))
+        : [
+          ...prev.filter((message) => message.id === initialMessage.id),
+          ...prev.filter((message) => message.id !== initialMessage.id).slice(-RECENT_MESSAGES_AFTER_COMPACTION),
+        ];
+      return persistMessages(activeIdRef.current, retained);
     });
   }, [initialMessage.id, persistMessages]);
 

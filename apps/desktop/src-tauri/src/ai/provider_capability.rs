@@ -139,6 +139,7 @@ pub fn capability_for_config(config: &AiConfig) -> Result<ProviderCapability, St
         capability.chat_tools = false;
     }
     validate_deadlines(capability)?;
+    validate_token_limits(capability)?;
     Ok(capability)
 }
 
@@ -198,6 +199,26 @@ fn validate_deadlines(capability: ProviderCapability) -> Result<(), String> {
         if value > MAX_DEADLINE_MS {
             return Err(format!("{name} 不能超过 {MAX_DEADLINE_MS} 毫秒"));
         }
+    }
+    Ok(())
+}
+
+fn validate_token_limits(capability: ProviderCapability) -> Result<(), String> {
+    for (name, value) in [
+        ("context_window_tokens", capability.context_window_tokens),
+        ("max_output_tokens", capability.max_output_tokens),
+    ] {
+        if value == 0 {
+            return Err(format!(
+                "{name} 不能为 0；如果不需要自定义限制，请在自定义能力声明里省略该字段（将使用默认值）"
+            ));
+        }
+    }
+    if capability.max_output_tokens >= capability.context_window_tokens {
+        return Err(
+            "max_output_tokens 必须小于 context_window_tokens，否则将没有可用的输入上下文空间"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -327,6 +348,25 @@ mod tests {
         assert!(capability_for_config(&invalid)
             .unwrap_err()
             .contains("chat_deadline_ms"));
+
+        let mut zero_context = config("custom", "model");
+        zero_context.capabilities = Some(ProviderCapabilityDeclaration {
+            context_window_tokens: Some(0),
+            ..Default::default()
+        });
+        assert!(capability_for_config(&zero_context)
+            .unwrap_err()
+            .contains("context_window_tokens"));
+
+        let mut inverted_tokens = config("custom", "model");
+        inverted_tokens.capabilities = Some(ProviderCapabilityDeclaration {
+            context_window_tokens: Some(8_192),
+            max_output_tokens: Some(8_192),
+            ..Default::default()
+        });
+        assert!(capability_for_config(&inverted_tokens)
+            .unwrap_err()
+            .contains("max_output_tokens 必须小于 context_window_tokens"));
     }
 
     #[test]

@@ -620,7 +620,15 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [sceneHeaders, replaceAssistantMessage, setSelectedNode, setShowScript]);
 
   // --- Function-calling agent loop ----------------------------------------
-  const runAgentLoop = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[], capability: ProviderCapability, digestOverride?: SessionDigest | null) => {
+  const runAgentLoop = useCallback(async (
+    runId: string,
+    text: string,
+    assistantId: string,
+    attachedUploadIds: string[],
+    capability: ProviderCapability,
+    digestOverride?: SessionDigest | null,
+    historyOverride?: ChatMessage[],
+  ) => {
     const trace: AiAgentTrace = {
       traceId: runId,
       createdAt: new Date().toISOString(),
@@ -726,7 +734,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setMemory(latestMemory);
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildAgentSystemContext(attachedUploadIds, latestMemory) },
-      ...buildConversationMessages(messages, digestOverride === undefined ? digest : digestOverride),
+      ...buildConversationMessages(historyOverride ?? messages, digestOverride === undefined ? digest : digestOverride),
       { role: 'user', content: text },
     ];
     const contextBudget = contextBudgetForCapability(capability);
@@ -943,7 +951,15 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, digest, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
 
   // --- JSON patch fallback for providers without function calling ---------
-  const runLegacyTurn = useCallback(async (runId: string, text: string, assistantId: string, attachedUploadIds: string[], capability: ProviderCapability, digestOverride?: SessionDigest | null) => {
+  const runLegacyTurn = useCallback(async (
+    runId: string,
+    text: string,
+    assistantId: string,
+    attachedUploadIds: string[],
+    capability: ProviderCapability,
+    digestOverride?: SessionDigest | null,
+    historyOverride?: ChatMessage[],
+  ) => {
     const trace: AiAgentTrace = {
       traceId: runId,
       createdAt: new Date().toISOString(),
@@ -971,7 +987,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     setMemory(latestMemory);
     const convo: AiChatMessage[] = [
       { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory) },
-      ...buildConversationMessages(messages, digestOverride === undefined ? digest : digestOverride),
+      ...buildConversationMessages(historyOverride ?? messages, digestOverride === undefined ? digest : digestOverride),
       { role: 'user', content: text },
     ];
     const contextBudget = contextBudgetForCapability(capability);
@@ -1084,10 +1100,10 @@ export function useAiAgent(params: UseAiAgentParams) {
     text: string,
     attachedUploadIds: string[],
     capability: ProviderCapability,
-  ): Promise<SessionDigest | null> => {
+  ): Promise<{ digest: SessionDigest; compactedIds: Set<string>; retainedMessages: ChatMessage[] } | null> => {
     const meaningful = messages.filter((message) => message.id !== INITIAL_AI_MESSAGE.id);
     const compactable = meaningful.slice(0, -24);
-    if (compactable.length === 0 && meaningful.length < 200) return null;
+    if (compactable.length === 0) return null;
     const budget = contextBudgetForCapability(capability);
     const currentMemory = projectPath ? await readProjectMemory(projectPath).catch(() => memory) : memory;
     if (!ownsRun(runId)) return null;
@@ -1104,8 +1120,10 @@ export function useAiAgent(params: UseAiAgentParams) {
       { role: 'user', content: text },
     ];
     const fullTrace = buildContextTrace(requestMessages, capability.chatTools ? toolDefs() : [], budget);
-    if (!fullTrace.shouldCompact && meaningful.length < 200) return null;
+    if (!fullTrace.shouldCompact && meaningful.length < 180) return null;
     const sourceMessageIds = compactable.map((message) => message.id);
+    const compactedIds = new Set(sourceMessageIds);
+    const retainedMessages = messages.filter((message) => !compactedIds.has(message.id));
     const fallback = buildLocalSessionDigest(digest, compactable);
     const olderConversation = buildConversationMessages(compactable, digest);
     try {
@@ -1121,14 +1139,14 @@ export function useAiAgent(params: UseAiAgentParams) {
         const parsed = parseDigestResponse(result.text, sourceMessageIds);
         if (parsed) {
           setDigest(parsed);
-          return parsed;
+          return { digest: parsed, compactedIds, retainedMessages };
         }
       }
     } catch {
       // The local digest is the intentional fallback when summary generation fails.
     }
     setDigest(fallback);
-    return fallback;
+    return { digest: fallback, compactedIds, retainedMessages };
   }, [buildAgentSystemContext, buildLegacySystemContext, digest, memory, messages, ownsRun, projectPath, setDigest, uploads]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
@@ -1186,12 +1204,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       const capability = await getAiProviderCapability();
       if (!ownsRun(myRunId)) return;
       if (cancelledRef.current) return;
-      const summarizedDigest = await summarizeSessionIfNeeded(myRunId, text, sentIds, capability);
-      if (summarizedDigest) compactMessages();
-      const sessionDigest = summarizedDigest ?? digest;
+      const summarized = await summarizeSessionIfNeeded(myRunId, text, sentIds, capability);
+      if (summarized) compactMessages(summarized.compactedIds);
+      const sessionDigest = summarized ? summarized.digest : digest;
+      const historyForTurn = summarized ? summarized.retainedMessages : messages;
       if (!ownsRun(myRunId)) return;
-      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds, capability, sessionDigest);
-      else await runLegacyTurn(myRunId, text, assistantId, sentIds, capability, sessionDigest);
+      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
+      else await runLegacyTurn(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
       setRetryCount(0);
     } catch (e) {
       if (!ownsRun(myRunId)) return;

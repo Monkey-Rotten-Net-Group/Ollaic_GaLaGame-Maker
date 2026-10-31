@@ -35,4 +35,19 @@ describe('agent context budget', () => {
     expect(trace.shouldCompact).toBe(true);
     expect(trace.overBudget).toBe(false);
   });
+
+  it('includes assistant toolCalls payload in history block estimation', () => {
+    const withoutToolCalls = buildContextTrace([
+      { role: 'assistant', content: '' },
+    ]);
+    const withToolCalls = buildContextTrace([
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'c1', name: 'edit_scene', arguments: { file: 'start.txt', patches: ['角色:台词;'] } }],
+      },
+    ]);
+    expect(withToolCalls.estimatedInputTokens).toBeGreaterThan(withoutToolCalls.estimatedInputTokens);
+    expect(withToolCalls.blocks[0]?.characters).toBeGreaterThan(0);
+  });
 });
