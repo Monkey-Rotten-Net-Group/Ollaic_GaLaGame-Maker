@@ -74,6 +74,15 @@ pub struct AiToolCall {
 pub struct AiTurnResult {
     pub text: Option<String>,
     pub tool_calls: Vec<AiToolCall>,
+    pub usage: Option<AiUsage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsage {
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+    pub cached_prompt_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -564,6 +573,22 @@ pub(crate) async fn ai_chat_turn(
     match client.exec_chat(&cfg.model, request, Some(&options)).await {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
+            let usage = Some(AiUsage {
+                prompt_tokens: response
+                    .usage
+                    .prompt_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+                completion_tokens: response
+                    .usage
+                    .completion_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+                cached_prompt_tokens: response
+                    .usage
+                    .prompt_tokens_details
+                    .as_ref()
+                    .and_then(|details| details.cached_tokens)
+                    .and_then(|value| u32::try_from(value).ok()),
+            });
             let tool_calls = response
                 .into_tool_calls()
                 .into_iter()
@@ -574,7 +599,11 @@ pub(crate) async fn ai_chat_turn(
                 })
                 .collect();
             log_ai_event("chat_turn", &cfg, &endpoint, true, "turn completed");
-            Ok(AiTurnResult { text, tool_calls })
+            Ok(AiTurnResult {
+                text,
+                tool_calls,
+                usage,
+            })
         }
         Err(err) => {
             let message = err.to_string();

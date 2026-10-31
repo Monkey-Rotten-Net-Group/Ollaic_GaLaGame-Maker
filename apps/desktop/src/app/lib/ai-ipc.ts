@@ -110,6 +110,13 @@ export interface AiToolCall {
 export interface AiTurnResult {
   text: string | null;
   toolCalls: AiToolCall[];
+  usage?: AiTurnUsage;
+}
+
+export interface AiTurnUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  cachedPromptTokens?: number;
 }
 
 export type AiStreamEvent =
@@ -142,6 +149,8 @@ export interface ProviderCapability {
   chatDeadlineMs: number;
   flowStepDeadlineMs: number;
   mediaFetchDeadlineMs: number;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
 }
 
 export async function getAiProviderCapability(

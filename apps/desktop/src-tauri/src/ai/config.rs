@@ -20,6 +20,8 @@ pub struct ProviderCapabilityDeclaration {
     pub chat_deadline_ms: Option<u64>,
     pub flow_step_deadline_ms: Option<u64>,
     pub media_fetch_deadline_ms: Option<u64>,
+    pub context_window_tokens: Option<u32>,
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

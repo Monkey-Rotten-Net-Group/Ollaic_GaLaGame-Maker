@@ -35,6 +35,8 @@ pub struct CapabilitySpec {
     pub streaming_cancellation: bool,
     pub media_url_output: bool,
     pub flow_step_deadline_ms: u64,
+    pub context_window_tokens: u32,
+    pub max_output_tokens: u32,
 }
 
 /// What one provider offers within one modality.
@@ -90,6 +92,8 @@ const fn capability(
     streaming_cancellation: bool,
     media_url_output: bool,
     flow_step_deadline_ms: u64,
+    context_window_tokens: u32,
+    max_output_tokens: u32,
 ) -> CapabilitySpec {
     CapabilitySpec {
         chat_tools,
@@ -97,14 +101,16 @@ const fn capability(
         streaming_cancellation,
         media_url_output,
         flow_step_deadline_ms,
+        context_window_tokens,
+        max_output_tokens,
     }
 }
 
 /// Hosted media providers: no chat/tools, but they do hand back media URLs.
-const HOSTED_MEDIA: CapabilitySpec = capability(false, false, true, true, 600_000);
+const HOSTED_MEDIA: CapabilitySpec = capability(false, false, true, true, 600_000, 128_000, 8_192);
 /// Locally hosted services: no media URLs, and generous deadlines because
 /// consumer hardware is slow.
-const LOCAL_MEDIA: CapabilitySpec = capability(false, false, false, false, 900_000);
+const LOCAL_MEDIA: CapabilitySpec = capability(false, false, false, false, 900_000, 128_000, 8_192);
 
 const OPENAI_CHAT_MODELS: &[&str] = &[
     "gpt-5.5",
@@ -291,7 +297,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "openai",
         requires_api_key: true,
-        capability: capability(true, true, true, true, 180_000),
+        capability: capability(true, true, true, true, 180_000, 128_000, 8_192),
         chat: Some(ModalitySpec {
             label: "OpenAI",
             default_model: "gpt-5.5",
@@ -318,7 +324,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "anthropic",
         requires_api_key: true,
-        capability: capability(true, false, true, false, 180_000),
+        capability: capability(true, false, true, false, 180_000, 200_000, 8_192),
         chat: Some(ModalitySpec {
             label: "Anthropic",
             default_model: "claude-opus-4-8",
@@ -333,7 +339,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "gemini",
         requires_api_key: true,
-        capability: capability(true, true, true, true, 180_000),
+        capability: capability(true, true, true, true, 180_000, 1_000_000, 8_192),
         chat: Some(ModalitySpec {
             label: "Gemini",
             default_model: "gemini-3.5-flash",
@@ -354,7 +360,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "deepseek",
         requires_api_key: true,
-        capability: capability(true, true, true, false, 180_000),
+        capability: capability(true, true, true, false, 180_000, 128_000, 8_192),
         chat: Some(ModalitySpec {
             label: "DeepSeek",
             default_model: "deepseek-v4-flash",
@@ -384,7 +390,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "xai",
         requires_api_key: true,
-        capability: capability(true, true, true, false, 120_000),
+        capability: capability(true, true, true, false, 120_000, 131_072, 8_192),
         chat: Some(ModalitySpec {
             label: "xAI",
             default_model: "grok-4.3",
@@ -547,7 +553,7 @@ pub const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         id: "custom",
         requires_api_key: false,
-        capability: capability(false, false, false, false, 180_000),
+        capability: capability(false, false, false, false, 180_000, 128_000, 8_192),
         chat: Some(ModalitySpec {
             label: "自定义 (OpenAI 兼容)",
             default_model: "gpt-4o-mini",

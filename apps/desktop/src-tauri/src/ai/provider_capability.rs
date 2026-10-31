@@ -15,6 +15,8 @@ use super::registry::{self, Modality};
 const DEFAULT_CHAT_DEADLINE_MS: u64 = 120_000;
 const DEFAULT_FLOW_DEADLINE_MS: u64 = 180_000;
 const DEFAULT_MEDIA_FETCH_DEADLINE_MS: u64 = 30_000;
+const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 128_000;
+const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 8_192;
 /// Maximum allowed deadline. Anything larger is almost certainly a typo and
 /// must surface as a config error rather than silently disable back-pressure.
 pub const MAX_DEADLINE_MS: u64 = 3_600_000;
@@ -32,6 +34,8 @@ pub struct ProviderCapability {
     pub chat_deadline_ms: u64,
     pub flow_step_deadline_ms: u64,
     pub media_fetch_deadline_ms: u64,
+    pub context_window_tokens: u32,
+    pub max_output_tokens: u32,
 }
 
 /// What a caller intends to use. `require` returns a localized error when
@@ -147,6 +151,8 @@ fn builtin(spec: &registry::CapabilitySpec) -> ProviderCapability {
         chat_deadline_ms: DEFAULT_CHAT_DEADLINE_MS,
         flow_step_deadline_ms: spec.flow_step_deadline_ms,
         media_fetch_deadline_ms: DEFAULT_MEDIA_FETCH_DEADLINE_MS,
+        context_window_tokens: spec.context_window_tokens,
+        max_output_tokens: spec.max_output_tokens,
     }
 }
 
@@ -166,6 +172,12 @@ fn from_custom(declaration: Option<&ProviderCapabilityDeclaration>) -> ProviderC
         media_fetch_deadline_ms: declaration
             .media_fetch_deadline_ms
             .unwrap_or(DEFAULT_MEDIA_FETCH_DEADLINE_MS),
+        context_window_tokens: declaration
+            .context_window_tokens
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS),
+        max_output_tokens: declaration
+            .max_output_tokens
+            .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS),
     }
 }
 
