@@ -33,10 +33,26 @@ function assertRange(startLine: number, endLine: number, total: number): void {
   }
 }
 
-export function resolveLineWithAnchor(lines: string[], lineNo: number, anchorText?: string): ResolvedLine {
-  if (!Number.isInteger(lineNo) || lineNo < 1) throw new EditorPatchError(`行号 ${lineNo} 不是有效正整数`);
+function normalizeAnchorCandidate(value: string): string {
+  return value
+    .trim()
+    .replace(/^\d+:\s*/, '')
+    .replace(/;+\s*$/, '')
+    .trim();
+}
+
+export function resolveLineWithAnchor(
+  lines: string[],
+  lineNo: number,
+  anchorText?: string,
+): ResolvedLine {
+  if (!Number.isInteger(lineNo) || lineNo < 1) {
+    throw new EditorPatchError(`行号 ${lineNo} 不是有效正整数`);
+  }
   if (!anchorText) {
-    if (lineNo > lines.length) throw new EditorPatchError(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
+    if (lineNo > lines.length) {
+      throw new EditorPatchError(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
+    }
     return { line: lineNo, corrected: false };
   }
 
@@ -55,8 +71,35 @@ export function resolveLineWithAnchor(lines: string[], lineNo: number, anchorTex
     if (line === anchorText) matches.push(index + 1);
   });
   if (matches.length === 1) return { line: matches[0], corrected: true };
+  if (matches.length > 1) {
+    throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
+  }
 
-  if (matches.length > 1) throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
+  // Tolerate common model formatting noise: copied `22: ` line-number prefixes
+  // or omitted trailing `;` semicolons.
+  const normalizedAnchor = normalizeAnchorCandidate(anchorText);
+  if (normalizedAnchor.length > 0) {
+    if (
+      lineNo <= lines.length &&
+      normalizeAnchorCandidate(lines[lineNo - 1]) === normalizedAnchor
+    ) {
+      return { line: lineNo, corrected: false };
+    }
+    for (let line = start; line <= end; line += 1) {
+      if (normalizeAnchorCandidate(lines[line - 1]) === normalizedAnchor) {
+        return { line, corrected: true };
+      }
+    }
+    const normalizedMatches: number[] = [];
+    lines.forEach((line, index) => {
+      if (normalizeAnchorCandidate(line) === normalizedAnchor) normalizedMatches.push(index + 1);
+    });
+    if (normalizedMatches.length === 1) return { line: normalizedMatches[0], corrected: true };
+    if (normalizedMatches.length > 1) {
+      throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
+    }
+  }
+
   throw new EditorPatchError(`无法定位 anchorText：${anchorText}`);
 }
 
