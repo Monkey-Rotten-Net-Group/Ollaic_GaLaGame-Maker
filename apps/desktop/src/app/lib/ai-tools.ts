@@ -46,6 +46,12 @@ export interface ToolContext {
    * an answer. Undefined means "no attachment context" and is treated as empty.
    */
   attachedUploadIds?: string[];
+  /**
+   * In-flight scene contents staged earlier in the current multi-turn agent run.
+   * Ensures read_scene and list_scenes observe read-your-writes for newly created
+   * or edited scenes before user confirmation writes them to disk.
+   */
+  stagedSceneContents?: ReadonlyMap<string, string>;
 }
 
 const SCENE_READ_MAX_LINES = 200;
@@ -307,11 +313,14 @@ const readTools: AgentTool[] = [
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
-      const files = await listScenes(sceneDir(projectPath));
+      const diskFiles = await listScenes(sceneDir(projectPath));
+      const files = Array.from(new Set([...diskFiles, ...(ctx.stagedSceneContents?.keys() ?? [])]));
       // Pair each filename with its chapter/outline header, inferred title, line count, and outgoing transitions.
       const rawScenes = await Promise.all(files.map(async (file) => {
         try {
-          const content = await readFileText(await getScenePath(projectPath, file));
+          const content =
+            ctx.stagedSceneContents?.get(file)
+            ?? (await readFileText(await getScenePath(projectPath, file)));
           const header = parseSceneHeader(content);
           const meta = inferSceneMetadata(content);
           return {
@@ -357,11 +366,20 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const name = asString(args.name);
       if (!name) throw new Error('read_scene 需要场景文件名 name。');
-      const path = await getScenePath(projectPath, name);
-      const content = await readFileText(path);
+      const stagedContent = ctx.stagedSceneContents?.get(name);
+      const content =
+        stagedContent !== undefined
+          ? stagedContent
+          : await readFileText(await getScenePath(projectPath, name));
       const fromLine = asInt(args.fromLine) ?? 1;
       const lines = content.replace(/\r\n/g, '\n').split('\n');
-      if (ctx.currentSceneName && name === ctx.currentSceneName && fromLine <= 1 && lines.length <= 9999) {
+      if (
+        stagedContent === undefined
+        && ctx.currentSceneName
+        && name === ctx.currentSceneName
+        && fromLine <= 1
+        && lines.length <= 9999
+      ) {
         return {
           name,
           alreadyInSystemContext: true,

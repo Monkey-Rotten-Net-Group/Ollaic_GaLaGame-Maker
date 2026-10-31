@@ -55,16 +55,20 @@ export interface SessionDigest {
   updatedAt: string;
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
 export function isSessionDigest(value: unknown): value is SessionDigest {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<SessionDigest>;
   return item.version === 1
     && typeof item.goal === 'string'
-    && Array.isArray(item.decisions)
-    && Array.isArray(item.completed)
-    && Array.isArray(item.openQuestions)
+    && isStringArray(item.decisions)
+    && isStringArray(item.completed)
+    && isStringArray(item.openQuestions)
     && typeof item.nextStep === 'string'
-    && Array.isArray(item.sourceMessageIds)
+    && isStringArray(item.sourceMessageIds)
     && typeof item.updatedAt === 'string';
 }
 
@@ -217,8 +221,9 @@ function loadSessionMessages(
   try {
     const raw = localStorage.getItem(sessionKey(projectId, sessionId));
     if (!raw) return [initialMessage];
-    const parsed = JSON.parse(raw) as PersistedChatSession;
-    return [initialMessage, ...trimMessages(parsed.messages ?? [])];
+    const parsed = JSON.parse(raw) as Partial<PersistedChatSession> | null;
+    const persisted = Array.isArray(parsed?.messages) ? parsed.messages : [];
+    return [initialMessage, ...trimMessages(persisted)];
   } catch {
     return [initialMessage];
   }
@@ -228,7 +233,7 @@ function loadSessionDigest(projectId: string | undefined, sessionId: string): Se
   try {
     const raw = localStorage.getItem(sessionKey(projectId, sessionId));
     const parsed = raw ? JSON.parse(raw) as PersistedChatSession : null;
-    return parsed?.digest ?? null;
+    return isSessionDigest(parsed?.digest) ? parsed.digest : null;
   } catch {
     return null;
   }
