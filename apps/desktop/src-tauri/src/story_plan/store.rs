@@ -181,6 +181,36 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
             format!("references unknown scene: {}", plan.branches.entry_scene),
         );
     }
+    let mut variable_ids: HashSet<&str> = HashSet::new();
+    for (index, var) in plan.variables.iter().enumerate() {
+        let path = format!("$.variables[{index}]");
+        if !is_safe_variable_id(&var.id) {
+            return invalid(format!("{path}.id"), "must be a safe variable identifier");
+        }
+        if !variable_ids.insert(var.id.as_str()) {
+            return invalid(format!("{path}.id"), "must be unique");
+        }
+        match var.kind {
+            crate::story_plan::types::VariableKind::Integer => {
+                if var.initial_value.trim().parse::<i64>().is_err() {
+                    return invalid(
+                        format!("{path}.initialValue"),
+                        format!("invalid integer initial value: {}", var.initial_value),
+                    );
+                }
+            }
+            crate::story_plan::types::VariableKind::Boolean => {
+                if !matches!(var.initial_value.trim(), "true" | "false") {
+                    return invalid(
+                        format!("{path}.initialValue"),
+                        format!("invalid boolean initial value: {}", var.initial_value),
+                    );
+                }
+            }
+        }
+    }
+    let mut written_variables: HashSet<String> = HashSet::new();
+    let mut read_variables: HashSet<String> = HashSet::new();
     for (index, edge) in plan.branches.edges.iter().enumerate() {
         for (field, id) in [("from", &edge.from), ("to", &edge.to)] {
             if !scene_ids.contains(id.as_str()) {
@@ -188,6 +218,133 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
                     format!("$.branches.edges[{index}].{field}"),
                     format!("references unknown scene: {id}"),
                 );
+            }
+        }
+        if let Some(condition) = &edge.condition {
+            if condition.trim().is_empty() {
+                return invalid(
+                    format!("$.branches.edges[{index}].condition"),
+                    "must not be empty",
+                );
+            }
+            let condition_vars = extract_condition_variables(condition);
+            for var in condition_vars {
+                if !variable_ids.contains(var.as_str()) {
+                    return invalid(
+                        format!("$.branches.edges[{index}].condition"),
+                        format!("references undefined variable: {var}"),
+                    );
+                }
+                read_variables.insert(var);
+            }
+        }
+        for (effect_index, effect) in edge.effects.iter().enumerate() {
+            let effect_path = format!("$.branches.edges[{index}].effects[{effect_index}]");
+            if effect.trim().is_empty() {
+                return invalid(effect_path, "must not be empty");
+            }
+            let Some(target_var) = extract_effect_variable(effect) else {
+                return invalid(
+                    effect_path,
+                    "must be an assignment to a valid variable (e.g. var=expr)",
+                );
+            };
+            if !variable_ids.contains(target_var.as_str()) {
+                return invalid(
+                    effect_path,
+                    format!("writes to undefined variable: {target_var}"),
+                );
+            }
+            written_variables.insert(target_var);
+        }
+    }
+    for var in &read_variables {
+        if !written_variables.contains(var) {
+            return invalid(
+                "$.branches",
+                format!("variable '{var}' is read in a condition but never written in any branch effect"),
+            );
+        }
+    }
+    if !scene_ids.is_empty() {
+        let mut visited: HashSet<&str> = HashSet::new();
+        let mut queue: std::collections::VecDeque<&str> = std::collections::VecDeque::new();
+        visited.insert(plan.branches.entry_scene.as_str());
+        queue.push_back(plan.branches.entry_scene.as_str());
+        while let Some(current) = queue.pop_front() {
+            for edge in &plan.branches.edges {
+                if edge.from == current && visited.insert(edge.to.as_str()) {
+                    queue.push_back(edge.to.as_str());
+                }
+            }
+        }
+        for scene in &plan.scene_plans {
+            if !visited.contains(scene.id.as_str()) {
+                return invalid(
+                    "$.branches",
+                    format!(
+                        "scene '{}' is unreachable from entry scene '{}'",
+                        scene.id, plan.branches.entry_scene
+                    ),
+                );
+            }
+        }
+        if plan.scene_plans.len() > 1 {
+            let ending_scene_ids: HashSet<&str> = plan
+                .scene_plans
+                .iter()
+                .filter(|s| s.is_ending())
+                .map(|s| s.id.as_str())
+                .collect();
+
+            for scene in &plan.scene_plans {
+                let out_degree = plan
+                    .branches
+                    .edges
+                    .iter()
+                    .filter(|e| e.from == scene.id)
+                    .count();
+                if out_degree == 0 && !scene.is_ending() {
+                    return invalid(
+                        "$.branches.edges",
+                        format!(
+                            "non-ending scene '{}' has no outgoing edges (dead end)",
+                            scene.id
+                        ),
+                    );
+                }
+
+                if !ending_scene_ids.is_empty() {
+                    let mut scene_visited: HashSet<&str> = HashSet::new();
+                    let mut scene_queue: std::collections::VecDeque<&str> =
+                        std::collections::VecDeque::new();
+                    scene_visited.insert(scene.id.as_str());
+                    scene_queue.push_back(scene.id.as_str());
+                    let mut reaches_ending = ending_scene_ids.contains(scene.id.as_str());
+                    while let Some(curr) = scene_queue.pop_front() {
+                        if reaches_ending {
+                            break;
+                        }
+                        for edge in &plan.branches.edges {
+                            if edge.from == curr && scene_visited.insert(edge.to.as_str()) {
+                                if ending_scene_ids.contains(edge.to.as_str()) {
+                                    reaches_ending = true;
+                                    break;
+                                }
+                                scene_queue.push_back(edge.to.as_str());
+                            }
+                        }
+                    }
+                    if !reaches_ending {
+                        return invalid(
+                            "$.branches.edges",
+                            format!(
+                                "scene '{}' has no path to an ending scene (dead-end branch)",
+                                scene.id
+                            ),
+                        );
+                    }
+                }
             }
         }
     }
@@ -351,6 +508,16 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
             );
         }
     }
+    for (index, scene) in plan.scene_plans.iter().enumerate() {
+        if scene.approval_status == crate::story_plan::types::SceneApprovalStatus::Approved
+            && (!plan.scenes.contains(&scene.file) || !draft_ids.contains(scene.id.as_str()))
+        {
+            return invalid(
+                format!("$.scenePlans[{index}].approvalStatus"),
+                "approved scenes require a compiled scene and dialogue draft",
+            );
+        }
+    }
     Ok(())
 }
 
@@ -387,6 +554,54 @@ fn is_safe_scene_file(file: &str) -> bool {
             .file_name()
             .and_then(|name| name.to_str())
             == Some(file)
+}
+
+pub(crate) fn is_safe_variable_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+            chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn extract_condition_variables(condition: &str) -> Vec<String> {
+    let mut vars = Vec::new();
+    let mut current = String::new();
+    for ch in condition.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch);
+        } else if !current.is_empty() {
+            if !current.chars().next().unwrap().is_ascii_digit()
+                && current != "true"
+                && current != "false"
+            {
+                vars.push(current.clone());
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty()
+        && !current.chars().next().unwrap().is_ascii_digit()
+        && current != "true"
+        && current != "false"
+    {
+        vars.push(current);
+    }
+    vars.sort();
+    vars.dedup();
+    vars
+}
+
+pub(crate) fn extract_effect_variable(effect: &str) -> Option<String> {
+    let lhs = effect.split('=').next()?.trim();
+    let var = lhs.trim_end_matches(['+', '-', '*', '/']).trim();
+    if is_safe_variable_id(var) {
+        Some(var.to_string())
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

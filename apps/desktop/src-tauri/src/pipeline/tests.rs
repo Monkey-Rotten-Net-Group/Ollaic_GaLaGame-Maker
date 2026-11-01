@@ -271,8 +271,6 @@ fn pipeline_test_character(name: &str) -> crate::characters::types::Character {
 
 fn chapters_output() -> AgentOutput {
     AgentOutput::new(AgentOutputPayload::Outline {
-        variables: Vec::new(),
-
         chapters: vec![
             ChapterPlan {
                 id: "ch1".to_string(),
@@ -287,6 +285,7 @@ fn chapters_output() -> AgentOutput {
         ],
         scene_plans: Vec::new(),
         branches: Default::default(),
+        variables: Vec::new(),
     })
 }
 
@@ -511,6 +510,42 @@ fn ipc_contract_serializes_to_camel_case() {
     assert_eq!(v["steps"][0]["def"]["kind"], "plan");
     assert_eq!(v["steps"][0]["status"], "pending");
     assert_eq!(v["steps"][1]["def"]["dependsOn"][0], "plan");
+
+    let var_def = crate::story_plan::VariableDef {
+        id: "trust".to_string(),
+        kind: crate::story_plan::VariableKind::Integer,
+        initial_value: "0".to_string(),
+        description: "林夏信任度".to_string(),
+    };
+    let var_v = serde_json::to_value(&var_def).unwrap();
+    assert_eq!(var_v["id"], "trust");
+    assert_eq!(var_v["kind"], "integer");
+    assert_eq!(var_v["initialValue"], "0");
+    assert_eq!(var_v["description"], "林夏信任度");
+
+    let edge = crate::story_plan::BranchEdge {
+        from: "s1".to_string(),
+        to: "s2".to_string(),
+        choice: Some("c".to_string()),
+        condition: Some("trust > 0".to_string()),
+        effects: vec!["trust=trust+1".to_string()],
+    };
+    let edge_v = serde_json::to_value(&edge).unwrap();
+    assert_eq!(edge_v["from"], "s1");
+    assert_eq!(edge_v["to"], "s2");
+    assert_eq!(edge_v["choice"], "c");
+    assert_eq!(edge_v["condition"], "trust > 0");
+    assert_eq!(edge_v["effects"][0], "trust=trust+1");
+
+    let beat = crate::story_plan::DialogueBeat {
+        kind: crate::story_plan::BeatKind::Monologue,
+        speaker: None,
+        text: "内心独白".to_string(),
+        figure_cues: vec![],
+    };
+    let beat_v = serde_json::to_value(&beat).unwrap();
+    assert_eq!(beat_v["kind"], "monologue");
+    assert_eq!(beat_v["text"], "内心独白");
 }
 
 #[test]
@@ -600,15 +635,23 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
     assert!(project.join("game/scene/start.txt").is_file());
     assert!(project.join("game/scene/ending_trust.txt").is_file());
     let opening = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    assert!(opening.contains("setVar:linxia_trust=0;"));
+    assert!(opening.contains("setVar:protocol_obeyed=false;"));
     assert!(opening.contains("林夏:"));
     assert!(opening.contains("changeScene:chapter_01.txt;"));
     assert!(opening.contains("changeBg:"));
     assert!(opening.contains("bgm:"));
     assert!(opening.contains("changeFigure:"));
     let decision = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
-    assert!(decision.contains(
-        "choose:握住她的手，一起承担:ending_trust.txt|遵守协议，回到日常:ending_depart.txt;"
-    ));
+    assert!(
+        decision.contains("choose:握住她的手，一起承担:lbl_edge_0|遵守协议，回到日常:lbl_edge_1;")
+    );
+    assert!(decision.contains("label:lbl_edge_0;"));
+    assert!(decision.contains("setVar:linxia_trust=linxia_trust+1;"));
+    assert!(decision.contains("changeScene:ending_trust.txt -when=linxia_trust>=1;"));
+    assert!(decision.contains("label:lbl_edge_1;"));
+    assert!(decision.contains("setVar:protocol_obeyed=true;"));
+    assert!(decision.contains("changeScene:ending_depart.txt;"));
     assert!(project.join("game/config/characters.json").is_file());
     assert!(project
         .join("game/background")
