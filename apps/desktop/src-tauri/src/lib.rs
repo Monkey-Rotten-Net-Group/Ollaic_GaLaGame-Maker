@@ -259,6 +259,10 @@ pub fn run() {
             characters::commands::save_characters,
             // V2 Pipeline (Agent Flow)
             pipeline::commands::pipeline_start,
+            pipeline::commands::pipeline_run_setup,
+            pipeline::commands::pipeline_run_scene,
+            pipeline::commands::pipeline_approve_scene,
+            pipeline::commands::pipeline_unlock_scene,
             pipeline::commands::pipeline_get_capabilities,
             pipeline::commands::pipeline_pause,
             pipeline::commands::pipeline_resume,

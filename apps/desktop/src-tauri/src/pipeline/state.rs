@@ -142,6 +142,8 @@ impl StepState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunState {
+    #[serde(default)]
+    pub scope: crate::pipeline::dsl::FlowScope,
     pub run_id: String,
     pub project_path: String,
     pub prompt: String,
@@ -173,6 +175,7 @@ impl RunState {
         now_ms: u64,
     ) -> Self {
         RunState {
+            scope: recipe.scope.clone(),
             run_id: run_id.into(),
             project_path: project_path.as_ref().to_string_lossy().into_owned(),
             prompt: prompt.into(),

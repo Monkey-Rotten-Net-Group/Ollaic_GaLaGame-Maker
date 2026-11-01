@@ -3,6 +3,7 @@
 //! without an LLM (ADR 0056). P1 agents use the configured `genai` provider
 //! and expose an explicit local fallback when no chat model is configured.
 
+mod anchor_planner;
 pub mod asset_planner;
 pub mod character;
 pub mod dialogist;
@@ -205,6 +206,10 @@ impl AgentRegistry {
         registry.register(StepKind::Scene, Box::new(SceneAgent));
         registry.register_named("dialogist", Box::new(DialogistAgent));
         registry.register_named("assetPlanner", Box::new(AssetPlannerAgent));
+        registry.register_named(
+            "anchorPlanner",
+            Box::new(anchor_planner::AnchorPlannerAgent),
+        );
         registry.register_named("sceneScript", Box::new(SceneAgent));
         registry
     }

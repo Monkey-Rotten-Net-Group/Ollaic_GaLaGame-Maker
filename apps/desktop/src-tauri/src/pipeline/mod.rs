@@ -13,6 +13,8 @@ mod recovery;
 pub mod registry;
 mod run_control;
 mod run_driver;
+mod scene_context;
+pub(crate) mod scene_review;
 pub mod scheduler;
 pub mod state;
 mod step_executor;

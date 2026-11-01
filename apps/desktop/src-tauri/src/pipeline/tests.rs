@@ -2892,3 +2892,222 @@ async fn edited_step_prompt_is_used_by_retry() {
     let input: serde_json::Value = serde_json::from_str(&history[1].input_snapshot).unwrap();
     assert_eq!(input["stepInstruction"], "revised direction");
 }
+
+#[allow(clippy::type_complexity)]
+struct TailCapturingDialogist {
+    inputs: Arc<std::sync::Mutex<Vec<(Option<String>, String)>>>,
+}
+
+impl Agent for TailCapturingDialogist {
+    fn run<'a>(
+        &'a self,
+        context: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inputs.lock().unwrap().push((
+                context.target_scene_id.map(str::to_string),
+                context.preceding_scene_tail.to_string(),
+            ));
+            crate::agents::DialogistAgent.run(context).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn setup_then_sequential_scene_runs_preserve_reviewed_files_and_use_saved_tail() {
+    use crate::pipeline::dsl::{scene_recipe, setup_recipe, FlowScope};
+    let project = fresh_project("scene_scoped_sequence");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let inputs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register_named(
+        "dialogist",
+        Box::new(TailCapturingDialogist {
+            inputs: inputs.clone(),
+        }),
+    );
+    let pipeline = Pipeline::new(agents);
+    let setup = setup_recipe();
+    let setup_handle = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "setup",
+            prompt: "A scene-centered story",
+            recipe: &setup,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, setup_handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(setup_handle.state.lock().await.status, RunStatus::Completed);
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert!(plan.scene_drafts.is_empty());
+    assert!(plan.scenes.is_empty());
+    let anchors = crate::asset_queue::store::load_queue(&project).unwrap();
+    assert_eq!(anchors.tasks.len(), plan.characters.len());
+    assert!(anchors.tasks.iter().all(|task| task.status
+        == crate::asset_queue::AssetTaskStatus::Succeeded
+        && task.emotion.as_deref() == Some("default")));
+    assert!(!project.join("game/scene/start.txt").exists());
+    let opening = scene_recipe("opening");
+    let first = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "opening",
+            prompt: &plan.prompt,
+            recipe: &opening,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, first.clone(), &sink, &clock)
+        .await;
+    assert_eq!(first.state.lock().await.status, RunStatus::Completed);
+    let mut text = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    for index in 0..12 {
+        text.push_str(&format!("\n林夏:Manually edited line {index};"));
+    }
+    std::fs::write(project.join("game/scene/start.txt"), &text).unwrap();
+    super::scene_review::approve_scene(&project, "opening").unwrap();
+    let encounter = scene_recipe("encounter");
+    let next = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "encounter",
+            prompt: &plan.prompt,
+            recipe: &encounter,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    // The durable scene identity survives attaching after a process restart.
+    next.pause(&project, &sink, &clock).await.unwrap();
+    let attached = pipeline.attach_run(&project, "encounter", &clock).unwrap();
+    assert_eq!(
+        attached.state.lock().await.scope,
+        FlowScope::Scene {
+            scene_id: "encounter".into()
+        }
+    );
+    let resumed = pipeline
+        .resume_run(&project, "encounter", &sink, &clock)
+        .unwrap();
+    pipeline
+        .execute(&project, resumed.clone(), &sink, &clock)
+        .await;
+    assert_eq!(resumed.state.lock().await.status, RunStatus::Completed);
+    let final_plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert_eq!(final_plan.scene_drafts.len(), 2);
+    assert_eq!(final_plan.scenes.len(), 2);
+    assert_eq!(
+        final_plan
+            .scene_plans
+            .iter()
+            .find(|scene| scene.id == "opening")
+            .unwrap()
+            .approval_status,
+        crate::story_plan::types::SceneApprovalStatus::Approved
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+        text
+    );
+    assert!(project.join("game/scene/chapter_01.txt").is_file());
+    let inputs = inputs.lock().unwrap();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[0], (Some("opening".into()), String::new()));
+    assert_eq!(inputs[1].0.as_deref(), Some("encounter"));
+    assert!(inputs[1].1.contains("Manually edited line 2"));
+    assert!(inputs[1].1.contains("Manually edited line 11"));
+    assert!(!inputs[1].1.contains("Manually edited line 1;"));
+    assert_eq!(inputs[1].1.lines().count(), 11); // predecessor ID plus exactly ten saved lines
+    drop(inputs);
+    assert!(pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "locked_opening",
+            prompt: &plan.prompt,
+            recipe: &opening,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .is_err());
+    assert!(
+        !crate::pipeline::store::run_state_path(&project, "locked_opening")
+            .unwrap()
+            .exists()
+    );
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
+async fn scene_scope_rejects_unknown_targets_and_preserves_the_project_brief() {
+    use crate::pipeline::dsl::{scene_recipe, setup_recipe};
+    let project = fresh_project("scene_scope_validation");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let setup = setup_recipe();
+    let handle = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "setup",
+            prompt: "Original brief",
+            recipe: &setup,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline.execute(&project, handle, &sink, &clock).await;
+    let recipe = scene_recipe("../outside");
+    assert!(pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "invalid",
+            prompt: "Replacement",
+            recipe: &recipe,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .is_err());
+    assert!(!crate::pipeline::store::run_state_path(&project, "invalid")
+        .unwrap()
+        .exists());
+    let recipe = scene_recipe("opening");
+    let _ = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "valid",
+            prompt: "Scene-only instruction",
+            recipe: &recipe,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    assert_eq!(
+        crate::story_plan::load_plan(&project)
+            .unwrap()
+            .unwrap()
+            .prompt,
+        "Original brief"
+    );
+    let _ = std::fs::remove_dir_all(project);
+}

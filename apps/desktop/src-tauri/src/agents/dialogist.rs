@@ -34,7 +34,13 @@ impl Agent for DialogistAgent {
         ctx: &'a AgentContext<'a>,
     ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
         Box::pin(async move {
-            if ctx.scene_plans.is_empty() || ctx.characters.is_empty() {
+            let scene_plans: Vec<_> = ctx
+                .scene_plans
+                .iter()
+                .filter(|scene| ctx.target_scene_id.is_none_or(|target| scene.id == target))
+                .cloned()
+                .collect();
+            if scene_plans.as_slice().is_empty() || ctx.characters.is_empty() {
                 return Err(AgentError(
                     "Dialogist requires scene plans and characters".to_string(),
                 ));
@@ -45,7 +51,8 @@ impl Agent for DialogistAgent {
                 "worldbook": ctx.worldbook,
                 "glossary": ctx.glossary,
                 "characters": ctx.characters,
-                "scenePlans": ctx.scene_plans,
+                "scenePlans": scene_plans.as_slice(),
+                "precedingSceneTail": ctx.preceding_scene_tail,
                 "branches": ctx.branches,
                 "stepInstruction": ctx.instruction,
                 "requirements": "每个 scenePlan 对应一个 sceneDraft，sceneId 必须一致；每场至少 8 个 beat。speaker 为角色 name 或 null（旁白），text 不含 WebGAL 命令。必须用 figureCues 显式决定镜头需要的角色何时 show/hide；show 必须给项目已有 characterId、left/center/right position 和安全英文 emotion 标签，hide 只需 characterId。可根据演出需要补充 scenePlan 未列出的已有角色，但不要把全部角色默认上屏。对白要推进冲突、体现人物口吻。"
@@ -57,7 +64,7 @@ impl Agent for DialogistAgent {
                 &input,
                 ctx.allow_local_fallback,
                 |response| {
-                    fill_missing_titles(ctx.scene_plans, &mut response.scene_drafts);
+                    fill_missing_titles(scene_plans.as_slice(), &mut response.scene_drafts);
                     normalize_figure_cue_character_ids(
                         ctx.characters,
                         &mut response.scene_drafts,
@@ -65,7 +72,7 @@ impl Agent for DialogistAgent {
                     for draft in &mut response.scene_drafts {
                         draft.stage_managed = true;
                     }
-                    validate_drafts(ctx.scene_plans, ctx.characters, &response.scene_drafts)
+                    validate_drafts(scene_plans.as_slice(), ctx.characters, &response.scene_drafts)
                 },
             ).await? {
                 return Ok(AgentOutput::new(AgentOutputPayload::SceneDrafts(
@@ -78,8 +85,7 @@ impl Agent for DialogistAgent {
                 ));
             }
 
-            let drafts = ctx
-                .scene_plans
+            let drafts = scene_plans
                 .iter()
                 .map(|scene| local_draft(scene, ctx.characters))
                 .collect();

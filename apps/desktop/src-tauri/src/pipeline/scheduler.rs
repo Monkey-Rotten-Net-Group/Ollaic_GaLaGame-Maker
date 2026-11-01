@@ -17,7 +17,7 @@ use crate::agents::{AgentContext, AgentRegistry};
 #[cfg(test)]
 use crate::pipeline::asset_executor::PlaceholderAssetGeneratorFactory;
 use crate::pipeline::asset_executor::{AssetGeneratorFactory, ConfiguredAssetGeneratorFactory};
-use crate::pipeline::dsl::{FlowRecipe, StepExecutor, StepKind};
+use crate::pipeline::dsl::{FlowRecipe, FlowScope, StepExecutor, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::output_commit::{
     apply_canonical_characters, apply_output, commit_step_output, restore_interrupted_outputs,
@@ -208,6 +208,9 @@ impl Pipeline {
         &self,
         creation: RunCreation<'_>,
     ) -> Result<Arc<RunHandle>, PipelineError> {
+        if creation.recipe.scope != FlowScope::Project {
+            return self.create_scoped_run_with_timeout(creation);
+        }
         crate::project_lock::with_project_lock(creation.project_path, || {
             if let Some(active) = store::list_run_states(creation.project_path)
                 .map_err(PipelineError::Store)?
@@ -231,6 +234,48 @@ impl Pipeline {
         })
     }
 
+    /// Create setup or a single-scene continuation while preserving unrelated content.
+    pub(crate) fn create_scoped_run_with_timeout(
+        &self,
+        creation: RunCreation<'_>,
+    ) -> Result<Arc<RunHandle>, PipelineError> {
+        crate::project_lock::with_project_lock(creation.project_path, || {
+            if let Some(active) = store::list_run_states(creation.project_path)
+                .map_err(PipelineError::Store)?
+                .into_iter()
+                .find(|run| !run.status.is_terminal())
+            {
+                return Err(PipelineError::Recovery(format!(
+                    "project has unfinished run {}; resume or stop it before starting another flow",
+                    active.run_id
+                )));
+            }
+            match &creation.recipe.scope {
+                FlowScope::Scene { scene_id } => {
+                    let plan = story_plan::load_plan(creation.project_path)
+                        .map_err(PipelineError::Plan)?
+                        .ok_or(PipelineError::PlanMissing)?;
+                    validate_scene_target(&plan, scene_id).map_err(PipelineError::Recovery)?;
+                }
+                FlowScope::Setup => {
+                    if project_has_story_content_locked(creation.project_path)
+                        .map_err(PipelineError::Recovery)?
+                    {
+                        return Err(PipelineError::Recovery(
+                            "项目已有故事内容；请使用单场景生产继续编辑。".into(),
+                        ));
+                    }
+                }
+                FlowScope::Project => {
+                    return Err(PipelineError::Recovery(
+                        "scoped run requires setup or scene scope".into(),
+                    ))
+                }
+            }
+            self.create_run_with_timeout_locked(creation)
+        })
+    }
+
     fn create_run_with_timeout_locked(
         &self,
         creation: RunCreation<'_>,
@@ -246,10 +291,11 @@ impl Pipeline {
             sink,
         } = creation;
         recipe.validate().map_err(PipelineError::RecipeInvalid)?;
-        if recipe
-            .steps
-            .iter()
-            .any(|step| step.executor == StepExecutor::AssetQueue)
+        if recipe.scope == FlowScope::Project
+            && recipe
+                .steps
+                .iter()
+                .any(|step| step.executor == StepExecutor::AssetQueue)
         {
             self.asset_generators
                 .preflight_run(allow_local_fallback)
@@ -260,7 +306,9 @@ impl Pipeline {
         let previous_plan = story_plan::load_plan(project_path).map_err(PipelineError::Plan)?;
         match previous_plan.clone() {
             Some(mut next) => {
-                next.prompt = prompt.to_string();
+                if !matches!(recipe.scope, FlowScope::Scene { .. }) {
+                    next.prompt = prompt.to_string();
+                }
                 story_plan::save_plan(project_path, &next).map_err(PipelineError::Plan)?;
             }
             None => {
@@ -563,11 +611,46 @@ impl Pipeline {
             }
         }
 
-        let (production_brief, allow_local_fallback) = {
+        let (production_brief, allow_local_fallback, scope) = {
             let state = handle.state.lock().await;
-            (state.prompt.clone(), state.allow_local_fallback)
+            (
+                state.prompt.clone(),
+                state.allow_local_fallback,
+                state.scope.clone(),
+            )
         };
+        let target_scene_id = match &scope {
+            FlowScope::Scene { scene_id } => Some(scene_id.as_str()),
+            _ => None,
+        };
+        let preceding_scene_tail = if let Some(target) = target_scene_id {
+            if let Err(error) = validate_scene_target(&plan, target) {
+                self.fail_step(execution, id, error).await;
+                return;
+            }
+            let target = target.to_string();
+            let project = project_path.to_path_buf();
+            let plan = plan.clone();
+            match tokio::task::spawn_blocking(move || {
+                super::scene_context::preceding_scene_tail(&project, &plan, &target)
+            })
+            .await
+            .map_err(|error| format!("preceding scene context task failed: {error}"))
+            .and_then(|result| result)
+            {
+                Ok(tail) => tail,
+                Err(error) => {
+                    self.fail_step(execution, id, error).await;
+                    return;
+                }
+            }
+        } else {
+            String::new()
+        };
+        let production_plan = super::scene_context::production_plan(&plan, &scope);
         let input_snapshot = serde_json::json!({
+            "scope": &scope,
+            "precedingSceneTail": &preceding_scene_tail,
             "productionBrief": &production_brief,
             "stepInstruction": &prompt,
             "synopsis": &plan.synopsis,
@@ -603,11 +686,8 @@ impl Pipeline {
         }
 
         let ctx = AgentContext {
-            target_scene_id: None,
-            preceding_scene_tail: "",
-            visual_style: &plan.visual_style,
-            variables: &[],
-
+            target_scene_id,
+            preceding_scene_tail: &preceding_scene_tail,
             chat: self.chat.as_ref(),
             prompt: &production_brief,
             instruction: &prompt,
@@ -618,8 +698,10 @@ impl Pipeline {
             characters: &plan.characters,
             scene_plans: &plan.scene_plans,
             branches: &plan.branches,
+            variables: &plan.variables,
             scene_drafts: &plan.scene_drafts,
             asset_plan: &plan.asset_plan,
+            visual_style: &plan.visual_style,
             allow_local_fallback,
         };
         let executor = {
@@ -657,7 +739,8 @@ impl Pipeline {
                 asset_generators: self.asset_generators.as_ref(),
                 project_path,
                 run_id: &run_id,
-                plan: &plan,
+                plan: &production_plan,
+                scope: &scope,
                 cancelled: &handle.cancelled,
                 asset_binding_gate: &handle.asset_binding_gate,
                 #[cfg(test)]
@@ -686,7 +769,14 @@ impl Pipeline {
             }
         };
         match result {
-            Ok(out) => {
+            Ok(mut out) => {
+                super::scene_context::preserve_shared_assets(&mut out, &plan, &scope);
+                if let Err(error) =
+                    super::scene_context::validate_scoped_output(&out, &plan, &scope)
+                {
+                    self.fail_step(execution, id, error).await;
+                    return;
+                }
                 // Crash-safety order: apply output to the plan and persist it
                 // BEFORE marking the step Succeeded. If the process dies between
                 // these two writes, the step is left Running and reset to Pending
@@ -815,4 +905,17 @@ impl Pipeline {
         }
         let _ = record_run_summary(project_path, &run_id, clock);
     }
+}
+
+fn validate_scene_target(plan: &StoryPlan, scene_id: &str) -> Result<(), String> {
+    if !crate::story_plan::types::is_webgal_flag_value(scene_id) {
+        return Err("invalid scene id".into());
+    }
+    if !plan.scene_plans.iter().any(|scene| scene.id == scene_id) {
+        return Err(format!("unknown scene id: {scene_id}"));
+    }
+    if plan.characters.is_empty() {
+        return Err("scene production requires completed character setup".into());
+    }
+    super::scene_review::require_scene_unlocked(plan, scene_id)
 }

@@ -19,12 +19,13 @@ impl Agent for SceneAgent {
         ctx: &'a AgentContext<'a>,
     ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
         Box::pin(async move {
-            validate_scene_inputs(
+            validate_scene_inputs_for_target(
                 ctx.scene_plans,
                 ctx.scene_drafts,
                 ctx.branches,
                 ctx.characters,
                 ctx.asset_plan,
+                ctx.target_scene_id,
             )?;
             let by_draft: HashMap<&str, &SceneDraft> = ctx
                 .scene_drafts
@@ -48,7 +49,11 @@ impl Agent for SceneAgent {
                 })
                 .collect();
             let mut scripts = Vec::with_capacity(ctx.scene_plans.len());
-            for scene in ctx.scene_plans {
+            for scene in ctx
+                .scene_plans
+                .iter()
+                .filter(|scene| ctx.target_scene_id.is_none_or(|target| scene.id == target))
+            {
                 let draft = by_draft.get(scene.id.as_str()).ok_or_else(|| {
                     AgentError(format!(
                         "SceneScript is missing draft for scene {}",
@@ -115,12 +120,24 @@ impl Agent for SceneAgent {
     }
 }
 
+#[cfg(test)]
 fn validate_scene_inputs(
     scene_plans: &[ScenePlan],
     drafts: &[SceneDraft],
     branches: &BranchGraph,
     characters: &[crate::characters::types::Character],
     asset_plan: &[AssetTaskPlan],
+) -> Result<(), AgentError> {
+    validate_scene_inputs_for_target(scene_plans, drafts, branches, characters, asset_plan, None)
+}
+
+fn validate_scene_inputs_for_target(
+    scene_plans: &[ScenePlan],
+    drafts: &[SceneDraft],
+    branches: &BranchGraph,
+    characters: &[crate::characters::types::Character],
+    asset_plan: &[AssetTaskPlan],
+    target_scene_id: Option<&str>,
 ) -> Result<(), AgentError> {
     if scene_plans.is_empty() {
         return Err(contract_error("$.scenePlans", "must not be empty"));
@@ -208,7 +225,10 @@ fn validate_scene_inputs(
             }
         }
     }
-    for scene in scene_plans {
+    for scene in scene_plans
+        .iter()
+        .filter(|scene| target_scene_id.is_none_or(|target| scene.id == target))
+    {
         if !draft_ids.contains(scene.id.as_str()) {
             return Err(contract_error(
                 "$.sceneDrafts",
