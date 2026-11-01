@@ -16,7 +16,9 @@ OpenAI、Anthropic、Gemini、DeepSeek、Groq、xAI、Cohere、Ollama（本地�
 
 ### Image
 
-OpenAI Images、Google Gemini / Imagen、阿里云 DashScope / 通义万相、火山引擎 / 即梦 / 豆包、智谱 CogView、SiliconFlow、Midjourney Proxy（OpenAI 兼容）、Stable Diffusion WebUI（本地）、custom。
+OpenAI Images、Google Gemini / Imagen、阿里云 DashScope / 通义万相、火山引擎 / 即梦 / 豆包、智谱 CogView、SiliconFlow、MiniMax、Midjourney Proxy（OpenAI 兼容）、Stable Diffusion WebUI（本地）、custom。
+
+For MiniMax Token Plan setup, regional endpoints, and character-reference constraints, see [MiniMax image generation](./minimax-images.md).
 
 ### TTS
 

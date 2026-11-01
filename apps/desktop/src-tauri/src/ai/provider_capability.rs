@@ -109,6 +109,7 @@ pub fn supports_reference_image(provider: &str, model: &str) -> bool {
     }
     match provider.as_str() {
         "sd-webui" => true,
+        "minimax" => matches!(model.as_str(), "image-01" | "image-01-live"),
         "gemini" => model.starts_with("gemini-") && model.contains("image"),
         "openai" | "custom" | "zhipu" | "siliconflow" | "midjourney" | "volcengine" => {
             model.contains("seedream-4") || model.contains("seedream-5")
@@ -251,6 +252,9 @@ mod tests {
             ("custom", "doubao-seedream-5-0-lite", true),
             ("custom", "image-model", false),
             ("openai", "dall-e-3", false),
+            ("minimax", "image-01", true),
+            ("minimax", "image-01-live", true),
+            ("minimax", "MiniMax-M3", false),
             ("unknown", "doubao-seedream-4-5", false),
         ] {
             assert_eq!(

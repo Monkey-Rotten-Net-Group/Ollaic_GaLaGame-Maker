@@ -9,6 +9,7 @@
 pub mod dashscope;
 pub mod elevenlabs;
 pub mod gemini;
+pub mod minimax;
 pub mod openai;
 pub mod sd_webui;
 pub mod volcengine;
@@ -25,6 +26,7 @@ pub enum MediaAdaptor {
     OpenAiCompatible,
     DashScope,
     Gemini,
+    MiniMax,
     SdWebUi,
     ElevenLabs,
     Volcengine,
@@ -46,6 +48,7 @@ pub fn adaptor_for(provider: &str, modality: Modality) -> Option<MediaAdaptor> {
         ) => Some(MediaAdaptor::OpenAiCompatible),
         ("aliyun", Modality::Image) => Some(MediaAdaptor::DashScope),
         ("gemini", Modality::Image) => Some(MediaAdaptor::Gemini),
+        ("minimax", Modality::Image) => Some(MediaAdaptor::MiniMax),
         ("sd-webui", Modality::Image) => Some(MediaAdaptor::SdWebUi),
 
         ("openai" | "custom", Modality::Tts) => Some(MediaAdaptor::OpenAiCompatible),
@@ -73,6 +76,7 @@ impl MediaAdaptor {
             MediaAdaptor::OpenAiCompatible => openai::generate_image(ctx.cfg, request).await,
             MediaAdaptor::DashScope => dashscope::generate_image(ctx, request).await,
             MediaAdaptor::Gemini => gemini::generate_image(ctx.cfg, request).await,
+            MediaAdaptor::MiniMax => minimax::generate_image(ctx.cfg, request).await,
             MediaAdaptor::SdWebUi => sd_webui::generate_image(ctx.cfg, request).await,
             MediaAdaptor::ElevenLabs | MediaAdaptor::Volcengine => {
                 Err(unsupported(ctx.cfg.provider.trim(), "图片生成"))
@@ -90,7 +94,7 @@ impl MediaAdaptor {
             MediaAdaptor::DashScope => dashscope::generate_tts(ctx.cfg, request).await,
             MediaAdaptor::ElevenLabs => elevenlabs::generate_tts(ctx.cfg, request).await,
             MediaAdaptor::Volcengine => volcengine::generate_tts(ctx.cfg, request).await,
-            MediaAdaptor::Gemini | MediaAdaptor::SdWebUi => {
+            MediaAdaptor::Gemini | MediaAdaptor::MiniMax | MediaAdaptor::SdWebUi => {
                 Err(unsupported(ctx.cfg.provider.trim(), "语音生成"))
             }
         }

@@ -225,6 +225,8 @@ const VOLCENGINE_IMAGE_MODELS: &[&str] = &[
     "doubao-seedream-3-0-t2i-250415",
 ];
 
+const MINIMAX_IMAGE_MODELS: &[&str] = &["image-01", "image-01-live"];
+
 const ZHIPU_IMAGE_MODELS: &[&str] = &["cogview-3-flash", "cogview-3-plus", "cogview-4"];
 
 const SILICONFLOW_IMAGE_MODELS: &[&str] = &[
@@ -576,7 +578,14 @@ pub const PROVIDERS: &[ProviderSpec] = &[
         requires_api_key: true,
         capability: HOSTED_MEDIA,
         chat: None,
-        image: None,
+        image: Some(ModalitySpec {
+            label: "MiniMax 图片",
+            default_model: "image-01",
+            models: MINIMAX_IMAGE_MODELS,
+            default_base_url: "https://api.minimax.io/v1",
+            base_url_placeholder:
+                "国际站默认 https://api.minimax.io/v1；国内站填写 https://api.minimax.cn/v1",
+        }),
         tts: None,
         video: Some(ModalitySpec {
             label: "MiniMax 视频",
@@ -822,6 +831,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn minimax_image_catalog_exposes_the_native_models_and_region_hint() {
+        let option = catalog()
+            .image
+            .into_iter()
+            .find(|option| option.value == "minimax")
+            .unwrap();
+        assert_eq!(option.default_model, "image-01");
+        assert_eq!(option.models, ["image-01", "image-01-live"]);
+        assert!(option.requires_api_key);
+        assert!(!option.needs_base_url);
+        assert_eq!(option.default_base_url, "https://api.minimax.io/v1");
+        assert!(option
+            .base_url_placeholder
+            .contains("https://api.minimax.cn/v1"));
     }
 
     #[test]
