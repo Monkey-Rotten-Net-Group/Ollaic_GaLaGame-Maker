@@ -4,6 +4,17 @@ use super::*;
 fn character_output_reconciles_provisional_scene_cast_names() {
     let mut plan = StoryPlan::new("test");
     plan.scene_plans = vec![crate::story_plan::ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "ch1".into(),
@@ -29,6 +40,17 @@ fn character_output_reconciles_provisional_scene_cast_names() {
 fn character_output_reconciles_provisional_id_case() {
     let mut plan = StoryPlan::new("test");
     plan.scene_plans = vec![crate::story_plan::ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "ch1".into(),
@@ -53,6 +75,17 @@ fn character_output_reconciles_provisional_id_case() {
 #[test]
 fn unresolved_provisional_cast_uses_empty_cast_recovery() {
     let mut scenes = vec![crate::story_plan::ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "ch1".into(),
@@ -75,6 +108,17 @@ fn unresolved_provisional_cast_uses_empty_cast_recovery() {
 fn character_step_keeps_provisional_cast_when_old_config_is_loaded() {
     let mut plan = StoryPlan::new("test");
     plan.scene_plans = vec![crate::story_plan::ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "ch1".into(),
@@ -96,6 +140,17 @@ fn character_step_keeps_provisional_cast_when_old_config_is_loaded() {
 fn dialogist_output_merges_staged_character_into_scene_cast() {
     let mut plan = StoryPlan::new("test");
     plan.scene_plans = vec![crate::story_plan::ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "ch1".into(),
@@ -134,6 +189,9 @@ fn asset_plan_persists_missing_character_sprite_slots() {
     .unwrap();
     let output = AgentOutput::new(AgentOutputPayload::AssetPlan(vec![
         crate::story_plan::AssetTaskPlan {
+            reference_image: None,
+            aspect_ratio: None,
+
             id: "figure_alice_happy".into(),
             kind: "figure".into(),
             target_stem: "alice_happy".into(),

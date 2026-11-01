@@ -63,6 +63,12 @@ impl MediaAdaptor {
         ctx: &MediaCtx<'_>,
         request: &ImageRequest<'_>,
     ) -> Result<GeneratedMedia, String> {
+        if request.reference.is_some() {
+            crate::ai::provider_capability::require_reference_image_capability(
+                ctx.cfg,
+                request.model,
+            )?;
+        }
         match self {
             MediaAdaptor::OpenAiCompatible => openai::generate_image(ctx.cfg, request).await,
             MediaAdaptor::DashScope => dashscope::generate_image(ctx, request).await,
@@ -99,6 +105,36 @@ fn unsupported(provider: &str, label: &str) -> String {
 mod tests {
     use super::*;
     use crate::ai::registry;
+
+    #[tokio::test]
+    async fn unsupported_reference_fails_before_any_network_request() {
+        let cfg = crate::ai::config::AiProviderConfig {
+            provider: "custom".into(),
+            model: "unknown-model".into(),
+            api_key: String::new(),
+            base_url: "http://127.0.0.1:1".into(),
+        };
+        let reference = crate::ai::gateway::types::ImageReference {
+            mime: "image/png".into(),
+            base64: "QUJD".into(),
+        };
+        let error = MediaAdaptor::OpenAiCompatible
+            .image(
+                &MediaCtx {
+                    cfg: &cfg,
+                    app_handle: None,
+                },
+                &ImageRequest {
+                    model: "unknown-model",
+                    prompt: "portrait",
+                    reference: Some(&reference),
+                    aspect_ratio: Some("3:4"),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.contains("不支持参考图垫图"), "{error}");
+    }
 
     /// The registry decides what the settings UI offers; this table decides
     /// what actually runs. If they disagree, a user can pick a provider that

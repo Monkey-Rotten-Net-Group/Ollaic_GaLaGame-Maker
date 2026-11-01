@@ -34,6 +34,8 @@ impl ChatGateway for FixtureChatGateway {
             let scene_drafts = field::<Vec<_>>(&input, "sceneDrafts");
             let asset_plan = field::<Vec<_>>(&input, "assetPlan");
             let ctx = AgentContext {
+                target_scene_id: None,
+                preceding_scene_tail: "",
                 chat: self,
                 prompt: input["productionBrief"].as_str().unwrap_or_default(),
                 instruction: input["stepInstruction"].as_str().unwrap_or_default(),
@@ -44,8 +46,11 @@ impl ChatGateway for FixtureChatGateway {
                 characters: &characters,
                 scene_plans: &scene_plans,
                 branches: &branches,
+                variables: &[],
                 scene_drafts: &scene_drafts,
                 asset_plan: &asset_plan,
+                visual_style: &Default::default(),
+                allow_local_fallback: true,
             };
             let output = if system.contains("Plan / 制片策划") {
                 super::plan::fixture_output(&ctx)
@@ -73,8 +78,9 @@ impl ChatGateway for FixtureChatGateway {
                     chapters,
                     scene_plans,
                     branches,
+                    variables,
                 } => {
-                    json!({ "chapters": chapters, "scenePlans": scene_plans, "branches": branches })
+                    json!({ "chapters": chapters, "scenePlans": scene_plans, "branches": branches, "variables": variables })
                 }
                 AgentOutputPayload::Characters(characters) => json!({ "characters": characters }),
                 AgentOutputPayload::SceneDrafts(drafts) => json!({ "sceneDrafts": drafts }),

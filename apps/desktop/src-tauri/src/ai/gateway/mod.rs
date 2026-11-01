@@ -67,12 +67,13 @@ pub fn emit_media_generation_progress(
     );
 }
 
-/// Generate an image with the saved image provider.
-pub async fn generate_image(
+/// Generate an image with an explicit aspect ratio hint.
+pub async fn generate_image_with_aspect_ratio(
     app_handle: Option<&AppHandle>,
     prompt: &str,
     model: &str,
     reference: Option<&ImageReference>,
+    aspect_ratio: Option<&str>,
 ) -> Result<GeneratedMedia, String> {
     let cfg = config::load_image_config();
     let model = prepare(&cfg, model, prompt, Modality::Image, "图片", "图片生成描述")?;
@@ -84,6 +85,7 @@ pub async fn generate_image(
         model: &model,
         prompt,
         reference,
+        aspect_ratio,
     };
     resolve(&cfg, Modality::Image)?.image(&ctx, &request).await
 }

@@ -337,13 +337,31 @@ pub(crate) async fn generate_image_media(
     model: String,
     reference_image_path: Option<String>,
 ) -> Result<GeneratedMedia, String> {
+    generate_image_media_with_aspect_ratio(app_handle, prompt, model, reference_image_path, None)
+        .await
+}
+
+pub(crate) async fn generate_image_media_with_aspect_ratio(
+    app_handle: Option<&AppHandle>,
+    prompt: String,
+    model: String,
+    reference_image_path: Option<String>,
+    aspect_ratio: Option<String>,
+) -> Result<GeneratedMedia, String> {
     // Optional reference image (image-to-image). Only some providers accept
     // one; the rest ignore it rather than failing.
     let reference = match reference_image_path {
         Some(path) if !path.trim().is_empty() => Some(read_image_reference(path.trim())?),
         _ => None,
     };
-    gateway::generate_image(app_handle, &prompt, &model, reference.as_ref()).await
+    gateway::generate_image_with_aspect_ratio(
+        app_handle,
+        &prompt,
+        &model,
+        reference.as_ref(),
+        aspect_ratio.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]

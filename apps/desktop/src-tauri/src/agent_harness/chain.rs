@@ -342,6 +342,7 @@ mod tests {
                 entry_scene: "opening".into(),
                 edges: vec![],
             },
+            variables: vec![],
         });
         let error = commit_output(&mut plan, &def, &output).unwrap_err();
         assert!(error.contains("unknown chapter"), "{error}");

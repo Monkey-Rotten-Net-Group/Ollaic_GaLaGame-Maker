@@ -125,6 +125,11 @@ pub fn pipeline_get_capabilities(orchestrator: tauri::State<'_, Orchestrator>) -
             Some("未配置可用的对话模型，请在 AI 设置中填写模型和接口信息".into())
         },
         asset_error: orchestrator.pipeline.asset_capability_error(),
+        reference_image_warning: {
+            let config = crate::ai::config::load_image_config();
+            (!crate::ai::provider_capability::supports_reference_image(&config.provider, &config.model))
+                .then(|| "当前图片模型不支持参考图垫图，角色不同表情可能出现长相漂移；建议切换至 Gemini、Seedream 或 SD WebUI。".into())
+        },
     }
 }
 
@@ -133,6 +138,7 @@ pub fn pipeline_get_capabilities(orchestrator: tauri::State<'_, Orchestrator>) -
 pub struct FlowCapabilities {
     chat_error: Option<String>,
     asset_error: Option<String>,
+    reference_image_warning: Option<String>,
 }
 
 #[tauri::command]

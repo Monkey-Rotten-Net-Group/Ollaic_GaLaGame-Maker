@@ -52,6 +52,7 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
     }
 
     let generator = context.asset_generators.create(
+        Some(context.project_path),
         context.agent_context.allow_local_fallback,
         context.cancelled.clone(),
     );

@@ -158,6 +158,7 @@ impl AssetGeneratorFactory for MissingMediaCapabilityFactory {
 
     fn create(
         &self,
+        _project_path: Option<&std::path::Path>,
         _allow_local_fallback: bool,
         _cancelled: Arc<std::sync::atomic::AtomicBool>,
     ) -> Arc<dyn AssetGenerator> {
@@ -270,6 +271,8 @@ fn pipeline_test_character(name: &str) -> crate::characters::types::Character {
 
 fn chapters_output() -> AgentOutput {
     AgentOutput::new(AgentOutputPayload::Outline {
+        variables: Vec::new(),
+
         chapters: vec![
             ChapterPlan {
                 id: "ch1".to_string(),

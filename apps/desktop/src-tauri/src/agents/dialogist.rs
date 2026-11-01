@@ -242,6 +242,8 @@ fn local_draft(
 
 fn beat(speaker: Option<&str>, text: &str) -> DialogueBeat {
     DialogueBeat {
+        kind: crate::story_plan::types::BeatKind::Dialogue,
+
         speaker: speaker.map(str::to_string),
         text: text.to_string(),
         figure_cues: Vec::new(),
@@ -365,6 +367,17 @@ mod tests {
             }]
         }"#;
         let plans = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
@@ -382,6 +395,17 @@ mod tests {
     #[test]
     fn duplicate_scene_draft_reports_exact_scene_id_path() {
         let plans = ["opening", "ending"].map(|id| ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: id.into(),
             file: format!("{id}.txt"),
             chapter_id: "ch1".into(),
@@ -391,6 +415,8 @@ mod tests {
         });
         let beats = (0..8)
             .map(|index| DialogueBeat {
+                kind: crate::story_plan::types::BeatKind::Dialogue,
+
                 speaker: None,
                 text: format!("beat {index}"),
                 figure_cues: Vec::new(),
@@ -417,6 +443,17 @@ mod tests {
     #[test]
     fn local_opening_is_readable_dialogue() {
         let scene = ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
@@ -453,6 +490,8 @@ mod tests {
             title: "Opening".into(),
             stage_managed: true,
             beats: vec![DialogueBeat {
+                kind: crate::story_plan::types::BeatKind::Dialogue,
+
                 speaker: Some("艾拉".into()),
                 text: "走吧。".into(),
                 figure_cues: vec![FigureCue {
@@ -468,11 +507,24 @@ mod tests {
 
         assert_eq!(drafts[0].beats[0].figure_cues[0].character_id, "ailla");
         drafts[0].beats.extend((0..7).map(|index| DialogueBeat {
+            kind: crate::story_plan::types::BeatKind::Dialogue,
+
             speaker: None,
             text: format!("Narration {index}"),
             figure_cues: Vec::new(),
         }));
         let plans = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
@@ -492,6 +544,17 @@ mod tests {
             ]))
             .unwrap();
         let plans = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "ambush".into(),
             file: "ambush.txt".into(),
             chapter_id: "ch2".into(),
@@ -500,6 +563,8 @@ mod tests {
             character_ids: vec!["erin".into()],
         }];
         let mut beats = vec![DialogueBeat {
+            kind: crate::story_plan::types::BeatKind::Dialogue,
+
             speaker: Some("毒蛇".into()),
             text: "抓住他们。".into(),
             figure_cues: vec![FigureCue {
@@ -510,6 +575,8 @@ mod tests {
             }],
         }];
         beats.extend((0..7).map(|index| DialogueBeat {
+            kind: crate::story_plan::types::BeatKind::Dialogue,
+
             speaker: None,
             text: format!("Narration {index}"),
             figure_cues: Vec::new(),
@@ -529,6 +596,17 @@ mod tests {
         let characters: Vec<crate::characters::types::Character> =
             serde_json::from_value(serde_json::json!([{"id":"alice","name":"Alice"}])).unwrap();
         let plans = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
@@ -538,6 +616,8 @@ mod tests {
         }];
         let mut beats = (0..8)
             .map(|index| DialogueBeat {
+                kind: crate::story_plan::types::BeatKind::Dialogue,
+
                 speaker: None,
                 text: format!("Beat {index}"),
                 figure_cues: Vec::new(),

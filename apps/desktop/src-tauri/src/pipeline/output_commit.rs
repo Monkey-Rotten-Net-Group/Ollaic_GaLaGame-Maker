@@ -69,6 +69,8 @@ pub(crate) fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
             clear_after_memory(plan);
         }
         AgentOutputPayload::Outline {
+            variables: _,
+
             chapters,
             scene_plans,
             branches,
@@ -497,6 +499,8 @@ pub(crate) fn serialize_output(out: &AgentOutput) -> String {
             "worldbook": worldbook.chars().take(500).collect::<String>(), "glossary": glossary
         }),
         AgentOutputPayload::Outline {
+            variables: _,
+
             chapters,
             scene_plans,
             branches,
@@ -537,7 +541,11 @@ pub(crate) fn describe_output(out: &AgentOutput) -> String {
     let changed = match &out.payload {
         AgentOutputPayload::Synopsis(_) => "synopsis".to_string(),
         AgentOutputPayload::Memory { .. } => "memory".to_string(),
-        AgentOutputPayload::Outline { chapters, .. } => format!("chapters:{}", chapters.len()),
+        AgentOutputPayload::Outline {
+            variables: _,
+            chapters,
+            ..
+        } => format!("chapters:{}", chapters.len()),
         AgentOutputPayload::Characters(values) => format!("characters:{}", values.len()),
         AgentOutputPayload::SceneDrafts(values) => format!("sceneDrafts:{}", values.len()),
         AgentOutputPayload::AssetPlan(values) => format!("assetPlan:{}", values.len()),

@@ -17,6 +17,9 @@ fn fresh_project_dir(name: &str) -> std::path::PathBuf {
 fn plan_round_trips_through_disk() {
     let project = fresh_project_dir("round_trip");
     let plan = StoryPlan {
+        visual_style: Default::default(),
+        variables: Vec::new(),
+
         version: 1,
         prompt: "赛博朋克校园恋爱悬疑短篇".to_string(),
         synopsis: "一名转学生在校园服务器里发现了一段不该存在的记忆。".to_string(),
@@ -43,6 +46,17 @@ fn plan_round_trips_through_disk() {
         },
         characters: Vec::new(),
         scene_plans: vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "opening".to_string(),
             file: "start.txt".to_string(),
             chapter_id: "ch1".to_string(),
@@ -53,6 +67,9 @@ fn plan_round_trips_through_disk() {
         branches: BranchGraph {
             entry_scene: "opening".to_string(),
             edges: vec![BranchEdge {
+                condition: None,
+                effects: Vec::new(),
+
                 from: "opening".to_string(),
                 to: "opening".to_string(),
                 choice: None,
@@ -63,12 +80,17 @@ fn plan_round_trips_through_disk() {
             title: "异常信号".to_string(),
             stage_managed: false,
             beats: vec![DialogueBeat {
+                kind: crate::story_plan::types::BeatKind::Dialogue,
+
                 speaker: None,
                 text: "雨落在窗上。".to_string(),
                 figure_cues: Vec::new(),
             }],
         }],
         asset_plan: vec![AssetTaskPlan {
+            reference_image: None,
+            aspect_ratio: None,
+
             id: "bg_opening".to_string(),
             kind: "background".to_string(),
             target_stem: "bg_opening".to_string(),
@@ -107,6 +129,9 @@ fn load_returns_none_when_no_plan_exists() {
 #[test]
 fn rejects_plan_with_unsupported_version() {
     let plan = StoryPlan {
+        visual_style: Default::default(),
+        variables: Vec::new(),
+
         version: 99,
         prompt: "p".to_string(),
         ..StoryPlan::new("")
@@ -138,6 +163,17 @@ fn rejects_figure_cue_for_character_outside_scene_cast() {
                 .unwrap(),
         ];
     plan.scene_plans = vec![ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "chapter".into(),
@@ -150,6 +186,8 @@ fn rejects_figure_cue_for_character_outside_scene_cast() {
         title: "Opening".into(),
         stage_managed: true,
         beats: vec![DialogueBeat {
+            kind: crate::story_plan::types::BeatKind::Dialogue,
+
             speaker: None,
             text: "The room is empty.".into(),
             figure_cues: vec![FigureCue {
@@ -191,6 +229,9 @@ fn rejects_outline_with_duplicate_chapter_ids() {
 fn refuses_to_save_an_invalid_plan() {
     let project = fresh_project_dir("invalid_save");
     let plan = StoryPlan {
+        visual_style: Default::default(),
+        variables: Vec::new(),
+
         version: 2,
         prompt: "p".to_string(),
         synopsis: String::new(),
@@ -219,6 +260,17 @@ fn rejects_scene_plan_with_path_traversal() {
         summary: "开场".to_string(),
     });
     plan.scene_plans.push(ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".to_string(),
         file: "../start.txt".to_string(),
         chapter_id: "ch1".to_string(),
@@ -271,6 +323,17 @@ fn invalid_cross_node_reference_reports_json_path() {
         summary: "Summary".into(),
     });
     plan.scene_plans.push(ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "missing".into(),

@@ -166,6 +166,8 @@ impl Agent for OutlineAgent {
             .await?
             {
                 return Ok(AgentOutput::new(AgentOutputPayload::Outline {
+variables: Vec::new(),
+
                     chapters: routed.value.chapters,
                     scene_plans: routed.value.scene_plans,
                     branches: routed.value.branches,
@@ -259,6 +261,8 @@ impl Agent for OutlineAgent {
                 ],
             };
             Ok(AgentOutput::new(AgentOutputPayload::Outline {
+                variables: Vec::new(),
+
                 chapters,
                 scene_plans,
                 branches,
@@ -277,6 +281,17 @@ fn scene(
     characters: &[&str],
 ) -> ScenePlan {
     ScenePlan {
+        location_id: None,
+        time_of_day: None,
+        approval_status: Default::default(),
+        rolling_summary: None,
+        pov_character_id: None,
+        emotional_arc: String::new(),
+        required_beats: Vec::new(),
+        forbidden_reveals: Vec::new(),
+        entry_state: Vec::new(),
+        min_beats: 24,
+
         id: id.to_string(),
         file: file.to_string(),
         chapter_id: chapter_id.to_string(),
@@ -288,6 +303,9 @@ fn scene(
 
 fn edge(from: &str, to: &str, choice: Option<&str>) -> BranchEdge {
     BranchEdge {
+        condition: None,
+        effects: Vec::new(),
+
         from: from.to_string(),
         to: to.to_string(),
         choice: choice.map(str::to_string),
@@ -331,6 +349,11 @@ mod tests {
     async fn outline_agent_produces_two_chapters_from_synopsis() {
         let agent = OutlineAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
+            variables: &[],
+
             chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
@@ -347,6 +370,8 @@ mod tests {
         };
         let out = agent.run(&ctx).await.unwrap();
         let AgentOutputPayload::Outline {
+            variables: _,
+
             chapters,
             scene_plans,
             branches,

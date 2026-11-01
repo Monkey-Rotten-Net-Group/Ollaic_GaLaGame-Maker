@@ -603,6 +603,11 @@ impl Pipeline {
         }
 
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &plan.visual_style,
+            variables: &[],
+
             chat: self.chat.as_ref(),
             prompt: &production_brief,
             instruction: &prompt,

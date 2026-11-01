@@ -87,6 +87,8 @@ enum ContentTypeCheck {
     ConfiguredEndpoint,
 }
 
+type AddressPolicy = Box<dyn Fn(&reqwest::Url, IpAddr) -> bool + Send + Sync>;
+
 /// Per-fetch policy. `total_deadline` covers DNS resolution, connection,
 /// every redirect, and the response body — exceeding it for *any* reason
 /// aborts the fetch. `allow_address` decides whether a resolved IP is a
@@ -97,7 +99,7 @@ enum ContentTypeCheck {
 pub struct FetchPolicy {
     pub total_deadline: Duration,
     pub kind: MediaKind,
-    pub allow_address: Box<dyn Fn(&reqwest::Url, IpAddr) -> bool + Send + Sync>,
+    pub allow_address: AddressPolicy,
 }
 
 pub trait MediaDnsResolver: Send + Sync {

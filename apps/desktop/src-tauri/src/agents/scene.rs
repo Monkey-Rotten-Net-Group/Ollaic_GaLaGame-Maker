@@ -335,6 +335,17 @@ mod tests {
     async fn scene_agent_compiles_multiple_linked_webgal_files() {
         let plans = vec![
             ScenePlan {
+                location_id: None,
+                time_of_day: None,
+                approval_status: Default::default(),
+                rolling_summary: None,
+                pov_character_id: None,
+                emotional_arc: String::new(),
+                required_beats: Vec::new(),
+                forbidden_reveals: Vec::new(),
+                entry_state: Vec::new(),
+                min_beats: 24,
+
                 id: "opening".into(),
                 file: "start.txt".into(),
                 chapter_id: "ch1".into(),
@@ -343,6 +354,17 @@ mod tests {
                 character_ids: vec!["heroine".into(), "friend".into()],
             },
             ScenePlan {
+                location_id: None,
+                time_of_day: None,
+                approval_status: Default::default(),
+                rolling_summary: None,
+                pov_character_id: None,
+                emotional_arc: String::new(),
+                required_beats: Vec::new(),
+                forbidden_reveals: Vec::new(),
+                entry_state: Vec::new(),
+                min_beats: 24,
+
                 id: "end".into(),
                 file: "ending.txt".into(),
                 chapter_id: "ch1".into(),
@@ -358,6 +380,8 @@ mod tests {
                 stage_managed: true,
                 beats: vec![
                     DialogueBeat {
+                        kind: crate::story_plan::types::BeatKind::Dialogue,
+
                         speaker: Some("林夏".into()),
                         text: "你终于来了。".into(),
                         figure_cues: vec![
@@ -376,6 +400,8 @@ mod tests {
                         ],
                     },
                     DialogueBeat {
+                        kind: crate::story_plan::types::BeatKind::Dialogue,
+
                         speaker: None,
                         text: "她离开了教室。".into(),
                         figure_cues: vec![FigureCue {
@@ -392,6 +418,8 @@ mod tests {
                 title: "结尾".into(),
                 stage_managed: false,
                 beats: vec![DialogueBeat {
+                    kind: crate::story_plan::types::BeatKind::Dialogue,
+
                     speaker: None,
                     text: "天亮了。".into(),
                     figure_cues: Vec::new(),
@@ -401,6 +429,9 @@ mod tests {
         let branches = BranchGraph {
             entry_scene: "opening".into(),
             edges: vec![BranchEdge {
+                condition: None,
+                effects: Vec::new(),
+
                 from: "opening".into(),
                 to: "end".into(),
                 choice: None,
@@ -412,6 +443,11 @@ mod tests {
         ];
         let agent = SceneAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
+            variables: &[],
+
             chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
@@ -425,6 +461,9 @@ mod tests {
             scene_drafts: &drafts,
             asset_plan: &[
                 AssetTaskPlan {
+                    reference_image: None,
+                    aspect_ratio: None,
+
                     id: "figure_heroine_default".into(),
                     kind: "figure".into(),
                     target_stem: "heroine_default".into(),
@@ -435,6 +474,9 @@ mod tests {
                     status: "pending".into(),
                 },
                 AssetTaskPlan {
+                    reference_image: None,
+                    aspect_ratio: None,
+
                     id: "figure_friend_surprised".into(),
                     kind: "figure".into(),
                     target_stem: "friend_surprised".into(),
@@ -478,6 +520,17 @@ mod tests {
     #[test]
     fn scene_input_errors_report_cross_node_paths() {
         let plans = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
+            approval_status: Default::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: 24,
+
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
@@ -494,6 +547,8 @@ mod tests {
             title: "Opening".into(),
             stage_managed: false,
             beats: vec![DialogueBeat {
+                kind: crate::story_plan::types::BeatKind::Dialogue,
+
                 speaker: None,
                 text: "Text".into(),
                 figure_cues: Vec::new(),
@@ -502,6 +557,9 @@ mod tests {
         let branches = BranchGraph {
             entry_scene: "opening".into(),
             edges: vec![BranchEdge {
+                condition: None,
+                effects: Vec::new(),
+
                 from: "opening".into(),
                 to: "missing".into(),
                 choice: Some("Go".into()),
