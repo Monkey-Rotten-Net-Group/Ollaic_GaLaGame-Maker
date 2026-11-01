@@ -450,3 +450,18 @@ fn failed_partial_scene_commit_restores_written_scene_and_persisted_approvals() 
     );
     std::fs::remove_dir_all(project).unwrap();
 }
+
+#[test]
+fn synopsis_output_populates_default_visual_style_when_empty() {
+    let mut plan = StoryPlan::new("test");
+    assert!(plan.visual_style.style_prompt.is_empty());
+
+    apply_output(
+        &mut plan,
+        &AgentOutput::new(AgentOutputPayload::Synopsis("一段新的故事梗概".into())),
+    );
+
+    assert!(!plan.visual_style.style_prompt.is_empty());
+    assert!(!plan.visual_style.palette_and_lighting.is_empty());
+    assert!(!plan.visual_style.negative_prompt.is_empty());
+}

@@ -102,6 +102,12 @@ impl Agent for SceneAgent {
                     .filter(|edge| edge.from == scene.id)
                     .collect();
                 if outgoing.len() > 1 || outgoing.iter().any(|edge| edge.choice.is_some()) {
+                    let fallback_target = outgoing
+                        .iter()
+                        .find(|edge| edge.condition.is_none())
+                        .or_else(|| outgoing.first())
+                        .and_then(|edge| by_file.get(edge.to.as_str()).copied())
+                        .unwrap_or(&scene.file);
                     let mut trampolines: Vec<(String, &[String], &str, Option<&str>)> = Vec::new();
                     let mut choices = Vec::new();
 
@@ -112,7 +118,7 @@ impl Agent for SceneAgent {
                             .copied()
                             .expect("validated branch target");
 
-                        if !edge.effects.is_empty() {
+                        if !edge.effects.is_empty() || edge.condition.is_some() {
                             let trampoline_lbl = format!("lbl_edge_{i}");
                             choices.push(format!("{}:{}", label, trampoline_lbl));
                             trampolines.push((
@@ -135,6 +141,11 @@ impl Agent for SceneAgent {
                         }
                         if let Some(cond) = condition {
                             lines.push(format!("changeScene:{} -when={};", target_file, cond));
+                            if fallback_target != target_file {
+                                lines.push(format!("changeScene:{};", fallback_target));
+                            } else {
+                                lines.push("end;".to_string());
+                            }
                         } else {
                             lines.push(format!("changeScene:{};", target_file));
                         }
@@ -835,5 +846,91 @@ mod tests {
         assert!(parsed
             .iter()
             .any(|n| matches!(n.cmd_type, crate::webgal::types::CommandType::ChangeScene)));
+    }
+
+    #[tokio::test]
+    async fn conditional_choice_without_effects_uses_trampoline_and_emits_fallback_jump() {
+        let agent = SceneAgent;
+        let plans = vec![
+            ScenePlan {
+                id: "decision".into(),
+                file: "start.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "抉择".into(),
+                summary: "分岔".into(),
+                ..Default::default()
+            },
+            ScenePlan {
+                id: "true_end".into(),
+                file: "true_end.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "真结局".into(),
+                summary: "信任".into(),
+                ..Default::default()
+            },
+            ScenePlan {
+                id: "normal_end".into(),
+                file: "normal_end.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "普通结局".into(),
+                summary: "离别".into(),
+                ..Default::default()
+            },
+        ];
+        let drafts = vec![SceneDraft {
+            scene_id: "decision".into(),
+            title: "抉择".into(),
+            stage_managed: false,
+            beats: vec![DialogueBeat {
+                kind: BeatKind::Dialogue,
+                speaker: None,
+                text: "现在必须选了。".into(),
+                figure_cues: vec![],
+            }],
+        }];
+        let branches = BranchGraph {
+            entry_scene: "decision".into(),
+            edges: vec![
+                BranchEdge {
+                    from: "decision".into(),
+                    to: "true_end".into(),
+                    choice: Some("相信她".into()),
+                    condition: Some("linxia_trust>=1".into()),
+                    effects: vec![],
+                },
+                BranchEdge {
+                    from: "decision".into(),
+                    to: "normal_end".into(),
+                    choice: Some("转身离开".into()),
+                    condition: None,
+                    effects: vec![],
+                },
+            ],
+        };
+        let ctx = AgentContext {
+            target_scene_id: Some("decision"),
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
+            chat: &crate::agents::router::NoChatGateway,
+            prompt: "",
+            instruction: "",
+            synopsis: "",
+            chapters: &[],
+            worldbook: "",
+            glossary: &Default::default(),
+            characters: &[],
+            scene_plans: &plans,
+            branches: &branches,
+            variables: &[],
+            scene_drafts: &drafts,
+            asset_plan: &[],
+            allow_local_fallback: true,
+        };
+        let AgentOutputPayload::Scenes(scripts) = agent.run(&ctx).await.unwrap().payload else {
+            panic!("expected scene scripts")
+        };
+        let content = &scripts[0].content;
+        assert!(content.contains("choose:相信她:lbl_edge_0|转身离开:normal_end.txt;"));
+        assert!(content.contains("label:lbl_edge_0;\nchangeScene:true_end.txt -when=linxia_trust>=1;\nchangeScene:normal_end.txt;"));
     }
 }

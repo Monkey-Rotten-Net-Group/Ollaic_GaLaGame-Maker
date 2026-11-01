@@ -58,6 +58,20 @@ pub(crate) fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
     match &out.payload {
         AgentOutputPayload::Synopsis(synopsis) => {
             plan.synopsis = synopsis.clone();
+            if plan.visual_style.style_prompt.trim().is_empty() {
+                plan.visual_style.style_prompt =
+                    "日系二次元视觉小说赛璐璐与清透厚涂结合画风，线条干净利落，五官精致统一"
+                        .to_string();
+            }
+            if plan.visual_style.palette_and_lighting.trim().is_empty() {
+                plan.visual_style.palette_and_lighting =
+                    "电影感柔和冷暖对比光影，色调清澈且富有叙事氛围".to_string();
+            }
+            if plan.visual_style.negative_prompt.trim().is_empty() {
+                plan.visual_style.negative_prompt =
+                    "多人同框, 杂乱背景, 水印, 文字, 肢体畸形, 手指残缺, 头顶裁切, 画风突变"
+                        .to_string();
+            }
             plan.memory = Default::default();
             clear_after_memory(plan);
         }

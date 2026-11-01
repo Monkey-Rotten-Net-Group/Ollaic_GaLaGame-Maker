@@ -89,42 +89,50 @@ export function deriveSceneEntryVariables(
     variables[v.id] = v.initialValue ?? "0";
   }
 
-  // 2. Resolve target file
-  let targetFile = targetSceneIdOrFile;
-  const matchedPlan = plan.scenePlans?.find(
-    (scene) =>
-      scene.id === targetSceneIdOrFile || scene.file === targetSceneIdOrFile,
-  );
-  if (matchedPlan) {
-    targetFile = matchedPlan.file;
-  }
+  const scenePlans = plan.scenePlans ?? [];
+  const resolveCanonicalNode = (idOrFile: string): string => {
+    const matched = scenePlans.find(
+      (scene) => scene.id === idOrFile || scene.file === idOrFile,
+    );
+    return matched ? matched.id : idOrFile;
+  };
 
-  const entryScene = plan.branches?.entryScene;
-  if (!entryScene || targetFile === entryScene) {
+  // 2. Resolve target scene canonical node key
+  const targetNode = resolveCanonicalNode(targetSceneIdOrFile);
+  const rawEntry = plan.branches?.entryScene;
+  if (!rawEntry) {
+    return { variables, precedingScenes: [] };
+  }
+  const entryNode = resolveCanonicalNode(rawEntry);
+  if (targetNode === entryNode) {
     return { variables, precedingScenes: [] };
   }
 
-  // 3. BFS search from entryScene to targetFile
+  // 3. BFS search from entryNode to targetNode (normalizing both scene IDs and filenames)
   const edges = plan.branches?.edges ?? [];
-  const queue: Array<{ current: string; path: string[]; effects: string[] }> = [
-    { current: entryScene, path: [entryScene], effects: [] },
-  ];
-  const visited = new Set<string>([entryScene]);
+  const queue: Array<{
+    current: string;
+    path: string[];
+    effects: string[];
+  }> = [{ current: entryNode, path: [rawEntry], effects: [] }];
+  const visited = new Set<string>([entryNode]);
 
   let foundPath: { path: string[]; effects: string[] } | null = null;
 
   while (queue.length > 0) {
     const step = queue.shift()!;
-    if (step.current === targetFile) {
+    if (step.current === targetNode) {
       foundPath = { path: step.path, effects: step.effects };
       break;
     }
 
     for (const edge of edges) {
-      if (edge.from === step.current && !visited.has(edge.to)) {
-        visited.add(edge.to);
+      const fromNode = resolveCanonicalNode(edge.from);
+      const toNode = resolveCanonicalNode(edge.to);
+      if (fromNode === step.current && !visited.has(toNode)) {
+        visited.add(toNode);
         queue.push({
-          current: edge.to,
+          current: toNode,
           path: [...step.path, edge.to],
           effects: [...step.effects, ...(edge.effects ?? [])],
         });

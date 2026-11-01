@@ -130,6 +130,78 @@ describe("scene-entry-state", () => {
     ]);
   });
 
+  it("derives entry variables when branch edges use canonical scene IDs that differ from filenames", () => {
+    const plan: StoryPlan = {
+      version: 1,
+      prompt: "test",
+      synopsis: "synopsis",
+      memory: { worldbook: "world", glossary: {} },
+      chapters: [],
+      characters: [],
+      scenes: ["start.txt", "chapter_01.txt", "decision.txt"],
+      scenePlans: [
+        {
+          id: "opening",
+          file: "start.txt",
+          chapterId: "c1",
+          title: "开场",
+          summary: "",
+          characterIds: [],
+        },
+        {
+          id: "encounter",
+          file: "chapter_01.txt",
+          chapterId: "c1",
+          title: "相遇",
+          summary: "",
+          characterIds: [],
+        },
+        {
+          id: "decision",
+          file: "decision.txt",
+          chapterId: "c1",
+          title: "抉择",
+          summary: "",
+          characterIds: [],
+        },
+      ],
+      sceneDrafts: [],
+      assetPlan: [],
+      pipelineRuns: [],
+      variables: [
+        {
+          id: "linxia_trust",
+          kind: "integer",
+          initialValue: "0",
+          description: "好感度",
+        },
+      ],
+      branches: {
+        entryScene: "opening",
+        edges: [
+          {
+            from: "opening",
+            to: "encounter",
+            effects: ["linxia_trust=linxia_trust+1"],
+          },
+          {
+            from: "encounter",
+            to: "decision",
+            effects: ["linxia_trust=linxia_trust+2"],
+          },
+        ],
+      },
+    };
+
+    const byId = deriveSceneEntryVariables(plan, "decision");
+    expect(byId.variables.linxia_trust).toBe("3");
+    expect(byId.precedingScenes).toEqual(["opening", "encounter"]);
+
+    const byFile = deriveSceneEntryVariables(plan, "decision.txt");
+    expect(byFile.variables.linxia_trust).toBe("3");
+    expect(byFile.precedingScenes).toEqual(["opening", "encounter"]);
+  });
+
   it("wraps script with setVar statements", () => {
     const raw = ":夕阳下的旧校舍。;\n陆川:我们到了。;";
     const wrapped = wrapScriptWithEntryVariables(raw, {
