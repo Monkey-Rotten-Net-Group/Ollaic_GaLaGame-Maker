@@ -48,6 +48,15 @@ async fn set_runtime_project(
 }
 
 #[tauri::command]
+async fn set_runtime_preview_entry(
+    server: tauri::State<'_, RuntimeServer>,
+    script: Option<String>,
+) -> Result<(), String> {
+    server.set_preview_entry(script).await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn set_runtime_template_dir(
     server: tauri::State<'_, RuntimeServer>,
     template_dir: String,
@@ -194,6 +203,7 @@ pub fn run() {
             // Runtime preview server
             get_runtime_url,
             set_runtime_project,
+            set_runtime_preview_entry,
             set_runtime_template_dir,
             runtime_broadcast,
             open_in_browser,

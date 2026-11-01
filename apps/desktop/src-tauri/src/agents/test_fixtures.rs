@@ -34,8 +34,8 @@ impl ChatGateway for FixtureChatGateway {
             let scene_drafts = field::<Vec<_>>(&input, "sceneDrafts");
             let asset_plan = field::<Vec<_>>(&input, "assetPlan");
             let ctx = AgentContext {
-                target_scene_id: None,
-                preceding_scene_tail: "",
+            target_scene_id: None,
+            preceding_scene_tail: "",
                 chat: self,
                 prompt: input["productionBrief"].as_str().unwrap_or_default(),
                 instruction: input["stepInstruction"].as_str().unwrap_or_default(),

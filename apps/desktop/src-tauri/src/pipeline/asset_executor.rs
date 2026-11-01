@@ -89,11 +89,12 @@ struct ConfiguredAssetGenerator {
 
 impl AssetGenerator for ConfiguredAssetGenerator {
     fn preflight(&self, task: &AssetTask) -> Result<(), String> {
-        // BGM/SFX are deliberately manual-only. This check must run before
-        // the local-fallback shortcut so fallback mode cannot bind a silent
-        // placeholder as if it were a real user-selected audio asset.
+        // BGM/SFX are manual-only unless local fallback is enabled to supply bundled mood audio.
         if task.kind == AssetKind::Bgm || task.kind == AssetKind::Sfx {
-            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件".to_string());
+            if self.local_fallback {
+                return Ok(());
+            }
+            return Err("BGM/SFX 不支持 AI 生成，请手动导入音频文件或允许本地降级".to_string());
         }
         if self.local_fallback {
             return Ok(());
@@ -138,7 +139,7 @@ impl AssetGenerator for ConfiguredAssetGenerator {
             }
             match result {
                 Ok(artifact) => Ok(artifact),
-                Err(_) if self.local_fallback => Ok(local_placeholder(task.kind)),
+                Err(_) if self.local_fallback => Ok(local_placeholder_for_task(task)),
                 Err(error) => Err(error),
             }
         })
@@ -410,7 +411,20 @@ fn matte_figure_bytes(
     matte(&bytes)
 }
 
+#[allow(dead_code)]
 pub(crate) fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
+    local_placeholder_with_context(kind, "", "")
+}
+
+pub(crate) fn local_placeholder_for_task(task: &AssetTask) -> GeneratedArtifact {
+    local_placeholder_with_context(task.kind, &task.prompt, &task.target_stem)
+}
+
+fn local_placeholder_with_context(
+    kind: AssetKind,
+    prompt: &str,
+    target_stem: &str,
+) -> GeneratedArtifact {
     if kind == AssetKind::Figure {
         let mut bytes = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
@@ -433,6 +447,15 @@ pub(crate) fn local_placeholder(kind: AssetKind) -> GeneratedArtifact {
         return GeneratedArtifact {
             extension: "png".to_string(),
             bytes,
+            used_local_fallback: true,
+        };
+    }
+    if kind == AssetKind::Bgm || kind == AssetKind::Sfx {
+        let query = format!("{prompt} {target_stem}");
+        let mood = crate::asset_queue::detect_audio_mood(&query);
+        return GeneratedArtifact {
+            extension: "wav".to_string(),
+            bytes: mood.audio_bytes().to_vec(),
             used_local_fallback: true,
         };
     }
@@ -536,15 +559,15 @@ mod tests {
         assert!(require_figure_matting_model(&Ok(PathBuf::from("model.onnx"))).is_ok());
     }
 
-    #[test]
-    fn manual_audio_stays_pending_even_when_local_fallback_is_allowed() {
+    #[tokio::test]
+    async fn manual_audio_preflight_and_fallback_behavior() {
         let factory = ConfiguredAssetGeneratorFactory::new(Ok(PathBuf::from("model.onnx")));
-        let generator = factory.create(None, true, Arc::new(AtomicBool::new(false)));
+        let strict_generator = factory.create(None, false, Arc::new(AtomicBool::new(false)));
         let task = AssetTask {
             id: "bgm_theme".into(),
             kind: AssetKind::Bgm,
             target_stem: "theme".into(),
-            prompt: "epic theme".into(),
+            prompt: "悬疑旧校舍的探案氛围".into(),
             scene_ref: None,
             character_ref: None,
             emotion: None,
@@ -558,7 +581,21 @@ mod tests {
             reference_image: None,
             aspect_ratio: None,
         };
-        assert!(generator.preflight(&task).unwrap_err().contains("手动导入"));
+        // Strict mode without import requires manual file or fallback authorization
+        assert!(strict_generator
+            .preflight(&task)
+            .unwrap_err()
+            .contains("手动导入"));
+
+        // Fallback mode allows preflight and generates bundled mood audio
+        let fallback_generator = factory.create(None, true, Arc::new(AtomicBool::new(false)));
+        assert!(fallback_generator.preflight(&task).is_ok());
+
+        let artifact = fallback_generator.generate(&task).await.unwrap();
+        assert_eq!(artifact.extension, "wav");
+        assert!(artifact.used_local_fallback);
+        assert!(!artifact.bytes.is_empty());
+        assert_eq!(&artifact.bytes[0..4], b"RIFF");
     }
 
     #[test]

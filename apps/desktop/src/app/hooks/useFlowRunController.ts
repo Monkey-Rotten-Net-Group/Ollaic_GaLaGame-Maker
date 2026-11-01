@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { initialFlowState, recordsFromSnapshot, reduceFlowEvent } from '../lib/flow-state';
-import { listAssets } from '../lib/assets-ipc';
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  initialFlowState,
+  recordsFromSnapshot,
+  reduceFlowEvent,
+} from "../lib/flow-state";
+import { listAssets } from "../lib/assets-ipc";
 import {
   assetQueueBindImportedAudio,
   assetQueueDeleteArtifact,
   assetQueueGet,
   assetQueuePreviewArtifact,
   listenPipelineEvents,
+  pipelineApproveScene,
   pipelineClearRunHistory,
   pipelineExportRunHistory,
   pipelineGetPlan,
@@ -16,24 +21,37 @@ import {
   pipelineResume,
   pipelineResumeRun,
   pipelineRetryStep,
+  pipelineRunScene,
+  pipelineRunSetup,
   pipelineSetRunPinned,
   pipelineSkipStep,
   pipelineStart,
   pipelineStepOnce,
   pipelineStop,
+  pipelineUnlockScene,
   pipelineUpdateDependencies,
   pipelineUpdateStepPrompt,
-} from '../lib/pipeline-ipc';
-import { isAssetQueueStep } from '../lib/pipeline-types';
-import type { AssetQueueState, PipelineEventRecord } from '../lib/pipeline-types';
+} from "../lib/pipeline-ipc";
+import { isAssetQueueStep } from "../lib/pipeline-types";
+import type {
+  AssetQueueState,
+  PipelineEventRecord,
+} from "../lib/pipeline-types";
 
 export function useFlowRunController(projectPath: string) {
-  const [state, dispatch] = useReducer(reduceFlowEvent, undefined, initialFlowState);
-  const [prompt, setPrompt] = useState('');
+  const [state, dispatch] = useReducer(
+    reduceFlowEvent,
+    undefined,
+    initialFlowState,
+  );
+  const [prompt, setPrompt] = useState("");
   const [allowLocalFallback, setAllowLocalFallback] = useState(false);
-  const [plan, setPlan] = useState<Awaited<ReturnType<typeof pipelineGetPlan>>>(null);
+  const [plan, setPlan] =
+    useState<Awaited<ReturnType<typeof pipelineGetPlan>>>(null);
   const [assetQueue, setAssetQueue] = useState<AssetQueueState | null>(null);
-  const [importedAudioByDir, setImportedAudioByDir] = useState<Record<string, string[]>>({});
+  const [importedAudioByDir, setImportedAudioByDir] = useState<
+    Record<string, string[]>
+  >({});
   const [events, setEvents] = useState<PipelineEventRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -47,7 +65,9 @@ export function useFlowRunController(projectPath: string) {
   const subscriptionRef = useRef(0);
   const assetQueueStepIdsRef = useRef<Set<string>>(new Set());
   const assetQueueStep = state.steps.find(isAssetQueueStep) ?? null;
-  assetQueueStepIdsRef.current = new Set(state.steps.filter(isAssetQueueStep).map((step) => step.id));
+  assetQueueStepIdsRef.current = new Set(
+    state.steps.filter(isAssetQueueStep).map((step) => step.id),
+  );
 
   const refreshPlan = useCallback(async () => {
     const request = ++planRequestRef.current;
@@ -70,8 +90,8 @@ export function useFlowRunController(projectPath: string) {
   const refreshImportedAudio = useCallback(async () => {
     try {
       const [bgm, vocal] = await Promise.all([
-        listAssets(projectPath, 'bgm'),
-        listAssets(projectPath, 'vocal'),
+        listAssets(projectPath, "bgm"),
+        listAssets(projectPath, "vocal"),
       ]);
       setImportedAudioByDir({
         bgm: bgm.map((asset) => asset.name),
@@ -82,53 +102,80 @@ export function useFlowRunController(projectPath: string) {
     }
   }, [projectPath]);
 
-  const previewAssetArtifact = useCallback((taskId: string, attempt: number) => (
-    assetQueuePreviewArtifact(projectPath, taskId, attempt)
-  ), [projectPath]);
+  const previewAssetArtifact = useCallback(
+    (taskId: string, attempt: number) =>
+      assetQueuePreviewArtifact(projectPath, taskId, attempt),
+    [projectPath],
+  );
 
-  const updateAssetArtifact = useCallback(async (
-    action: typeof assetQueueDeleteArtifact,
-    taskId: string,
-    attempt: number,
-  ) => {
-    const queue = await action(projectPath, taskId, attempt);
-    if (queue.runId === runIdRef.current) setAssetQueue(queue);
-  }, [projectPath]);
+  const updateAssetArtifact = useCallback(
+    async (
+      action: typeof assetQueueDeleteArtifact,
+      taskId: string,
+      attempt: number,
+    ) => {
+      const queue = await action(projectPath, taskId, attempt);
+      if (queue.runId === runIdRef.current) setAssetQueue(queue);
+    },
+    [projectPath],
+  );
 
-  const bindImportedAudio = useCallback(async (
-    taskId: string,
-    filename: string,
-  ) => {
-    const queue = await assetQueueBindImportedAudio(projectPath, taskId, filename);
-    if (queue.runId === runIdRef.current) setAssetQueue(queue);
-  }, [projectPath]);
+  const bindImportedAudio = useCallback(
+    async (taskId: string, filename: string) => {
+      const queue = await assetQueueBindImportedAudio(
+        projectPath,
+        taskId,
+        filename,
+      );
+      if (queue.runId === runIdRef.current) setAssetQueue(queue);
+    },
+    [projectPath],
+  );
 
-  const subscribe = useCallback(async (runId: string) => {
-    const subscription = ++subscriptionRef.current;
-    unlistenRef.current?.();
-    unlistenRef.current = null;
-    runIdRef.current = runId;
-    const unlisten = await listenPipelineEvents(runId, (event) => {
-      if (event.runId !== runId || runIdRef.current !== runId || subscriptionRef.current !== subscription) return;
-      dispatch(event);
-      setEvents((current) => [...current, { event, receivedAt: Date.now() }]);
-      if (event.type === 'runPersistenceFailed') setError(event.error);
-      if (event.type === 'stepSucceeded' || event.type === 'runCompleted') void refreshPlan();
-      if ('stepId' in event && assetQueueStepIdsRef.current.has(event.stepId)) void refreshAssetQueue();
-    });
-    if (subscriptionRef.current !== subscription || runIdRef.current !== runId) {
-      unlisten();
-      return;
-    }
-    unlistenRef.current = unlisten;
-  }, [refreshAssetQueue, refreshPlan]);
+  const subscribe = useCallback(
+    async (runId: string) => {
+      const subscription = ++subscriptionRef.current;
+      unlistenRef.current?.();
+      unlistenRef.current = null;
+      runIdRef.current = runId;
+      const unlisten = await listenPipelineEvents(runId, (event) => {
+        if (
+          event.runId !== runId ||
+          runIdRef.current !== runId ||
+          subscriptionRef.current !== subscription
+        )
+          return;
+        dispatch(event);
+        setEvents((current) => [...current, { event, receivedAt: Date.now() }]);
+        if (event.type === "runPersistenceFailed") setError(event.error);
+        if (event.type === "stepSucceeded" || event.type === "runCompleted")
+          void refreshPlan();
+        if ("stepId" in event && assetQueueStepIdsRef.current.has(event.stepId))
+          void refreshAssetQueue();
+      });
+      if (
+        subscriptionRef.current !== subscription ||
+        runIdRef.current !== runId
+      ) {
+        unlisten();
+        return;
+      }
+      unlistenRef.current = unlisten;
+    },
+    [refreshAssetQueue, refreshPlan],
+  );
 
-  const refresh = useCallback(async (runId: string) => {
-    const snapshot = await pipelineGetState(runId, projectPath);
-    if (!snapshot) return;
-    dispatch({ type: 'stateHydrated', state: snapshot });
-    setEvents((current) => current.length ? current : recordsFromSnapshot(snapshot));
-  }, [projectPath]);
+  const refresh = useCallback(
+    async (runId: string) => {
+      const snapshot = await pipelineGetState(runId, projectPath);
+      if (!snapshot) return;
+      dispatch({ type: "stateHydrated", state: snapshot });
+      setEvents((current) =>
+        current.length ? current : recordsFromSnapshot(snapshot),
+      );
+    },
+    [projectPath],
+  );
 
   const loadLatest = useCallback(async () => {
     const request = ++loadRequestRef.current;
@@ -143,9 +190,9 @@ export function useFlowRunController(projectPath: string) {
       setPlan(storyPlan);
       const latest = runs[0];
       if (!latest) {
-        setPrompt('');
+        setPrompt("");
         setAllowLocalFallback(false);
-        dispatch({ type: 'reset' });
+        dispatch({ type: "reset" });
         setEvents([]);
         setAssetQueue(null);
         setDetached(false);
@@ -154,7 +201,7 @@ export function useFlowRunController(projectPath: string) {
       }
       let snapshot = latest;
       let live = false;
-      if (latest.status === 'running' || latest.status === 'paused') {
+      if (latest.status === "running" || latest.status === "paused") {
         try {
           const current = await pipelineGetState(latest.runId, projectPath);
           if (request !== loadRequestRef.current) return;
@@ -167,13 +214,14 @@ export function useFlowRunController(projectPath: string) {
         }
         if (request !== loadRequestRef.current) return;
       }
-      dispatch({ type: 'stateHydrated', state: snapshot });
+      dispatch({ type: "stateHydrated", state: snapshot });
       setPrompt(snapshot.prompt);
       setAllowLocalFallback(snapshot.allowLocalFallback ?? false);
       setEvents(recordsFromSnapshot(snapshot));
       runIdRef.current = snapshot.runId;
       setDetached(!live);
-      if (snapshot.status === 'running' || snapshot.status === 'paused') await subscribe(snapshot.runId);
+      if (snapshot.status === "running" || snapshot.status === "paused")
+        await subscribe(snapshot.runId);
     } catch (err) {
       if (request === loadRequestRef.current) setError(String(err));
     } finally {
@@ -202,43 +250,165 @@ export function useFlowRunController(projectPath: string) {
     }
     void refreshAssetQueue();
     void refreshImportedAudio();
-    if (assetQueueStep.status !== 'running') return;
+    if (assetQueueStep.status !== "running") return;
     const timer = window.setInterval(() => void refreshAssetQueue(), 1000);
     return () => window.clearInterval(timer);
   }, [assetQueueStep, refreshAssetQueue, refreshImportedAudio]);
 
-  const runCommand = useCallback(async (command: () => Promise<void>) => {
-    if (busy) return false;
-    setBusy(true);
-    setError(null);
-    try {
-      await command();
-      return true;
-    } catch (err) {
-      setError(String(err));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, [busy]);
+  const runCommand = useCallback(
+    async (command: () => Promise<void>) => {
+      if (busy) return false;
+      setBusy(true);
+      setError(null);
+      try {
+        await command();
+        return true;
+      } catch (err) {
+        setError(String(err));
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy],
+  );
 
-  const start = useCallback(async (selectedStepIds: string[]) => {
-    if (!prompt.trim()) return;
-    return runCommand(async () => {
-      const runId = await pipelineStart(projectPath, prompt.trim(), allowLocalFallback, selectedStepIds);
-      setEvents([]);
-      planRequestRef.current += 1;
-      runIdRef.current = null;
-      subscriptionRef.current += 1;
-      unlistenRef.current?.();
-      unlistenRef.current = null;
-      dispatch({ type: 'reset' });
-      setAssetQueue(null);
-      await subscribe(runId);
-      setDetached(false);
-      await Promise.all([refresh(runId), refreshPlan()]);
-    });
-  }, [allowLocalFallback, projectPath, prompt, refresh, refreshPlan, runCommand, subscribe]);
+  const start = useCallback(
+    async (selectedStepIds: string[]) => {
+      if (!prompt.trim()) return;
+      return runCommand(async () => {
+        const runId = await pipelineStart(
+          projectPath,
+          prompt.trim(),
+          allowLocalFallback,
+          selectedStepIds,
+        );
+        setEvents([]);
+        planRequestRef.current += 1;
+        runIdRef.current = null;
+        subscriptionRef.current += 1;
+        unlistenRef.current?.();
+        unlistenRef.current = null;
+        dispatch({ type: "reset" });
+        setAssetQueue(null);
+        await subscribe(runId);
+        setDetached(false);
+        await Promise.all([refresh(runId), refreshPlan()]);
+      });
+    },
+    [
+      allowLocalFallback,
+      projectPath,
+      prompt,
+      refresh,
+      refreshPlan,
+      runCommand,
+      subscribe,
+    ],
+  );
+
+  const runSetup = useCallback(
+    async (customPrompt?: string) => {
+      const brief = (customPrompt ?? prompt).trim();
+      if (!brief) return;
+      return runCommand(async () => {
+        const runId = await pipelineRunSetup(
+          projectPath,
+          brief,
+          allowLocalFallback,
+        );
+        setEvents([]);
+        planRequestRef.current += 1;
+        runIdRef.current = null;
+        subscriptionRef.current += 1;
+        unlistenRef.current?.();
+        unlistenRef.current = null;
+        dispatch({ type: "reset" });
+        setAssetQueue(null);
+        await subscribe(runId);
+        setDetached(false);
+        await Promise.all([refresh(runId), refreshPlan()]);
+      });
+    },
+    [
+      allowLocalFallback,
+      projectPath,
+      prompt,
+      refresh,
+      refreshPlan,
+      runCommand,
+      subscribe,
+    ],
+  );
+
+  const runScene = useCallback(
+    async (sceneId: string) => {
+      return runCommand(async () => {
+        const runId = await pipelineRunScene(
+          projectPath,
+          sceneId,
+          allowLocalFallback,
+        );
+        setEvents([]);
+        planRequestRef.current += 1;
+        runIdRef.current = null;
+        subscriptionRef.current += 1;
+        unlistenRef.current?.();
+        unlistenRef.current = null;
+        dispatch({ type: "reset" });
+        setAssetQueue(null);
+        await subscribe(runId);
+        setDetached(false);
+        await Promise.all([refresh(runId), refreshPlan()]);
+      });
+    },
+    [
+      allowLocalFallback,
+      projectPath,
+      refresh,
+      refreshPlan,
+      runCommand,
+      subscribe,
+    ],
+  );
+
+  const approveScene = useCallback(
+    async (sceneId: string) => {
+      if (busy) return null;
+      setBusy(true);
+      setError(null);
+      try {
+        const updatedPlan = await pipelineApproveScene(projectPath, sceneId);
+        setPlan(updatedPlan);
+        return updatedPlan;
+      } catch (err) {
+        setError(String(err));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, projectPath],
+  );
+
+  const unlockScene = useCallback(
+    async (sceneId: string) => {
+      if (busy) return null;
+      setBusy(true);
+      setError(null);
+      try {
+        const updatedPlan = await pipelineUnlockScene(projectPath, sceneId);
+        setPlan(updatedPlan);
+        return updatedPlan;
+      } catch (err) {
+        setError(String(err));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, projectPath],
+  );
 
   const pause = useCallback(async () => {
     const runId = runIdRef.current;
@@ -295,7 +465,11 @@ export function useFlowRunController(projectPath: string) {
 
   const clearHistory = useCallback(async () => {
     const runId = runIdRef.current;
-    if (!runId || !window.confirm('清除这个 run 的全部步骤尝试记录？当前输出不会删除。')) return;
+    if (
+      !runId ||
+      !window.confirm("清除这个 run 的全部步骤尝试记录？当前输出不会删除。")
+    )
+      return;
     await runCommand(async () => {
       await pipelineClearRunHistory(runId, projectPath);
       await refresh(runId);
@@ -307,8 +481,10 @@ export function useFlowRunController(projectPath: string) {
     if (!runId) return;
     await runCommand(async () => {
       const content = await pipelineExportRunHistory(runId, projectPath);
-      const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-      const link = document.createElement('a');
+      const url = URL.createObjectURL(
+        new Blob([content], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
       link.href = url;
       link.download = `${runId}-history.json`;
       link.click();
@@ -316,46 +492,58 @@ export function useFlowRunController(projectPath: string) {
     });
   }, [projectPath, runCommand]);
 
-  const retryStep = useCallback(async (stepId: string) => {
-    const runId = runIdRef.current;
-    if (!runId) return;
-    await runCommand(async () => {
-      await subscribe(runId);
-      await pipelineRetryStep(runId, stepId, projectPath);
-      setDetached(false);
-      await refresh(runId);
-    });
-  }, [projectPath, refresh, runCommand, subscribe]);
+  const retryStep = useCallback(
+    async (stepId: string) => {
+      const runId = runIdRef.current;
+      if (!runId) return;
+      await runCommand(async () => {
+        await subscribe(runId);
+        await pipelineRetryStep(runId, stepId, projectPath);
+        setDetached(false);
+        await refresh(runId);
+      });
+    },
+    [projectPath, refresh, runCommand, subscribe],
+  );
 
-  const updatePromptAndRetry = useCallback(async (stepId: string, stepPrompt: string) => {
-    const runId = runIdRef.current;
-    if (!runId) return;
-    await runCommand(async () => {
-      await subscribe(runId);
-      await pipelineUpdateStepPrompt(runId, stepId, stepPrompt, projectPath);
-      await pipelineRetryStep(runId, stepId, projectPath);
-      setDetached(false);
-      await refresh(runId);
-    });
-  }, [projectPath, refresh, runCommand, subscribe]);
+  const updatePromptAndRetry = useCallback(
+    async (stepId: string, stepPrompt: string) => {
+      const runId = runIdRef.current;
+      if (!runId) return;
+      await runCommand(async () => {
+        await subscribe(runId);
+        await pipelineUpdateStepPrompt(runId, stepId, stepPrompt, projectPath);
+        await pipelineRetryStep(runId, stepId, projectPath);
+        setDetached(false);
+        await refresh(runId);
+      });
+    },
+    [projectPath, refresh, runCommand, subscribe],
+  );
 
-  const skipStep = useCallback(async (stepId: string) => {
-    const runId = runIdRef.current;
-    if (!runId) return;
-    await runCommand(async () => {
-      await pipelineSkipStep(runId, stepId, projectPath);
-      await refresh(runId);
-    });
-  }, [projectPath, refresh, runCommand]);
+  const skipStep = useCallback(
+    async (stepId: string) => {
+      const runId = runIdRef.current;
+      if (!runId) return;
+      await runCommand(async () => {
+        await pipelineSkipStep(runId, stepId, projectPath);
+        await refresh(runId);
+      });
+    },
+    [projectPath, refresh, runCommand],
+  );
 
-  const updateDependencies = useCallback(async (stepId: string, dependsOn: string[]) => {
-    const runId = runIdRef.current;
-    if (!runId) return;
-    await runCommand(async () => {
-      await pipelineUpdateDependencies(runId, stepId, dependsOn, projectPath);
-      await refresh(runId);
-    });
-  }, [projectPath, refresh, runCommand]);
+  const updateDependencies = useCallback(
+    async (stepId: string, dependsOn: string[]) => {
+      const runId = runIdRef.current;
+      if (!runId) return;
+      await runCommand(async () => {
+        await pipelineUpdateDependencies(runId, stepId, dependsOn, projectPath);
+        await refresh(runId);
+      });
+    },
+    [projectPath, refresh, runCommand],
+  );
 
   return {
     state,
@@ -373,6 +561,11 @@ export function useFlowRunController(projectPath: string) {
     error,
     loadLatest,
     start,
+    runSetup,
+    runScene,
+    approveScene,
+    unlockScene,
+    refreshPlan,
     pause,
     resume,
     stepOnce,

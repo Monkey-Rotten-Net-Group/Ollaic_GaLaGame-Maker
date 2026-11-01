@@ -1,10 +1,12 @@
 pub mod binder;
+pub mod bundled_audio;
 pub mod commands;
 pub mod scheduler;
 pub mod store;
 pub(crate) mod transaction;
 pub mod types;
 
+pub use bundled_audio::detect_audio_mood;
 pub use scheduler::{
     run_queue_cancellable, run_queue_scoped_cancellable, AssetGenerator, GeneratedArtifact,
     QueueScope,

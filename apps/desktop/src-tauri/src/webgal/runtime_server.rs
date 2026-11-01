@@ -25,6 +25,7 @@ pub struct RuntimeServer {
     template_dir: Arc<RwLock<PathBuf>>,
     project_dir: Arc<RwLock<Option<PathBuf>>>,
     broadcast_tx: broadcast::Sender<String>,
+    preview_entry: Arc<RwLock<Option<String>>>,
     port: u16,
 }
 
@@ -40,6 +41,7 @@ impl RuntimeServer {
             template_dir: Arc::new(RwLock::new(template_dir)),
             project_dir: Arc::new(RwLock::new(None)),
             broadcast_tx,
+            preview_entry: Arc::new(RwLock::new(None)),
             port,
         };
 
@@ -77,6 +79,14 @@ impl RuntimeServer {
 
     pub async fn set_project(&self, dir: Option<PathBuf>) {
         *self.project_dir.write().await = dir;
+    }
+
+    pub async fn set_preview_entry(&self, script: Option<String>) {
+        *self.preview_entry.write().await = script;
+    }
+
+    pub async fn preview_entry(&self) -> Option<String> {
+        self.preview_entry.read().await.clone()
     }
 
     pub fn broadcast(&self, msg: String) {
@@ -120,6 +130,21 @@ async fn handle_socket(socket: WebSocket, server: RuntimeServer) {
 async fn static_handler(State(server): State<RuntimeServer>, uri: Uri) -> Response {
     let raw_path = uri.path();
     let decoded = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+
+    if decoded == "/game/scene/__ollaic_preview_entry__.txt"
+        || decoded == "/__ollaic_preview_entry__.txt"
+    {
+        if let Some(script) = server.preview_entry().await {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/plain; charset=utf-8"),
+            );
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            return (StatusCode::OK, headers, script.into_bytes()).into_response();
+        }
+    }
+
     let embedded_preview = matches!(decoded.as_str(), "/" | "/index.html")
         && uri
             .query()
@@ -183,45 +208,6 @@ async fn serve_file(base: PathBuf, rel: String, embedded_preview: bool) -> Respo
             (StatusCode::OK, headers, bytes).into_response()
         }
         Err(_) => not_found("read failed"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn embedded_preview_bootstraps_language_without_modifying_engine_files() {
-        let dir = std::env::temp_dir().join(format!(
-            "ollaic-runtime-preview-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        tokio::fs::create_dir_all(&dir).await.unwrap();
-        let html = b"<!doctype html><html><head></head><body>WebGAL</body></html>";
-        tokio::fs::write(dir.join("index.html"), html)
-            .await
-            .unwrap();
-        let preview = serve_file(dir.clone(), "index.html".into(), true).await;
-        assert_eq!(preview.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(preview.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body = String::from_utf8(bytes.to_vec()).unwrap();
-        assert!(body.contains("if(!localStorage.getItem('lang'))"));
-        assert!(body.contains("localStorage.setItem('lang','0')"));
-        let ordinary = serve_file(dir.clone(), "index.html".into(), false).await;
-        let ordinary_bytes = axum::body::to_bytes(ordinary.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        assert_eq!(ordinary_bytes.as_ref(), html);
-        assert_eq!(
-            tokio::fs::read(dir.join("index.html")).await.unwrap(),
-            html.to_vec()
-        );
-        tokio::fs::remove_dir_all(&dir).await.unwrap();
     }
 }
 
@@ -296,4 +282,43 @@ fn missing_template_response(base: &Path) -> Response {
         html,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn embedded_preview_bootstraps_language_without_modifying_engine_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "ollaic-runtime-preview-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let html = b"<!doctype html><html><head></head><body>WebGAL</body></html>";
+        tokio::fs::write(dir.join("index.html"), html)
+            .await
+            .unwrap();
+        let preview = serve_file(dir.clone(), "index.html".into(), true).await;
+        assert_eq!(preview.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(preview.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(body.contains("if(!localStorage.getItem('lang'))"));
+        assert!(body.contains("localStorage.setItem('lang','0')"));
+        let ordinary = serve_file(dir.clone(), "index.html".into(), false).await;
+        let ordinary_bytes = axum::body::to_bytes(ordinary.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(ordinary_bytes.as_ref(), html);
+        assert_eq!(
+            tokio::fs::read(dir.join("index.html")).await.unwrap(),
+            html.to_vec()
+        );
+        tokio::fs::remove_dir_all(&dir).await.unwrap();
+    }
 }

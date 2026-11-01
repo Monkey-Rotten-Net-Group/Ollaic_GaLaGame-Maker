@@ -12,6 +12,7 @@ use super::types::{AssetKind, AssetTask};
 /// Metadata tag written when a user-imported file is bound instead of an AI
 /// generated artifact, so the asset library can tell manual picks apart.
 pub(crate) const IMPORTED_SOURCE_TAG: &str = "source:imported";
+pub(crate) const BUNDLED_MOOD_SOURCE_TAG: &str = "source:bundled_mood";
 
 #[derive(Clone, Copy)]
 pub(crate) enum BindingScope<'a> {
@@ -144,7 +145,21 @@ impl BindingTransaction {
             crate::json_store::write_crash_safe(&target, &bytes).map_err(|error| {
                 format!("failed to promote asset {}: {error}", target.display())
             })?;
-            apply_binding_with_source_scoped(project_path, task, &filename, "source:ai", scope)
+            let used_fallback = task
+                .attempts
+                .iter()
+                .rev()
+                .find(|attempt| attempt.artifact.is_some())
+                .is_some_and(|attempt| attempt.used_local_fallback)
+                || task.used_local_fallback;
+            let tag = if used_fallback && matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx) {
+                BUNDLED_MOOD_SOURCE_TAG
+            } else if used_fallback {
+                "source:fallback"
+            } else {
+                "source:ai"
+            };
+            apply_binding_with_source_scoped(project_path, task, &filename, tag, scope)
         })();
         if let Err(error) = binding {
             return match restore_binding_files(snapshots) {
@@ -254,6 +269,13 @@ fn rebind_asset_locked(
         .any(|item| item.imported_file.is_some())
     {
         IMPORTED_SOURCE_TAG
+    } else if task.attempts.iter().any(|item| item.used_local_fallback) || task.used_local_fallback
+    {
+        if matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx) {
+            BUNDLED_MOOD_SOURCE_TAG
+        } else {
+            "source:fallback"
+        }
     } else {
         "source:ai"
     };
