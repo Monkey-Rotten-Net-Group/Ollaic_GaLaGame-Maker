@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Bot, FileText, FolderOpen, GitBranch, Loader2, PanelRightClose, PanelRightOpen, Play, X } from 'lucide-react';
+import { Bot, FileText, FolderOpen, GitBranch, Loader2, PanelRightClose, PanelRightOpen, Play, Workflow, X } from 'lucide-react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AiSettingsDialog } from './AiSettingsDialog';
@@ -69,7 +69,6 @@ export function StoryEditor() {
   const requestedScene = searchParams.get('scene');
   const requestedSceneName = requestedScene || 'start.txt';
   const viewMode = searchParams.get('view');
-  const agentMode = searchParams.get('agent') === 'workflow' ? 'workflow' : 'edit';
   const [agentOpen, setAgentOpen] = useState(true);
   const [previewLayout, setPreviewLayout] = useState<PreviewLayout>('hidden');
   const [preferredDockLayout, setPreferredDockLayout] = useState<'split' | 'float'>('split');
@@ -161,11 +160,18 @@ export function StoryEditor() {
       window.removeEventListener('blur', finishResize);
     };
   }, [isResizingDock, bottomDockHeight, dockDragMoved]);
-  const setAgentMode = (mode: 'workflow' | 'edit') => {
+  const toggleWorkflowBoard = () => {
     const next = new URLSearchParams(searchParams);
-    next.set('agent', mode);
+    if (viewMode === 'workflow') next.delete('view');
+    else { next.set('view', 'workflow'); changePreviewLayout('hidden'); }
     setSearchParams(next, { replace: true });
   };
+  const openWorkflowBoard = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set('view', 'workflow');
+    changePreviewLayout('hidden');
+    setSearchParams(next, { replace: true });
+  }, [changePreviewLayout, searchParams, setSearchParams]);
   const toggleSceneGraph = () => {
     const next = new URLSearchParams(searchParams);
     if (viewMode === 'worldline') next.delete('view');
@@ -883,7 +889,7 @@ export function StoryEditor() {
     setSelectedNode(null);
     setShowScript(false);
     markDirty();
-  }, [scriptSource, markDirty, setNodes, setSelectedNode]);
+  }, [scriptSource, markDirty, setNodes, setSelectedNode, setShowScript]);
 
   const projectName = projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
 
@@ -1054,8 +1060,79 @@ export function StoryEditor() {
   const editingAgentBlocked = aiAgent.busy || aiAgent.committing || aiAgent.pendingChangeSet?.status === 'pending';
   editAgentBusyRef.current = Boolean(editingAgentBlocked);
   const handleAiSend = useCallback((text: string) => {
-    if (!workflowOwnsProjectRef.current) void aiAgent.sendPrompt(text);
-  }, [aiAgent]);
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    // 1. Handle /workflow command
+    if (trimmed.startsWith('/workflow')) {
+      const brief = trimmed.replace(/^\/workflow\s*/, '').trim();
+      if (!brief) {
+        if (flow.plan) {
+          openWorkflowBoard();
+          aiAgent.recordWorkflowTurn(
+            trimmed,
+            '已在主舞台展开当前故事企划的工作流看板。如需更新企划，可输入：`/workflow <新创意或修改意见>`。',
+          );
+        } else {
+          aiAgent.recordWorkflowTurn(
+            trimmed,
+            '请提供故事企划创意。例如：`/workflow 暴雨夜天台磁带悬疑恋爱短篇，4个场景，双人对峙`。',
+          );
+        }
+        return;
+      }
+
+      aiAgent.recordWorkflowTurn(
+        trimmed,
+        `已收到企划指令：“${brief}”。正在启动 Stage 1 全局设定与角色视觉定锚流水线...`,
+      );
+      void flow.runSetup(brief);
+      return;
+    }
+
+    // 2. Handle /scene command
+    if (trimmed.startsWith('/scene')) {
+      const sceneId = trimmed.replace(/^\/scene\s*/, '').trim();
+      if (!sceneId) {
+        const availableScenes = flow.plan?.scenePlans?.map((s) => s.id).join(', ') || '暂无';
+        aiAgent.recordWorkflowTurn(
+          trimmed,
+          `请指定场景 ID。当前企划分场：${availableScenes}。例如：\`/scene ${flow.plan?.scenePlans?.[0]?.id || 'opening'}\``,
+        );
+        return;
+      }
+
+      aiAgent.recordWorkflowTurn(
+        trimmed,
+        `正在安排场景【${sceneId}】的 Stage 2 生产流水线...`,
+      );
+      void flow.runScene(sceneId);
+      return;
+    }
+
+    // 3. Handle /plan and /help commands
+    if (trimmed === '/plan' || trimmed === '/help') {
+      if (trimmed === '/help') {
+        aiAgent.recordWorkflowTurn(
+          trimmed,
+          `**Ollaic AI 导演助手指令指南**：\n\n- \`/workflow <故事企划>\`：启动 Stage 1 立项企划与角色视觉定锚\n- \`/scene <场景ID>\`：生产指定场景（例如 \`/scene ${flow.plan?.scenePlans?.[0]?.id || 'opening'}\`）\n- \`/plan\`：查看当前故事企划与分场概览\n- \`/help\`：显示本指令说明\n\n日常直接输入文字即可编辑当前场景台词、增删角色或调整剧情。`,
+        );
+      } else {
+        const synopsis = flow.plan?.synopsis || '尚未立项';
+        const count = flow.plan?.scenePlans?.length ?? 0;
+        aiAgent.recordWorkflowTurn(
+          trimmed,
+          `**当前故事企划**：\n\n${synopsis}\n\n- 包含分场：${count} 场\n- 可点击下方卡片中的【看板】按钮在主舞台查看完整分场队列与素材。`,
+        );
+      }
+      return;
+    }
+
+    // 4. Default: editing agent chat turn
+    if (!workflowOwnsProjectRef.current) {
+      void aiAgent.sendPrompt(trimmed);
+    }
+  }, [aiAgent, flow, openWorkflowBoard]);
 
   const prepareWorkflow = async (stepIds: string[]) => {
     if (workflowOwnsProjectRef.current || editAgentBusyRef.current) return false;
@@ -1199,6 +1276,7 @@ export function StoryEditor() {
             <div className="flex shrink-0 items-center gap-1.5">
               <button type="button" className={`ollaic-top-action ${previewLayout !== 'hidden' ? 'bg-primary/12 text-primary' : ''}`} aria-pressed={previewLayout !== 'hidden'} onClick={() => changePreviewLayout(previewLayout === 'hidden' ? preferredDockLayout : 'hidden')}><Play className="size-4" /><span className="hidden sm:inline">实时预览</span><span className="sr-only sm:hidden">实时预览</span></button>
               <button type="button" className={`ollaic-top-action ${viewMode === 'worldline' ? 'bg-primary/12 text-primary' : ''}`} aria-pressed={viewMode === 'worldline'} onClick={toggleSceneGraph}><GitBranch className="size-4" /><span className="hidden sm:inline">场景图</span><span className="sr-only sm:hidden">场景图</span></button>
+              <button type="button" className={`ollaic-top-action ${viewMode === 'workflow' ? 'bg-primary/12 text-primary' : ''}`} aria-pressed={viewMode === 'workflow'} onClick={toggleWorkflowBoard}><Workflow className="size-4" /><span className="hidden sm:inline">工作流</span><span className="sr-only sm:hidden">工作流看板</span></button>
               <button type="button" className="ollaic-icon-button" onClick={() => setAgentOpen((value) => !value)} aria-label={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'} aria-expanded={agentOpen} title={agentOpen ? '收起 Agent 面板' : '打开 Agent 面板'}>{agentOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}</button>
             </div>
           </header>
@@ -1211,7 +1289,7 @@ export function StoryEditor() {
               {workflowOwnsProject && <div role="status" className="shrink-0 border-b border-primary/15 bg-primary/5 px-4 py-2 text-xs text-muted-foreground">{workflowSyncRequired ? '请先处理上方提示，再继续编辑。' : workflowRefreshing ? '正在同步生产结果…' : 'Workflow 正在管理项目，脚本暂时只读。停止生产后可继续编辑。'}</div>}
               <div className={`editor-stage editor-stage-${previewLayout}`}>
                 <div className={`relative min-h-0 min-w-0 flex-1 flex-col ${previewLayout === 'large' ? 'hidden' : 'flex'}`}>
-                  <div className={`min-h-0 flex-1 flex-col ${viewMode === 'worldline' ? 'hidden' : 'flex'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
+                  <div className={`min-h-0 flex-1 flex-col ${viewMode === 'worldline' || viewMode === 'workflow' ? 'hidden' : 'flex'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
                     {showScript ? (
                       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background/50">
                         <div className="flex items-center justify-between gap-2 border-b border-border p-3 text-xs">
@@ -1233,6 +1311,32 @@ export function StoryEditor() {
                     <FullScreenWorldline scenes={projectInfo?.scenes ?? [currentSceneName]} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders} sceneLinkMap={sceneLinkMap} nodes={nodes} selectedNode={selectedNode} onSelectNode={setSelectedNode} onOpenScene={stableSwitchScene} onClose={toggleSceneGraph}
                       characterColors={characterColors} onNewScene={handleNewScene} onDeleteScene={handleDeleteScene} onRenameScene={handleRenameScene} onOpenSceneManager={() => setSceneManagerOpen(true)} onDeleteNode={deleteNode} onJumpToIndex={jumpToNode} />
                   </div>}
+                  {viewMode === 'workflow' && (
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+                      {projectPath ? (
+                        <FlowBoardView
+                          key={projectPath}
+                          projectPath={projectPath}
+                          controller={workflowController}
+                          blocked={Boolean(editingAgentBlocked || workflowSyncRequired || (dirty && ['running', 'paused'].includes(flow.state.runStatus)))}
+                          onClose={toggleWorkflowBoard}
+                          onOpenArtifact={(step, plan) => {
+                            if (step.kind === 'character' || step.kind === 'asset') {
+                              guardedNavigate(() => navigate(`/editor/${projectId}/assets${step.kind === 'character' ? '?tab=character' : ''}`));
+                            } else if (step.id === 'scene') {
+                              const scene = plan?.scenePlans.find((candidate) => candidate.id === plan.branches.entryScene)?.file ?? plan?.scenes[0];
+                              if (scene) stableSwitchScene(scene);
+                              const next = new URLSearchParams(searchParams);
+                              next.delete('view');
+                              setSearchParams(next, { replace: true });
+                            }
+                          }}
+                        />
+                      ) : (
+                        <p className="p-6 text-sm text-muted-foreground">打开项目后即可查看工作流看板。</p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {previewStarted && previewLayout === 'split' && (
                   <div
@@ -1263,34 +1367,63 @@ export function StoryEditor() {
               <footer className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-4 text-[10px] text-muted-foreground"><span>{scriptSource.length.toLocaleString()} 字</span><span className="hidden sm:inline">约 {Math.max(1, Math.ceil(scriptSource.length / 380))} 分钟阅读</span><span className="ml-auto">WebGAL</span></footer>
             </div>
             <aside aria-label="Agent 面板" className={`editor-agent-dock ${agentOpen ? '' : 'hidden'}`}>
-              <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
-                <Bot className="size-4 shrink-0 text-primary" />
-                <div className="flex min-w-0 flex-1 gap-1 rounded-lg bg-surface-container-low p-1" role="tablist" aria-label="Agent 模式" onKeyDown={(event) => {
-                  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-                  event.preventDefault();
-                  const mode = event.key === 'Home' ? 'workflow' : event.key === 'End' ? 'edit' : agentMode === 'edit' ? 'workflow' : 'edit';
-                  setAgentMode(mode);
-                  document.getElementById(mode === 'workflow' ? 'workflow-agent-tab' : 'editing-agent-tab')?.focus();
-                }}>
-                  <button id="workflow-agent-tab" role="tab" type="button" aria-selected={agentMode === 'workflow'} tabIndex={agentMode === 'workflow' ? 0 : -1} aria-controls="workflow-agent-panel" onClick={() => setAgentMode('workflow')} className={`flex-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs ${agentMode === 'workflow' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>Workflow Agent</button>
-                  <button id="editing-agent-tab" role="tab" type="button" aria-selected={agentMode === 'edit'} tabIndex={agentMode === 'edit' ? 0 : -1} aria-controls="editing-agent-panel" onClick={() => setAgentMode('edit')} className={`flex-1 whitespace-nowrap rounded-md px-2 py-1.5 text-xs ${agentMode === 'edit' ? 'bg-surface-container-lowest font-semibold text-primary shadow-sm' : 'text-muted-foreground'}`}>编辑 Agent</button>
+              <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-3">
+                <div className="flex items-center gap-2">
+                  <Bot className="size-4 shrink-0 text-primary" />
+                  <span className="text-xs font-semibold text-foreground">AI 编剧助手</span>
                 </div>
-                <button type="button" className="ollaic-icon-button lg:hidden" onClick={() => setAgentOpen(false)} aria-label="关闭 Agent 面板"><X className="size-4" /></button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="ollaic-icon-button"
+                    onClick={toggleWorkflowBoard}
+                    title={viewMode === 'workflow' ? '返回剧本' : '打开工作流看板'}
+                    aria-label={viewMode === 'workflow' ? '返回剧本' : '打开工作流看板'}
+                  >
+                    <Workflow className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="ollaic-icon-button lg:hidden"
+                    onClick={() => setAgentOpen(false)}
+                    aria-label="关闭 Agent 面板"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
               </header>
-              <div id="workflow-agent-panel" role="tabpanel" aria-labelledby="workflow-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'workflow' ? 'flex' : 'hidden'}`}>
-                {editingAgentBlocked && <p role="status" className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">请先完成编辑 Agent 的生成和修改确认，再运行生产。</p>}
-                {projectPath ? <FlowBoardView key={projectPath} projectPath={projectPath} controller={workflowController} embedded blocked={Boolean(editingAgentBlocked || workflowSyncRequired || (dirty && ['running', 'paused'].includes(flow.state.runStatus)))} onOpenArtifact={(step, plan) => {
-                  if (step.kind === 'character' || step.kind === 'asset') guardedNavigate(() => navigate(`/editor/${projectId}/assets${step.kind === 'character' ? '?tab=character' : ''}`));
-                  else if (step.id === 'scene') {
-                    const scene = plan?.scenePlans.find((candidate) => candidate.id === plan.branches.entryScene)?.file ?? plan?.scenes[0];
-                    if (scene) stableSwitchScene(scene);
-                    setAgentMode('edit');
-                  }
-                }} /> : <p className="p-4 text-sm text-muted-foreground">打开项目后即可安排生产。</p>}
-              </div>
-              <div id="editing-agent-panel" role="tabpanel" aria-labelledby="editing-agent-tab" className={`min-h-0 flex-1 flex-col ${agentMode === 'edit' ? 'flex' : 'hidden'}`} ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}>
-                {workflowOwnsProject && <p className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">生产期间可查看对话。停止生产后可发送编辑请求。</p>}
-                <AiAssistantPanel embedded disabled={workflowOwnsProject} aiAgent={aiAgent} projectPath={projectPath} sceneHeaders={sceneHeaders} onOpenSettings={() => setAiSettingsOpen(true)} onOpenMemory={() => guardedNavigate(() => navigate(`/editor/${projectId}/memory`))} onSend={handleAiSend} />
+              <div
+                className="flex min-h-0 flex-1 flex-col"
+                ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}
+              >
+                {workflowOwnsProject && (
+                  <p className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">
+                    生产进行中。可随时在下方输入指令或对话。
+                  </p>
+                )}
+                <AiAssistantPanel
+                  embedded
+                  disabled={workflowOwnsProject}
+                  aiAgent={aiAgent}
+                  projectPath={projectPath}
+                  sceneHeaders={sceneHeaders}
+                  workflowController={workflowController}
+                  onOpenWorkflowBoard={openWorkflowBoard}
+                  onPreviewScene={(sceneId) => {
+                    const matchedScene = projectInfo?.scenes.find(
+                      (s) => s === sceneId || s === `${sceneId}.txt` || sceneHeaders[s]?.outline === sceneId,
+                    ) || sceneId;
+                    if (projectInfo?.scenes.includes(matchedScene)) {
+                      stableSwitchScene(matchedScene);
+                    }
+                    if (previewLayout === 'hidden') {
+                      changePreviewLayout(preferredDockLayout);
+                    }
+                  }}
+                  onOpenSettings={() => setAiSettingsOpen(true)}
+                  onOpenMemory={() => guardedNavigate(() => navigate(`/editor/${projectId}/memory`))}
+                  onSend={handleAiSend}
+                />
               </div>
             </aside>
           </div>

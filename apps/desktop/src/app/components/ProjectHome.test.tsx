@@ -196,7 +196,7 @@ describe('M3 project home', () => {
     expect(localStorage.getItem('webgal-projects')).toContain('/chosen/新项目');
     const saved = JSON.parse(localStorage.getItem('webgal-projects') ?? '[]') as Project[];
     expect(localStorage.getItem(`project-path-${saved[0].id}`)).toBe('/chosen/新项目');
-    expect(navigate).toHaveBeenCalledWith(`/editor/${saved[0].id}?agent=workflow`);
+    expect(navigate).toHaveBeenCalledWith(`/editor/${saved[0].id}?view=workflow`);
   });
 
   it('keeps creation disabled after cancelling folder selection', async () => {

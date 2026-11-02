@@ -3,21 +3,18 @@ import { openFlowBoard } from './fixtures/editor';
 
 test('one editing entry keeps both Agent drafts and workflow selection', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  await expect(page).toHaveURL(/\/editor\/alpha\?agent=workflow$/);
+  await expect(page).toHaveURL(/\/editor\/alpha\?view=workflow$/);
   await expect(page.getByRole('navigation', { name: '核心视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('navigation', { name: '核心视图' }).getByText(/生产流|脚本流|场景/)).toHaveCount(0);
   await page.getByLabel('production brief').fill('我们这次只制作故事。');
   await page.getByLabel('执行世界观设定').uncheck();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await page.getByLabel('AI 创作输入').fill('让开场对白更简洁');
-  await page.getByRole('tab', { name: 'Workflow Agent', exact: true }).click();
   await expect(page.getByLabel('production brief')).toHaveValue('我们这次只制作故事。');
   await expect(page.getByLabel('执行世界观设定')).not.toBeChecked();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toHaveValue('让开场对白更简洁');
   await page.getByRole('button', { name: '场景图', exact: true }).click();
   await expect(page.getByText('场景关系图', { exact: true })).toBeVisible();
-  await expect(page.getByRole('tab', { name: '编辑 Agent', exact: true })).toBeVisible();
+  await expect(page.getByLabel('AI 创作输入')).toBeVisible();
   await page.getByRole('button', { name: '场景图', exact: true }).click();
   await expect(page.getByRole('button', { name: /从这里开始我们的故事/ })).toBeVisible();
 });
@@ -25,7 +22,6 @@ test('one editing entry keeps both Agent drafts and workflow selection', async (
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`scene graph zoom and Escape preserve the editing workspace at ${viewport.width}px`, async ({ page }) => {
     await openFlowBoard(page, viewport, 'draft');
-    await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
     await page.getByLabel('AI 创作输入').fill('保留这段编辑输入');
     if (viewport.width < 640) await page.getByRole('button', { name: '收起 Agent 面板' }).click();
     await page.getByRole('button', { name: '场景图', exact: true }).click();
@@ -57,7 +53,7 @@ test('live draft preview expands without reloading its iframe or losing the Agen
     socket.onClose(() => clearInterval(heartbeat));
   });
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
+  await page.getByRole('button', { name: '返回剧本' }).click();
   await page.getByRole('button', { name: '实时预览', exact: true }).click();
   const frame = page.getByTitle('WebGAL 实时预览');
   await expect(frame).toBeVisible();
@@ -245,18 +241,15 @@ test('narrow workspace can switch from Agent to a large preview without overflow
   await expect(page.getByTitle('WebGAL 实时预览')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.getByRole('button', { name: '打开 Agent 面板' }).click();
-  await expect(page.getByLabel('production brief')).toBeVisible();
+  await expect(page.getByLabel('AI 创作输入')).toBeVisible();
 });
 
 test('production ownership survives Agent switches and reloads scenes before editing resumes', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 });
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeDisabled();
-  await page.getByRole('tab', { name: 'Workflow Agent', exact: true }).click();
   await expect(page.getByTestId('flow-run-status')).toContainText('已暂停');
   await page.getByRole('button', { name: '停止', exact: true }).click();
   await expect(page.getByTestId('flow-run-status')).toContainText('已停止');
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeEnabled();
   await expect(page.getByRole('button', { name: /生产之后的场景/ })).toBeVisible();
 });
@@ -272,19 +265,18 @@ test('restored unsaved drafts cannot autosave over production output', async ({ 
   await page.clock.fastForward(4000);
   expect(await page.evaluate(() => (window as unknown as { __flowCalls: { command: string }[] }).__flowCalls.filter((call) => call.command === 'save_scene'))).toHaveLength(0);
   await page.getByRole('button', { name: '读取生产结果（放弃当前草稿）', exact: true }).click();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeEnabled();
   await expect(page.getByRole('button', { name: /生产之后的场景/ })).toBeVisible();
 });
 
 test('preparing production also saves drafts cached in other scenes', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
+  await page.getByRole('button', { name: '返回剧本' }).click();
   await page.getByLabel('编辑器视图模式').selectOption('script');
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:第一场景的未保存修改。;');
   await page.getByRole('button', { name: '应用更改', exact: true }).click();
   await page.getByLabel('当前场景').selectOption('chapter2.txt');
-  await page.getByRole('tab', { name: 'Workflow Agent', exact: true }).click();
+  await page.getByRole('button', { name: '工作流', exact: true }).click();
   await page.getByLabel('production brief').fill('保留之前的修改并准备后续生产');
   await page.getByRole('button', { name: '准备流程' }).click();
   await expect(page.getByTestId('flow-run-status')).toContainText('已暂停');

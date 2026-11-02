@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowLeft,
   Check,
   ChevronDown,
   ChevronRight,
@@ -120,10 +121,12 @@ export function FlowBoardView({
   projectPath,
   onOpenArtifact,
   controller,
+  onClose,
   embedded = false,
   blocked = false,
 }: FlowBoardProps & {
   controller: ReturnType<typeof useFlowRunController>;
+  onClose?: () => void;
   embedded?: boolean;
   blocked?: boolean;
 }) {
@@ -258,7 +261,8 @@ export function FlowBoardView({
   const paused = state.runStatus === "paused";
   const recoverable = detached && (running || paused);
   const isSceneScope = state.scope?.type === "scene";
-  const activeSceneId = isSceneScope ? state.scope.sceneId : null;
+  const activeSceneId =
+    state.scope?.type === "scene" ? state.scope.sceneId : null;
   const selectedScene =
     plan?.scenePlans?.find((s) => s.id === selectedSceneId) ?? null;
   const selectedStep = configuring
@@ -327,6 +331,17 @@ export function FlowBoardView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {onClose && (
+              <Button
+                variant="ghost"
+                onClick={onClose}
+                className="gap-1.5 text-muted-foreground hover:text-foreground"
+                title="关闭看板，返回剧本编辑器"
+              >
+                <ArrowLeft className="size-4" />
+                <span>返回剧本</span>
+              </Button>
+            )}
             {configuring ? (
               <>
                 {hasPlanScenes && (

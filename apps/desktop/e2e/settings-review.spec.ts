@@ -73,7 +73,6 @@ async function openConfiguredEditor(page: Page) {
   await navigation.getByRole('button', { name: '编辑', exact: true }).click();
   await expect(page).toHaveURL(/\/editor\/alpha$/);
   await expect(page.getByLabel('当前场景')).toBeVisible();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await expect(page.getByRole('button', { name: '切换对话模型' })).toContainText('model-a');
 }
 

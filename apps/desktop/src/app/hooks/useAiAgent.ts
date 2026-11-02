@@ -1375,6 +1375,24 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStepLabel('');
   }, [setMessages]);
 
+  const recordWorkflowTurn = useCallback(
+    (userText: string, assistantReply: string) => {
+      const ts = Date.now();
+      const userMsg: ChatMessage = {
+        id: `user-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'user',
+        content: userText,
+      };
+      const assistantMsg: ChatMessage = {
+        id: `assistant-${ts + 1}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'assistant',
+        content: assistantReply,
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    },
+    [setMessages],
+  );
+
   return {
     messages,
     input,
@@ -1417,6 +1435,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     retryWithExistingAssets,
     retry,
     saveMemory,
+    recordWorkflowTurn,
     stop,
   };
 }

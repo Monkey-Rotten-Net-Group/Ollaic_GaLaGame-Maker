@@ -675,7 +675,7 @@ export function ProjectHome() {
         );
         return;
       }
-      navigate(`/editor/${id}?agent=workflow`);
+      navigate(`/editor/${id}?view=workflow`);
     } catch (error) {
       setCreateError(`无法创建项目：${String(error)}`);
     } finally {

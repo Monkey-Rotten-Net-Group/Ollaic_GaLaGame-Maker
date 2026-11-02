@@ -128,13 +128,11 @@ test('editor toolbar labels stay on one line at desktop widths', async ({ page }
     .locator('..')
     .locator('..');
   await settings.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('editor-crimson-1440.png') });
 });
 
 test('assistant replies keep readable contrast across accent themes', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
   const reply = page.locator('[data-message-role="assistant"]').first();
   await expect(reply).toBeVisible();
   for (const appearance of ['light', 'dark']) {

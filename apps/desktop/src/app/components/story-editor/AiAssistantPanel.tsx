@@ -1,15 +1,17 @@
-import { memo, useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowUp, Brain, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
-  Bot, Check, ChevronDown, Sliders,
+  Bot, Check, ChevronDown, Sliders, Sparkles, Workflow,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
 import { useChatModelSelection } from '../../hooks/useChatModelSelection';
 import { useAiAgent } from '../../hooks/useAiAgent';
+import type { useFlowRunController } from '../../hooks/useFlowRunController';
 import { AiMessageBubble } from '../AiMessageBubble';
 import { ChangeSetCard } from '../AiPendingCard';
 import { ConflictCard, ErrorCard, MissingAssetCard } from '../AiStatusCard';
 import { AiAttachmentTray, AiUploadsButton } from '../AiUploadsPanel';
+import { WorkflowPlanCard } from './WorkflowPlanCard';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -18,16 +20,55 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '../ui/dialog';
 
-interface AiAssistantPanelProps {
+export interface AiAssistantPanelProps {
   aiAgent: ReturnType<typeof useAiAgent>;
   projectPath: string | null;
   sceneHeaders: Record<string, SceneHeader>;
   onOpenSettings: () => void;
   onOpenMemory: () => void;
   onSend: (text: string) => void;
+  workflowController?: ReturnType<typeof useFlowRunController>;
+  onOpenWorkflowBoard?: () => void;
+  onPreviewScene?: (sceneId: string) => void;
   embedded?: boolean;
   disabled?: boolean;
 }
+
+interface SlashCommand {
+  name: string;
+  label: string;
+  description: string;
+  insert: string;
+  triggerPlanMode?: boolean;
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  {
+    name: '/workflow',
+    label: '/workflow <故事企划>',
+    description: '启动 Stage 1 立项企划与角色视觉定锚',
+    insert: '/workflow ',
+    triggerPlanMode: true,
+  },
+  {
+    name: '/scene',
+    label: '/scene <场景ID>',
+    description: '启动 Stage 2 生产指定场景的脚本与素材',
+    insert: '/scene ',
+  },
+  {
+    name: '/plan',
+    label: '/plan',
+    description: '查看全剧企划状态与分场概览',
+    insert: '/plan',
+  },
+  {
+    name: '/help',
+    label: '/help',
+    description: '查看可用指令说明',
+    insert: '/help',
+  },
+];
 
 interface AiInputBoxProps {
   /** Programmatic seed from the agent (prefill on regenerate, clear after send). */
@@ -35,6 +76,8 @@ interface AiInputBoxProps {
   busy: boolean;
   locked: boolean;
   pending: boolean;
+  isPlanMode: boolean;
+  onTogglePlanMode: () => void;
   onSubmit: (text: string) => void;
   onStop: () => void;
   /** Rendered at the bottom-right corner inside the textarea. */
@@ -46,28 +89,128 @@ interface AiInputBoxProps {
 
 // Keeps the draft in local state so typing only re-renders this small box,
 // not the whole StoryEditor tree (script list, worldline, timeline, ...).
-const AiInputBox = memo(function AiInputBox({ value, busy, locked, pending, onSubmit, onStop, attachSlot, modelSlot, traySlot }: AiInputBoxProps) {
+const AiInputBox = memo(function AiInputBox({
+  value,
+  busy,
+  locked,
+  pending,
+  isPlanMode,
+  onTogglePlanMode,
+  onSubmit,
+  onStop,
+  attachSlot,
+  modelSlot,
+  traySlot,
+}: AiInputBoxProps) {
   const [draft, setDraft] = useState(value);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
   // Sync when the agent changes input externally (regenerate prefills, send clears).
-  useEffect(() => { setDraft(value); }, [value]);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const matchingCommands = draft.startsWith('/') && !draft.includes(' ')
+    ? SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(draft.split(' ')[0]))
+    : [];
+
+  useEffect(() => {
+    if (matchingCommands.length > 0) {
+      setSlashMenuOpen(true);
+      setSlashIndex(0);
+    } else {
+      setSlashMenuOpen(false);
+    }
+  }, [draft, matchingCommands.length]);
+
+  const applySlashCommand = (cmd: SlashCommand) => {
+    if (cmd.triggerPlanMode && !isPlanMode) {
+      onTogglePlanMode();
+    }
+    setDraft(cmd.insert);
+    setSlashMenuOpen(false);
+    textareaRef.current?.focus();
+  };
 
   const submit = () => {
     if (locked) return;
-    if (busy) { onStop(); return; }
+    if (busy) {
+      onStop();
+      return;
+    }
     const text = draft.trim();
     if (!text || pending) return;
-    onSubmit(text);
+
+    if (isPlanMode && !text.startsWith('/')) {
+      onSubmit(`/workflow ${text}`);
+    } else {
+      onSubmit(text);
+    }
     setDraft('');
+    setSlashMenuOpen(false);
   };
 
   return (
     <>
       {traySlot}
       <div className="relative mt-2">
+        {/* Slash Command Suggestions Palette */}
+        {slashMenuOpen && matchingCommands.length > 0 && (
+          <div
+            role="listbox"
+            aria-label="快捷指令菜单"
+            className="absolute bottom-full left-0 mb-1.5 w-72 rounded-lg border border-border bg-surface-container-lowest p-1 shadow-md z-30"
+          >
+            <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground border-b border-border/50">
+              快捷指令（Enter 或点击插入）
+            </div>
+            {matchingCommands.map((cmd, idx) => (
+              <button
+                key={cmd.name}
+                type="button"
+                role="option"
+                aria-selected={idx === slashIndex}
+                onClick={() => applySlashCommand(cmd)}
+                className={`flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                  idx === slashIndex ? 'bg-secondary-container/60 text-foreground' : 'text-muted-foreground hover:bg-surface-container-low'
+                }`}
+              >
+                <span className="font-mono font-medium text-foreground">{cmd.label}</span>
+                <span className="text-[10px] text-muted-foreground">{cmd.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <textarea
+          ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            if (slashMenuOpen && matchingCommands.length > 0) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setSlashIndex((prev) => (prev + 1) % matchingCommands.length);
+                return;
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setSlashIndex((prev) => (prev - 1 + matchingCommands.length) % matchingCommands.length);
+                return;
+              }
+              if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+                event.preventDefault();
+                applySlashCommand(matchingCommands[slashIndex]);
+                return;
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setSlashMenuOpen(false);
+                return;
+              }
+            }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
               submit();
@@ -75,12 +218,35 @@ const AiInputBox = memo(function AiInputBox({ value, busy, locked, pending, onSu
           }}
           disabled={busy || locked || pending}
           className="h-24 w-full resize-none rounded-lg border border-border bg-surface-container-lowest p-2.5 pb-10 text-sm focus:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary-container/30 disabled:opacity-60"
-          placeholder={busy ? '生成中...' : pending ? '请先同意或拒绝当前 AI 修改...' : '输入你的创作想法...'}
+          placeholder={
+            busy
+              ? '生成中...'
+              : pending
+                ? '请先同意或拒绝当前 AI 修改...'
+                : isPlanMode
+                  ? '[规划模式] 输入全剧企划、修改设定，或安排分场制作...'
+                  : '输入你的创作想法...（输入 / 可用工作流指令）'
+          }
           aria-label="AI 创作输入"
         />
         {(attachSlot || modelSlot) && (
           <div className="absolute bottom-3 left-2.5 flex items-center gap-1.5">
             {attachSlot}
+            <button
+              type="button"
+              onClick={onTogglePlanMode}
+              disabled={locked || busy}
+              className={`flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                isPlanMode
+                  ? 'border-primary/40 bg-primary/15 text-primary shadow-xs'
+                  : 'border-border bg-surface-container-low text-muted-foreground hover:bg-secondary-container/60 hover:text-foreground'
+              }`}
+              title="规划模式：触发 Stage 1 企划定锚或全剧规划 (/workflow)"
+              aria-pressed={isPlanMode}
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>规划模式</span>
+            </button>
             {modelSlot}
           </div>
         )}
@@ -106,9 +272,13 @@ export function AiAssistantPanel({
   onOpenSettings,
   onOpenMemory,
   onSend,
+  workflowController,
+  onOpenWorkflowBoard,
+  onPreviewScene,
   embedded = false,
   disabled = false,
 }: AiAssistantPanelProps) {
+  const [isPlanMode, setIsPlanMode] = useState(false);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -224,6 +394,13 @@ export function AiAssistantPanel({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        {workflowController && (
+          <WorkflowPlanCard
+            controller={workflowController}
+            onOpenWorkflowBoard={onOpenWorkflowBoard}
+            onPreviewScene={onPreviewScene}
+          />
+        )}
         {aiAgent.messages.map((message) => (
           <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <AiMessageBubble
@@ -286,6 +463,8 @@ export function AiAssistantPanel({
           busy={aiAgent.busy}
           locked={aiAgent.committing || disabled}
           pending={aiAgent.pendingChangeSet?.status === 'pending'}
+          isPlanMode={isPlanMode}
+          onTogglePlanMode={() => setIsPlanMode((v) => !v)}
           onSubmit={onSend}
           onStop={aiAgent.stop}
           attachSlot={(
