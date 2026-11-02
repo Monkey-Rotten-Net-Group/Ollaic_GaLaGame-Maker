@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
-  ArrowRight,
-  Bookmark,
-  BookmarkCheck,
   Check,
   ChevronDown,
   ChevronRight,
   Circle,
-  Download,
   Loader2,
   Pause,
   Play,
@@ -16,7 +12,6 @@ import {
   Settings2,
   Square,
   StepForward,
-  Trash2,
 } from "lucide-react";
 import { FlowStepInspector } from "./FlowStepInspector";
 import { PipelineEventLedger } from "./PipelineEventLedger";
@@ -25,15 +20,8 @@ import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
-import { DEFAULT_RECIPE_STEPS, type FlowStepView } from "../lib/flow-state";
-import {
-  FLOW_PHASES,
-  excludeDependentSteps,
-  includeRequiredSteps,
-  missingScopeInputs,
-  stepDescription,
-  stepTitle,
-} from "../lib/flow-presentation";
+import type { FlowStepView } from "../lib/flow-state";
+import { stepDescription, stepTitle } from "../lib/flow-presentation";
 import {
   assetQueueDeleteArtifact,
   assetQueuePromoteArtifact,
@@ -60,6 +48,7 @@ const RUN_STATUS: Record<RunStatus, string> = {
   timeout: "已超时",
   persistenceFailed: "状态保存失败",
 };
+
 const STEP_STATUS: Record<StepStatus, string> = {
   pending: "待运行",
   running: "运行中",
@@ -68,9 +57,15 @@ const STEP_STATUS: Record<StepStatus, string> = {
   awaitingInput: "待输入",
   skipped: "已跳过",
 };
-const CONTENT_STEPS = DEFAULT_RECIPE_STEPS.filter(
-  (step) => step.id !== "assetQueue",
-).map((step) => step.id);
+
+const STAGE1_PREVIEW_STEPS = [
+  "plan",
+  "memory",
+  "outline",
+  "character",
+  "anchorPlan",
+  "assetQueue",
+] as const;
 
 export interface FlowBoardProps {
   projectPath: string;
@@ -146,29 +141,22 @@ export function FlowBoardView({
     detached,
     error,
     loadLatest,
-    start,
     runSetup,
     runScene,
     approveScene,
     unlockScene,
-    refreshPlan,
     pause,
     resume,
     stepOnce,
     stop,
-    togglePinned,
-    clearHistory,
-    exportHistory,
     retryStep,
     updatePromptAndRetry,
     skipStep,
-    updateDependencies,
     previewAssetArtifact,
     updateAssetArtifact,
     bindImportedAudio,
     importedAudioByDir,
   } = controller;
-  const [selectedIds, setSelectedIds] = useState<string[]>(CONTENT_STEPS);
   const [newConfiguration, setNewConfiguration] = useState(false);
   const [capabilities, setCapabilities] = useState<FlowCapabilities | null>(
     null,
@@ -209,9 +197,9 @@ export function FlowBoardView({
   }, []);
 
   useEffect(() => {
-    setSelectedIds(CONTENT_STEPS);
     setNewConfiguration(false);
     setSelectedStepId(null);
+    setSelectedSceneId(null);
     void checkCapabilities();
     return () => {
       capabilitiesRequest.current += 1;
@@ -264,10 +252,13 @@ export function FlowBoardView({
     window.setTimeout(() => previousFocusRef.current?.focus(), 0);
   }, []);
 
-  const configuring = !state.runId || newConfiguration;
+  const hasPlanScenes = Boolean(plan?.scenePlans && plan.scenePlans.length > 0);
+  const configuring = (!state.runId && !hasPlanScenes) || newConfiguration;
   const running = state.runStatus === "running";
   const paused = state.runStatus === "paused";
   const recoverable = detached && (running || paused);
+  const isSceneScope = state.scope?.type === "scene";
+  const activeSceneId = isSceneScope ? state.scope.sceneId : null;
   const selectedScene =
     plan?.scenePlans?.find((s) => s.id === selectedSceneId) ?? null;
   const selectedStep = configuring
@@ -278,21 +269,18 @@ export function FlowBoardView({
           state.steps[0] ??
           null)
         : null));
-  const missingInputs = missingScopeInputs(selectedIds);
-  const assetSelected = selectedIds.includes("assetQueue");
+
   const capabilityIssues = capabilities
-    ? [
-        capabilities.chatError,
-        assetSelected ? capabilities.assetError : null,
-      ].filter((issue): issue is string => Boolean(issue))
+    ? [capabilities.chatError, capabilities.assetError].filter(
+        (issue): issue is string => Boolean(issue),
+      )
     : [];
-  const scopeValid = selectedIds.length > 0 && !missingInputs.length;
-  const canPrepare =
-    scopeValid &&
+  const canStartSetup =
     !checking &&
     Boolean(capabilities) &&
     (!capabilityIssues.length || allowLocalFallback) &&
     Boolean(prompt.trim());
+
   const executedSteps = state.steps.filter((step) => step.status !== "skipped");
   const finishedSteps = executedSteps.filter(
     (step) => step.status === "succeeded" || step.status === "failed",
@@ -300,71 +288,18 @@ export function FlowBoardView({
   const progress = executedSteps.length
     ? Math.round((finishedSteps / executedSteps.length) * 100)
     : 0;
-  const totalCost = state.steps.reduce(
-    (sum, step) =>
-      sum + step.history.reduce((n, attempt) => n + (attempt.cost ?? 0), 0),
-    0,
-  );
-  const hasPricedAttempts = state.steps.some((step) =>
-    step.history.some((attempt) => attempt.cost != null),
-  );
-  const totalTokens = state.steps.reduce(
-    (sum, step) =>
-      sum +
-      step.history.reduce(
-        (n, attempt) =>
-          n + (attempt.promptTokens ?? 0) + (attempt.completionTokens ?? 0),
-        0,
-      ),
-    0,
-  );
   const elapsed =
     state.startedAt == null
       ? 0
       : (running ? now : (state.updatedAt ?? now)) - state.startedAt;
-  const historyClearBlocked =
-    running || state.steps.some((step) => step.status === "running");
   const activeStep =
     state.steps.find(
       (step) => step.status === "running" || step.status === "failed",
     ) ?? state.steps.find((step) => step.status === "pending");
-  const phases = configuring
-    ? FLOW_PHASES.map((phase) => ({
-        ...phase,
-        ids: phase.ids.filter((id) =>
-          DEFAULT_RECIPE_STEPS.some((step) => step.id === id),
-        ),
-      }))
-    : FLOW_PHASES.map((phase, index) => ({
-        ...phase,
-        ids: state.steps
-          .filter((step) => {
-            if (isAssetQueueStep(step)) return index === 2;
-            return (
-              index ===
-              (["plan", "memory", "outline", "character", "anchorPlan"].includes(
-                step.id,
-              )
-                ? 0
-                : 1)
-            );
-          })
-          .map((step) => step.id),
-      })).filter((phase) => phase.ids.length);
 
-  const canRunSetup =
-    !checking &&
-    Boolean(capabilities) &&
-    (!capabilities?.chatError || allowLocalFallback) &&
-    Boolean(prompt.trim());
-
-  const prepare = async () => {
+  const startStage1Setup = async () => {
     setSelectedStepId(null);
-    if (await start(selectedIds)) setNewConfiguration(false);
-  };
-
-  const prepareSetup = async () => {
-    setSelectedStepId(null);
+    setSelectedSceneId(null);
     if (await runSetup(prompt)) setNewConfiguration(false);
   };
 
@@ -378,39 +313,37 @@ export function FlowBoardView({
           <div className="min-w-0">
             <h1 className="text-lg font-semibold">
               {configuring
-                ? "安排这次生产"
-                : state.scope?.type === "setup"
-                  ? "Stage 1 · 立项企划与角色定锚"
-                  : state.scope?.type === "scene"
-                    ? `Stage 2 · 单场制作 (${state.scope.sceneId})`
-                    : "生产进度"}
+                ? "Stage 1 · 立项企划与角色定锚"
+                : isSceneScope
+                  ? `Stage 2 · 单场制作 (${activeSceneId})`
+                  : "Stage 1 · 立项企划与角色定锚"}
             </h1>
             <p className="mt-1 text-xs text-muted-foreground">
               {configuring
-                ? "选择需要执行的步骤，或直接启动 Stage 1 完成立项定锚后再逐场制作。"
+                ? "输入一句话创意或融合已有素材，先完成故事大纲、角色设定与基础锚定立绘，再逐场制作与审阅。"
                 : activeStep
                   ? `${activeStep.status === "pending" ? "下一步" : "当前步骤"}：${stepTitle(activeStep.id)}`
-                  : "查看本次生产结果与运行记录。"}
+                  : "立项定锚已完成，请在下方 Stage 2 队列中逐场生成、试玩与锁定。"}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {configuring ? (
               <>
+                {hasPlanScenes && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => setNewConfiguration(false)}
+                    disabled={busy}
+                  >
+                    返回分场工作台
+                  </Button>
+                )}
                 <Button
-                  variant="secondary"
-                  onClick={prepareSetup}
-                  disabled={blocked || busy || loading || !canRunSetup}
-                  title="仅执行 Stage 1（故事规划、世界观、大纲、角色与基础锚定立绘），完成后进入 Stage 2 逐场制作"
+                  onClick={startStage1Setup}
+                  disabled={blocked || busy || loading || !canStartSetup}
                 >
                   {busy ? <Loader2 className="animate-spin" /> : <Play />}{" "}
                   启动 Stage 1：立项与角色定锚
-                </Button>
-                <Button
-                  onClick={prepare}
-                  disabled={blocked || busy || loading || !canPrepare}
-                >
-                  {busy ? <Loader2 className="animate-spin" /> : <ArrowRight />}{" "}
-                  准备流程
                 </Button>
               </>
             ) : (
@@ -460,20 +393,21 @@ export function FlowBoardView({
                     variant="outline"
                     onClick={() => {
                       setSelectedStepId(null);
+                      setSelectedSceneId(null);
                       setNewConfiguration(true);
                       setAllowLocalFallback(false);
                       void checkCapabilities();
                     }}
                     disabled={busy}
                   >
-                    <Settings2 /> 新建配置
+                    <Settings2 /> 重新立项
                   </Button>
                 )}
               </>
             )}
           </div>
         </div>
-        {!configuring && (
+        {!configuring && state.runId && (
           <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
             <strong
               data-testid="flow-run-status"
@@ -540,109 +474,208 @@ export function FlowBoardView({
                   正在读取生产记录
                 </p>
               )}
-              {configuring && (
-                <section
-                  aria-label="生产目标"
-                  className="rounded-xl border border-border bg-surface-container-low p-4"
-                >
-                  <label
-                    htmlFor="production-brief"
-                    className="mb-2 block text-sm font-semibold"
-                  >
-                    这次想做什么？
-                  </label>
-                  <Textarea
-                    id="production-brief"
-                    aria-label="production brief"
-                    placeholder="描述题材、故事方向、角色关系和预期篇幅…"
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    disabled={blocked || busy || loading}
-                    className="min-h-24 resize-y rounded-lg bg-surface-container-lowest text-sm"
-                  />
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    生成内容会保存在项目中，之后可在编辑器里继续修改。
-                  </p>
-                </section>
-              )}
-              {!configuring && plan?.synopsis && (
-                <section
-                  aria-label="故事概览"
-                  className="rounded-xl border border-border bg-surface-container-low p-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold">故事概览</h2>
-                    {state.scope?.type === "scene" && (
-                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-                        Stage 1 全局设定已锁定 · 当前正执行单场制作 (
-                        {state.scope.sceneId})
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-2 text-sm leading-6">{plan.synopsis}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {plan.characters?.length ?? 0} 角色 /{" "}
-                    {plan.scenes?.length ?? 0} 场景 /{" "}
-                    {plan.assetPlan?.length ?? 0} 资产需求
-                  </p>
-                  {plan.characters && plan.characters.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5 text-xs">
-                      <span className="text-muted-foreground">已定锚角色：</span>
-                      {plan.characters.map((char) => (
-                        <span
-                          key={char.id}
-                          className="rounded-md border border-border/70 bg-surface-container-lowest px-2 py-0.5 font-medium text-foreground"
-                        >
-                          {char.name || char.id}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              )}
 
-              <section aria-label={configuring ? "选择生产步骤" : "生产步骤"}>
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold">
-                    {configuring ? "本次执行哪些步骤" : "步骤清单"}
-                  </h2>
-                  {configuring && (
-                    <span className="text-xs text-muted-foreground">
-                      已选择 {selectedIds.length} /{" "}
-                      {DEFAULT_RECIPE_STEPS.length} 步
-                    </span>
-                  )}
-                </div>
-                <div
-                  className={`grid items-start gap-3 ${!embedded && phases.length > 1 ? "lg:grid-cols-2" : ""}`}
-                >
-                  {phases.map((phase, index) => (
-                    <section
-                      key={phase.title}
-                      aria-label={phase.title}
-                      className={`overflow-hidden rounded-xl border border-border ${!embedded && phase.title === "素材制作" ? "lg:col-span-2" : ""}`}
+              {configuring ? (
+                <>
+                  <section
+                    aria-label="生产目标"
+                    className="rounded-xl border border-border bg-surface-container-low p-4"
+                  >
+                    <label
+                      htmlFor="production-brief"
+                      className="mb-2 block text-sm font-semibold"
                     >
-                      <header className="flex items-center gap-3 bg-surface-container-low px-4 py-3">
-                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                          {index + 1}
-                        </span>
-                        <div>
-                          <h3 className="text-sm font-semibold">
-                            {phase.title}
-                          </h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {phase.description}
+                      故事企划与创作提示词
+                    </label>
+                    <Textarea
+                      id="production-brief"
+                      aria-label="production brief"
+                      placeholder="输入一句话核心创意、世界观背景、人物关系或分支走向…"
+                      value={prompt}
+                      onChange={(event) => setPrompt(event.target.value)}
+                      disabled={blocked || busy || loading}
+                      className="min-h-24 resize-y rounded-lg bg-surface-container-lowest text-sm"
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      系统会自动复用项目中已导入的立绘、参考图与背景素材，仅补齐缺失设定与角色默认立绘锚点。
+                    </p>
+                  </section>
+
+                  <section
+                    aria-label="Stage 1 流程预览"
+                    className="overflow-hidden rounded-xl border border-border"
+                  >
+                    <header className="flex items-center gap-3 bg-surface-container-low px-4 py-3">
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                        1
+                      </span>
+                      <div>
+                        <h2 className="text-sm font-semibold">
+                          Stage 1 · 全局设定与角色视觉定锚
+                        </h2>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          先锁死世界观、分支变量、角色设定与基础立绘，确认后再进入 Stage 2 逐场制作
+                        </p>
+                      </div>
+                    </header>
+                    <ol className="grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+                      {STAGE1_PREVIEW_STEPS.map((id, idx) => (
+                        <li
+                          key={id}
+                          className={`flex items-start gap-3 px-4 py-3 ${idx >= 2 ? "sm:border-t sm:border-border" : ""}`}
+                        >
+                          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <span className="block text-xs font-semibold text-foreground">
+                              {stepTitle(id)}
+                            </span>
+                            <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+                              {stepDescription(id)}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+
+                  <section
+                    aria-label="运行前检查"
+                    className="rounded-xl border border-border bg-surface-container-low p-4 text-xs"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h2 className="text-sm font-semibold">接口与环境检查</h2>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSettingsOpen(true)}
+                      >
+                        <Settings2 /> AI 设置
+                      </Button>
+                    </div>
+                    {checking ? (
+                      <p className="mt-2 flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="size-3 animate-spin" />
+                        正在检查接口配置
+                      </p>
+                    ) : capabilityError || !capabilities ? (
+                      <div role="alert" className="mt-2 text-destructive">
+                        接口检查失败：{capabilityError ?? "未读取到配置"}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-2"
+                          onClick={checkCapabilities}
+                        >
+                          重新检查
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <p
+                          className={`mt-2 ${capabilities.chatError ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}
+                        >
+                          剧本与策划模型：{capabilities.chatError ?? "对话模型已配置"}
+                        </p>
+                        <p
+                          className={`mt-1.5 ${capabilities.assetError ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}
+                        >
+                          视觉与音频能力：
+                          {capabilities.assetError ??
+                            "图片、语音及立绘抠图能力已就绪"}
+                        </p>
+                        {capabilities.referenceImageWarning && (
+                          <p
+                            role="status"
+                            className="mt-1.5 text-amber-700 dark:text-amber-300"
+                          >
+                            {capabilities.referenceImageWarning}
                           </p>
+                        )}
+                      </>
+                    )}
+                    <div className="mt-3 border-t border-border pt-3">
+                      <label className="flex items-center gap-2 font-medium">
+                        <Switch
+                          checked={allowLocalFallback}
+                          onCheckedChange={setAllowLocalFallback}
+                          aria-label="允许本地内容降级"
+                        />
+                        允许本地降级（无外部 API 时使用内置确定性剧本与情绪音库）
+                      </label>
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  {/* Stage 1 Global Bible Summary Card */}
+                  {plan?.synopsis && (
+                    <section
+                      aria-label="故事概览"
+                      className="rounded-xl border border-border bg-surface-container-low p-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                            1
+                          </span>
+                          <h2 className="text-sm font-semibold">
+                            Stage 1 · 故事概览与角色定锚
+                          </h2>
                         </div>
+                        {isSceneScope && (
+                          <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                            全局设定已锁定 · 当前正执行单场制作 ({activeSceneId})
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm leading-6">{plan.synopsis}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {plan.characters?.length ?? 0} 角色 /{" "}
+                        {plan.scenes?.length ?? 0} 场景 /{" "}
+                        {plan.assetPlan?.length ?? 0} 资产需求
+                      </p>
+                      {plan.characters && plan.characters.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5 text-xs">
+                          <span className="text-muted-foreground">
+                            已定锚角色：
+                          </span>
+                          {plan.characters.map((char) => (
+                            <span
+                              key={char.id}
+                              className="rounded-md border border-border/70 bg-surface-container-lowest px-2 py-0.5 font-medium text-foreground"
+                            >
+                              {char.name || char.id}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  {/* Active Run Steps (Stage 1 Setup Steps OR Current Single-Scene Steps) */}
+                  {state.steps.length > 0 && (
+                    <section
+                      aria-label="当前执行步骤"
+                      className="overflow-hidden rounded-xl border border-border"
+                    >
+                      <header className="flex items-center justify-between bg-surface-container-low px-4 py-3">
+                        <h3 className="text-sm font-semibold">
+                          {isSceneScope
+                            ? `当前单场制作流水线 (${activeSceneId})`
+                            : "Stage 1 · 立项定锚执行步骤"}
+                        </h3>
+                        <span className="text-xs text-muted-foreground">
+                          点击步骤可在右侧检查或微调输出
+                        </span>
                       </header>
                       <ol className="divide-y divide-border">
-                        {phase.ids.map((id) => {
-                          const step = state.steps.find(
-                            (candidate) => candidate.id === id,
-                          );
-                          const included = selectedIds.includes(id);
-                          const queue =
-                            step && isAssetQueueStep(step) ? assetQueue : null;
+                        {state.steps.map((step) => {
+                          const id = step.id;
+                          const queue = isAssetQueueStep(step)
+                            ? assetQueue
+                            : null;
                           const done =
                             queue?.tasks.filter(
                               (task) =>
@@ -652,7 +685,7 @@ export function FlowBoardView({
                           const queueSummary = queue?.tasks.length
                             ? `${done}/${queue.tasks.length} 已处理`
                             : null;
-                          const status = step?.status ?? "pending";
+                          const status = step.status;
                           const icon =
                             status === "succeeded" ? (
                               <Check className="size-4" />
@@ -667,109 +700,83 @@ export function FlowBoardView({
                             <li
                               key={id}
                               data-step-id={id}
-                              data-step-status={
-                                configuring
-                                  ? included
-                                    ? "pending"
-                                    : "omitted"
-                                  : status
-                              }
+                              data-step-status={status}
                               className={
-                                selectedStepId === id && !configuring
-                                  ? "bg-primary/5"
-                                  : ""
+                                selectedStepId === id ? "bg-primary/5" : ""
                               }
                             >
-                              {configuring ? (
-                                <label className="flex cursor-pointer items-start gap-3 px-4 py-3.5 hover:bg-surface-container-low/50">
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`执行${stepTitle(id)}`}
-                                    checked={included}
-                                    disabled={blocked || busy || loading}
-                                    onChange={(event) =>
-                                      setSelectedIds((current) =>
-                                        event.target.checked
-                                          ? [...current, id]
-                                          : current.filter(
-                                              (selected) => selected !== id,
-                                            ),
-                                      )
-                                    }
-                                    className="mt-1 size-4 shrink-0 accent-primary"
-                                  />
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block text-sm font-medium">
-                                      {stepTitle(id)}
-                                    </span>
-                                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                                      {stepDescription(id)}
-                                    </span>
-                                  </span>
-                                  <span className="mt-0.5 shrink-0 text-[11px] text-muted-foreground">
-                                    {included ? "执行" : "不执行"}
-                                  </span>
-                                </label>
-                              ) : (
-                                <button
-                                  type="button"
-                                  aria-label={`查看${stepTitle(id)}`}
-                                  onClick={() => openInspector(id)}
-                                  className="flex w-full items-start gap-3 px-4 py-3.5 text-left hover:bg-surface-container-low/50 focus-visible:outline-2 focus-visible:outline-primary"
+                              <button
+                                type="button"
+                                aria-label={`查看${stepTitle(id)}`}
+                                onClick={() => openInspector(id)}
+                                className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-surface-container-low/50 focus-visible:outline-2 focus-visible:outline-primary"
+                              >
+                                <span
+                                  className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full ${
+                                    status === "failed"
+                                      ? "bg-destructive/10 text-destructive"
+                                      : status === "succeeded"
+                                        ? "bg-emerald-500/10 text-emerald-600"
+                                        : "bg-primary/10 text-primary"
+                                  }`}
                                 >
-                                  <span
-                                    className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full ${status === "failed" ? "bg-destructive/10 text-destructive" : status === "succeeded" ? "bg-emerald-500/10 text-emerald-600" : "bg-primary/10 text-primary"}`}
-                                  >
-                                    {icon}
+                                  {icon}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-sm font-medium">
+                                    {stepTitle(id)}
                                   </span>
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block text-sm font-medium">
-                                      {stepTitle(id)}
+                                  <span className="mt-1 block truncate text-xs text-muted-foreground">
+                                    {queueSummary ?? summarizeStep(step)}
+                                  </span>
+                                  {queue?.tasks.length ? (
+                                    <Progress
+                                      value={(done / queue.tasks.length) * 100}
+                                      aria-label={`${id} 步骤进度`}
+                                      className="mt-2 h-1"
+                                    />
+                                  ) : null}
+                                  {isDowngraded(step) && (
+                                    <span className="mt-1 block text-[11px] text-amber-700 dark:text-amber-300">
+                                      使用了降级结果，请检查输出
                                     </span>
-                                    <span className="mt-1 block truncate text-xs text-muted-foreground">
-                                      {queueSummary ??
-                                        (step
-                                          ? summarizeStep(step)
-                                          : stepDescription(id))}
-                                    </span>
-                                    {queue?.tasks.length ? (
-                                      <Progress
-                                        value={
-                                          (done / queue.tasks.length) * 100
-                                        }
-                                        aria-label={`${id} 步骤进度`}
-                                        className="mt-2 h-1"
-                                      />
-                                    ) : null}
-                                    {step && isDowngraded(step) && (
-                                      <span className="mt-1 block text-[11px] text-amber-700 dark:text-amber-300">
-                                        使用了降级结果，请检查输出
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span
-                                    className={`mt-1 shrink-0 text-[11px] ${status === "failed" ? "text-destructive" : "text-muted-foreground"}`}
-                                  >
-                                    {STEP_STATUS[status]}
-                                  </span>
-                                  <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                                </button>
-                              )}
+                                  )}
+                                </span>
+                                <span
+                                  className={`mt-1 shrink-0 text-[11px] ${
+                                    status === "failed"
+                                      ? "text-destructive"
+                                      : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {STEP_STATUS[status]}
+                                </span>
+                                <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                              </button>
                             </li>
                           );
                         })}
                       </ol>
                     </section>
-                  ))}
-                </div>
-              </section>
+                  )}
 
-              {!configuring &&
-                plan?.scenePlans &&
-                plan.scenePlans.length > 0 && (
+                  {/* Stage 2 Scene Production Queue */}
                   <SceneProductionQueue
                     projectPath={projectPath}
-                    plan={plan}
+                    plan={plan ?? {
+                      version: 1,
+                      prompt,
+                      synopsis: "",
+                      memory: { worldbook: "", glossary: {} },
+                      chapters: [],
+                      characters: [],
+                      scenePlans: [],
+                      branches: { entryScene: "", edges: [] },
+                      sceneDrafts: [],
+                      assetPlan: [],
+                      scenes: [],
+                      pipelineRuns: [],
+                    }}
                     busy={blocked || busy}
                     selectedSceneId={selectedSceneId}
                     onSelectScene={(scene) => {
@@ -784,196 +791,12 @@ export function FlowBoardView({
                     onApproveScene={approveScene}
                     onUnlockScene={unlockScene}
                   />
-                )}
-
-              {configuring && (
-                <section
-                  aria-label="运行前检查"
-                  className="rounded-xl border border-border bg-surface-container-low p-4 text-xs"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold">运行前检查</h2>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSettingsOpen(true)}
-                    >
-                      <Settings2 /> AI 设置
-                    </Button>
-                  </div>
-                  {checking ? (
-                    <p className="mt-2 flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="size-3 animate-spin" />
-                      正在检查接口配置
-                    </p>
-                  ) : capabilityError || !capabilities ? (
-                    <div role="alert" className="mt-2 text-destructive">
-                      接口检查失败：{capabilityError ?? "未读取到配置"}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="ml-2"
-                        onClick={checkCapabilities}
-                      >
-                        重新检查
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <p
-                        className={`mt-2 ${capabilities.chatError ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}
-                      >
-                        内容生成：{capabilities.chatError ?? "对话模型已配置"}
-                      </p>
-                      <p className="mt-2 leading-5 text-muted-foreground">
-                        {assetSelected
-                          ? `素材制作：${capabilities.assetError ?? "图片、语音及立绘抠图能力已配置；BGM 和音效需手动导入"}`
-                          : "本次不制作素材，无需图片或语音接口。场景中的素材可之后手动补充。"}
-                      </p>
-                      {assetSelected && capabilities.referenceImageWarning && (
-                        <p
-                          role="status"
-                          className="mt-2 text-amber-700 dark:text-amber-300"
-                        >
-                          {capabilities.referenceImageWarning}
-                        </p>
-                      )}
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        这里只检查本地配置，接口连通性可在 AI 设置中测试。
-                      </p>
-                    </>
-                  )}
-                  {missingInputs.length > 0 && (
-                    <div
-                      role="alert"
-                      className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-amber-800 dark:text-amber-300"
-                    >
-                      <p className="font-medium">所选步骤缺少前置输入</p>
-                      <ul className="mt-1 space-y-1">
-                        {missingInputs.map(({ step, dependency }) => (
-                          <li key={step}>
-                            {stepTitle(step)}需要{stepTitle(dependency)}的结果。
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="mt-2">
-                        新建故事还没有可复用的结果，请补选前置步骤或取消依赖它的后续步骤。
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setSelectedIds(includeRequiredSteps(selectedIds))
-                          }
-                        >
-                          补选前置步骤
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setSelectedIds(excludeDependentSteps(selectedIds))
-                          }
-                        >
-                          取消相关后续步骤
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {!selectedIds.length && (
-                    <p role="alert" className="mt-3 text-destructive">
-                      请至少选择一个生产步骤。
-                    </p>
-                  )}
-                  <details className="mt-4 border-t border-border pt-3">
-                    <summary className="cursor-pointer font-medium">
-                      高级选项
-                    </summary>
-                    <label className="mt-3 flex items-center gap-2">
-                      <Switch
-                        checked={allowLocalFallback}
-                        onCheckedChange={setAllowLocalFallback}
-                        aria-label="允许本地内容降级"
-                      />
-                      允许本地降级
-                    </label>
-                    <p className="mt-2 leading-5 text-muted-foreground">
-                      接口不可用时使用本地生成内容；若选择素材制作，也会允许占位素材。降级结果会在步骤中标出。
-                    </p>
-                  </details>
-                  <p className="mt-4 text-muted-foreground">
-                    准备流程会保存所选步骤，之后点击「开始生产」执行。未选择的步骤不会运行。
-                  </p>
-                </section>
-              )}
-              {!configuring && (
-                <>
-                  <details className="rounded-xl border border-border p-4 text-xs">
-                    <summary className="cursor-pointer font-medium">
-                      本次生产目标
-                    </summary>
-                    <p className="mt-3 whitespace-pre-wrap leading-5 text-muted-foreground">
-                      {prompt}
-                    </p>
-                  </details>
-                  {!state.steps.some(isAssetQueueStep) && (
-                    <p className="rounded-lg bg-surface-container-low px-4 py-3 text-xs leading-5 text-muted-foreground">
-                      本次未执行素材制作。图片、语音和音乐可在素材编辑器中补充。
-                    </p>
-                  )}
-                  <details className="rounded-xl border border-border p-4 text-xs">
-                    <summary className="cursor-pointer font-medium">
-                      运行信息与记录管理
-                    </summary>
-                    <p className="mt-3 break-all font-mono-family text-muted-foreground">
-                      {state.runId}
-                    </p>
-                    <p className="mt-2 text-muted-foreground">
-                      {totalTokens.toLocaleString()} Token ·{" "}
-                      {hasPricedAttempts
-                        ? `$${totalCost.toFixed(4)}`
-                        : "未计价"}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={togglePinned}
-                        disabled={busy}
-                        aria-label={
-                          state.pinned ? "取消固定运行记录" : "固定运行记录"
-                        }
-                      >
-                        {state.pinned ? <BookmarkCheck /> : <Bookmark />}{" "}
-                        {state.pinned ? "取消固定" : "固定记录"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={exportHistory}
-                        disabled={busy}
-                        aria-label="导出运行记录"
-                      >
-                        <Download /> 导出记录
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={clearHistory}
-                        disabled={busy || historyClearBlocked}
-                        aria-label="清除运行记录"
-                        className="text-destructive"
-                      >
-                        <Trash2 /> 清除记录
-                      </Button>
-                    </div>
-                  </details>
                 </>
               )}
             </div>
           </div>
-          {!configuring && (
+
+          {!configuring && state.runId && (
             <div className="shrink-0 border-t border-border">
               <button
                 type="button"
@@ -1006,6 +829,7 @@ export function FlowBoardView({
             </div>
           )}
         </div>
+
         {selectedStep && (
           <div
             ref={inspectorRef}
@@ -1030,7 +854,9 @@ export function FlowBoardView({
                 first.focus();
               }
             }}
-            className={`absolute inset-y-0 right-0 z-30 w-full max-w-[420px] border-l border-border bg-surface-container-lowest shadow-[-10px_0_30px_var(--shadow-soft)] ${embedded ? "" : "xl:static xl:w-[380px] xl:shrink-0 xl:shadow-none"}`}
+            className={`absolute inset-y-0 right-0 z-30 w-full max-w-[420px] border-l border-border bg-surface-container-lowest shadow-[-10px_0_30px_var(--shadow-soft)] ${
+              embedded ? "" : "xl:static xl:w-[380px] xl:shrink-0 xl:shadow-none"
+            }`}
           >
             <FlowStepInspector
               key={selectedStep.id}
@@ -1046,9 +872,6 @@ export function FlowBoardView({
               onSkip={skipStep}
               onPromptRerun={updatePromptAndRetry}
               onOpenArtifact={(step) => onOpenArtifact?.(step, plan)}
-              steps={state.steps}
-              canEditDependencies={paused && !detached}
-              onUpdateDependencies={updateDependencies}
               events={events}
               assetQueue={assetQueue}
               onPreviewAssetArtifact={previewAssetArtifact}
@@ -1064,6 +887,7 @@ export function FlowBoardView({
           </div>
         )}
       </div>
+
       <AiSettingsDialog
         open={settingsOpen}
         onClose={() => {
@@ -1076,7 +900,7 @@ export function FlowBoardView({
       />
       <span className="sr-only" aria-live="polite">
         {configuring
-          ? `已选择 ${selectedIds.length} 个生产步骤`
+          ? "正在配置 Stage 1 立项与角色定锚"
           : `当前运行状态：${RUN_STATUS[state.runStatus]}，总体进度 ${progress}%`}
       </span>
     </div>

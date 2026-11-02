@@ -67,9 +67,6 @@ export interface FlowStepInspectorProps {
   onPreviewAssetArtifact?: (taskId: string, attempt: number) => Promise<string>;
   onDeleteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
   onPromoteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
-  steps?: readonly FlowStepView[];
-  canEditDependencies?: boolean;
-  onUpdateDependencies?: (stepId: string, dependsOn: string[]) => void;
   onBindImportedAudio?: (taskId: string, filename: string) => Promise<void>;
   /** Imported audio filenames keyed by asset directory, for manual tasks. */
   importedAudioByDir?: Record<string, string[]>;
@@ -161,9 +158,6 @@ export function FlowStepInspector({
   onPreviewAssetArtifact,
   onDeleteAssetArtifact,
   onPromoteAssetArtifact,
-  steps = [],
-  canEditDependencies = false,
-  onUpdateDependencies,
   onBindImportedAudio,
   importedAudioByDir,
   selectedScene,
@@ -173,7 +167,6 @@ export function FlowStepInspector({
   onPreviewScene,
 }: FlowStepInspectorProps) {
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? "");
-  const [dependencies, setDependencies] = useState(selected?.dependsOn ?? []);
   const [artifactBusy, setArtifactBusy] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
   const [artifactPreviews, setArtifactPreviews] = useState<
@@ -186,10 +179,6 @@ export function FlowStepInspector({
     setArtifactError(null);
     setArtifactPreviews({});
   }, [selected?.id, selected?.prompt]);
-
-  useEffect(() => {
-    setDependencies(selected?.dependsOn ?? []);
-  }, [selected?.id, selected?.dependsOn]);
 
   if (!selected) return null;
 
@@ -383,9 +372,9 @@ export function FlowStepInspector({
                 </section>
               )}
 
-              <section>
-                <SectionLabel>依赖</SectionLabel>
-                {selected.dependsOn.length ? (
+              {selected.dependsOn.length > 0 && (
+                <section>
+                  <SectionLabel>前置依赖</SectionLabel>
                   <div className="flex flex-wrap gap-1.5">
                     {selected.dependsOn.map((dependency) => (
                       <code
@@ -396,67 +385,8 @@ export function FlowStepInspector({
                       </code>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">无</p>
-                )}
-                {onUpdateDependencies && (
-                  <details className="mt-3 text-xs">
-                    <summary className="cursor-pointer text-muted-foreground">
-                      调整前置步骤
-                    </summary>
-                    <p className="mt-2 leading-5 text-muted-foreground">
-                      仅可在暂停时调整待运行步骤。取消等待关系不会补齐缺少的故事数据。
-                    </p>
-                    <div className="mt-2 space-y-2">
-                      {steps
-                        .filter((step) => step.id !== selected.id)
-                        .map((step) => (
-                          <label
-                            key={step.id}
-                            className="flex items-center gap-2"
-                          >
-                            <input
-                              type="checkbox"
-                              aria-label={`等待${stepTitle(step.id)}`}
-                              className="size-3.5 accent-primary"
-                              checked={dependencies.includes(step.id)}
-                              disabled={
-                                busy ||
-                                !canEditDependencies ||
-                                selected.status !== "pending"
-                              }
-                              onChange={(event) =>
-                                setDependencies((current) =>
-                                  event.target.checked
-                                    ? [...current, step.id]
-                                    : current.filter((id) => id !== step.id),
-                                )
-                              }
-                            />
-                            {stepTitle(step.id)}
-                          </label>
-                        ))}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-3"
-                      disabled={
-                        busy ||
-                        !canEditDependencies ||
-                        selected.status !== "pending" ||
-                        JSON.stringify([...dependencies].sort()) ===
-                          JSON.stringify([...selected.dependsOn].sort())
-                      }
-                      onClick={() =>
-                        onUpdateDependencies(selected.id, dependencies)
-                      }
-                    >
-                      保存前置步骤
-                    </Button>
-                  </details>
-                )}
-              </section>
+                </section>
+              )}
 
               <section>
                 <SectionLabel>步骤要求</SectionLabel>
