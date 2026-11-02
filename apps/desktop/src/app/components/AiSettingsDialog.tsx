@@ -505,7 +505,7 @@ function ModelSelectField({
                 onChange(e.target.value);
               }
             }}
-            className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
             aria-label="选择模型"
           >
             {options.map((model) => (
@@ -522,7 +522,7 @@ function ModelSelectField({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           autoFocus
-          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
           aria-label="模型名称"
         />
       </div>
@@ -539,7 +539,7 @@ function ModelSelectField({
           onChange(e.target.value);
         }
       }}
-      className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+      className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
       aria-label="选择模型"
     >
       {options.map((model) => (
@@ -584,7 +584,7 @@ export function ConfigFields({
         <select
           value={config.provider}
           onChange={(e) => onProviderChange(e.target.value)}
-          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
           aria-label="选择 AI 供应商"
         >
           {options.map((p) => (
@@ -628,7 +628,7 @@ export function ConfigFields({
           value={config.api_key}
           onChange={(e) => onUpdate({ api_key: e.target.value })}
           placeholder="sk-..."
-          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
         />
       </Field>
 
@@ -638,7 +638,7 @@ export function ConfigFields({
           value={config.base_url}
           onChange={(e) => onUpdate({ base_url: e.target.value })}
           placeholder={provider?.baseUrlPlaceholder ?? '(默认)'}
-          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+          className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
         />
       </Field>
     </div>
@@ -764,7 +764,7 @@ function ModelTagPicker({
               }
             }}
             placeholder="输入自定义模型名称"
-            className="min-w-0 flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="min-w-0 flex-1 px-3 py-2 bg-input-background border border-border rounded-md text-sm"
           />
           <button
             type="button"

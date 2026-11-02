@@ -191,13 +191,10 @@
     transform: scale(0.98);
   }
 
-  button:focus-visible,
-  [role='button']:focus-visible,
-  input:focus-visible,
-  textarea:focus-visible,
-  select:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--ring) 70%, white);
-    outline-offset: 2px;
+  /* The one focus indicator. Components must not replace it with outline-none. */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
 
   input,
@@ -209,6 +206,21 @@
 }
 
 @layer components {
+  /* Composite fields (icon + bare input): show the focus ring on the wrapper. */
+  .focus-ring-within:has(:focus-visible) {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  .focus-ring-within :focus-visible {
+    outline: none;
+  }
+
+  /* Full-bleed editors: draw the ring inside so overflow containers do not clip it. */
+  .focus-ring-inset:focus-visible {
+    outline-offset: calc(var(--focus-ring-width) * -1);
+  }
+
   /* Breathable Soft Pastel Ambient Shell (matches ProjectHome) */
   .story-shell {
     background:
@@ -399,6 +411,11 @@
   .ollaic-top-search:focus-within {
     border-color: var(--primary);
     background: var(--surface-container-lowest);
+  }
+
+  .ollaic-top-search:has(:focus-visible) {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
 
   .ollaic-top-search-input {

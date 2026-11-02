@@ -135,7 +135,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索显示名称或文件名..."
-                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md"
                 autoFocus
                 aria-label="搜索素材"
               />

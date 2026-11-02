@@ -1296,7 +1296,7 @@ export function StoryEditor() {
                           <span className="truncate text-muted-foreground">脚本源码 · {currentSceneName}</span>
                           <button type="button" onClick={handleApplyScript} className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-primary-foreground">应用更改</button>
                         </div>
-                        <textarea value={scriptSource} onChange={(event) => { setScriptSource(event.target.value); markDirty(); }} className="min-h-0 w-full flex-1 resize-none bg-transparent p-4 text-sm leading-relaxed outline-none font-mono-family" spellCheck={false} aria-label="WebGAL 脚本编辑器" />
+                        <textarea value={scriptSource} onChange={(event) => { setScriptSource(event.target.value); markDirty(); }} className="min-h-0 w-full flex-1 resize-none bg-transparent p-4 text-sm leading-relaxed focus-ring-inset font-mono-family" spellCheck={false} aria-label="WebGAL 脚本编辑器" />
                       </div>
                     ) : (
                       <ScriptCommandStream displayMode={scriptMode === 'compact' ? 'compact' : 'stream'} nodes={nodes} selectedNode={selectedNode} currentSceneName={currentSceneName} sceneHeaders={sceneHeaders}

@@ -217,7 +217,7 @@ const AiInputBox = memo(function AiInputBox({
             }
           }}
           disabled={busy || locked || pending}
-          className="h-24 w-full resize-none rounded-lg border border-border bg-surface-container-lowest p-2.5 pb-10 text-sm focus:border-secondary focus:outline-none focus:ring-2 focus:ring-secondary-container/30 disabled:opacity-60"
+          className="h-24 w-full resize-none rounded-lg border border-border bg-surface-container-lowest p-2.5 pb-10 text-sm focus:border-secondary disabled:opacity-60"
           placeholder={
             busy
               ? '生成中...'
@@ -571,7 +571,7 @@ export function AiAssistantPanel({
                 setRenameTarget(null);
               }
             }}
-            className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
             placeholder="会话名称"
             aria-label="会话名称"
           />

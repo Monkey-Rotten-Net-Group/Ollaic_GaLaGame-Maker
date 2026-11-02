@@ -127,7 +127,7 @@ export function ProjectMemoryPage() {
   };
 
   const canEdit = !!projectPath && loaded && !loading && !busy;
-  const controlClass = 'min-w-0 rounded-md border border-border bg-surface-container-lowest px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
+  const controlClass = 'min-w-0 rounded-md border border-border bg-surface-container-lowest px-3 py-2 text-sm';
 
   return (
     <div className="min-h-screen bg-surface-container-lowest text-foreground">
@@ -157,7 +157,7 @@ export function ProjectMemoryPage() {
           ) : (
             <>
               <div className="flex flex-wrap gap-2 py-4">
-                <label className={`flex basis-full items-center gap-2 sm:flex-1 ${controlClass}`}>
+                <label className={`focus-ring-within flex basis-full items-center gap-2 sm:flex-1 ${controlClass}`}>
                   <Search className="size-4 shrink-0 text-muted-foreground" />
                   <input className="min-w-0 flex-1 bg-transparent outline-none" aria-label="搜索记忆" placeholder="搜索记忆..." value={query} onChange={(event) => setQuery(event.target.value)} />
                 </label>

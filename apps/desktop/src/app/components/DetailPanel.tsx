@@ -64,7 +64,7 @@ const typeOptions: { value: WebGalCommandType; label: string }[] = [
   { value: 'comment', label: '注释' },
 ];
 
-const inputClass = 'w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm';
+const inputClass = 'w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm';
 const labelClass = 'block text-xs uppercase tracking-widest text-muted-foreground mb-1.5';
 
 export function DetailPanel({
@@ -1003,7 +1003,7 @@ function CharacterEmotionDialog({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索表情、姿态或文件名..."
-                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full pl-10 pr-3 py-2 text-sm bg-input-background border border-border rounded-md"
                 aria-label="搜索表情"
                 autoFocus
               />
@@ -1106,7 +1106,7 @@ function SceneSelect({
 }) {
   const known = !value || scenes.includes(value);
   const cls = compact
-    ? 'w-full px-2 py-1 bg-background border border-border/50 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/50'
+    ? 'w-full px-2 py-1 bg-background border border-border/50 rounded text-sm'
     : inputClass;
   return (
     <select
@@ -1182,7 +1182,7 @@ function ChoiceEditor({ node, onUpdate, scenes = [], sceneHeaders = {} }: {
               type="text"
               value={choice.text}
               onChange={(e) => update(idx, 'text', e.target.value)}
-              className="w-full px-2 py-1 mb-1.5 bg-background border border-border/50 rounded text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+              className="w-full px-2 py-1 mb-1.5 bg-background border border-border/50 rounded text-sm"
               placeholder="选项文本"
               aria-label={`Option ${idx + 1} text`}
             />

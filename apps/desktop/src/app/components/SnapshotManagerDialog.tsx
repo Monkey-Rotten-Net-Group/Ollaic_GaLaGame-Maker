@@ -129,14 +129,14 @@ export function SnapshotManagerDialog({
               <input
                 value={label}
                 onChange={(event) => setLabel(event.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="min-w-0 flex-1 rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                 placeholder="快照名称"
                 aria-label="快照名称"
               />
               <select
                 value={kind}
                 onChange={(event) => setKind(event.target.value as SnapshotKind)}
-                className="rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                 aria-label="快照类型"
               >
                 <option value="manual">手动快照</option>
@@ -166,7 +166,7 @@ export function SnapshotManagerDialog({
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  className="w-full rounded-md border border-border bg-input-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className="w-full rounded-md border border-border bg-input-background py-2 pl-9 pr-3 text-sm"
                   placeholder="搜索名称、类型或 ID"
                   aria-label="搜索快照"
                 />
@@ -174,7 +174,7 @@ export function SnapshotManagerDialog({
               <select
                 value={filter}
                 onChange={(event) => setFilter(event.target.value as SnapshotFilter)}
-                className="rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                 aria-label="筛选快照类型"
               >
                 <option value="all">全部 ({counts.all ?? 0})</option>
@@ -351,7 +351,7 @@ function SnapshotRow({
               <input
                 value={editingLabel}
                 onChange={(event) => onEditingLabelChange(event.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-border bg-input-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="min-w-0 flex-1 rounded-md border border-border bg-input-background px-2 py-1.5 text-sm"
                 aria-label="编辑快照名称"
                 autoFocus
               />

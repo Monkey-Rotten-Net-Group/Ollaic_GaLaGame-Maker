@@ -99,7 +99,7 @@ export function SceneManagerPanel({
                         value={editChapter}
                         onChange={(e) => setEditChapter(e.target.value)}
                         placeholder="章节名称"
-                        className="w-full rounded border border-border bg-surface-container-low px-2 py-1 text-xs focus:border-secondary focus:outline-none"
+                        className="w-full rounded border border-border bg-surface-container-low px-2 py-1 text-xs focus:border-secondary"
                         aria-label="章节名称"
                       />
                       <input
@@ -107,7 +107,7 @@ export function SceneManagerPanel({
                         value={editOutline}
                         onChange={(e) => setEditOutline(e.target.value)}
                         placeholder="概要"
-                        className="w-full rounded border border-border bg-surface-container-low px-2 py-1 text-xs focus:border-secondary focus:outline-none"
+                        className="w-full rounded border border-border bg-surface-container-low px-2 py-1 text-xs focus:border-secondary"
                         aria-label="概要"
                       />
                       <div className="flex gap-2">

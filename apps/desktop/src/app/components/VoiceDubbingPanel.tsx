@@ -627,7 +627,7 @@ export function VoiceDubbingPanel({
                       <select
                         value={effectiveBatchModel}
                         onChange={(event) => setBatchModel(event.target.value)}
-                        className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                       >
                         {configuredModels.map((model) => (
                           <option key={model} value={model}>{model}</option>
@@ -637,7 +637,7 @@ export function VoiceDubbingPanel({
                       <input
                         value={batchModel}
                         onChange={(event) => setBatchModel(event.target.value)}
-                        className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                         placeholder="输入 TTS 模型"
                       />
                     )}
@@ -649,7 +649,7 @@ export function VoiceDubbingPanel({
                     <select
                       value={batchFormat}
                       onChange={(event) => setBatchFormat(event.target.value)}
-                      className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                     >
                       <option value="mp3">MP3</option>
                       <option value="wav">WAV</option>

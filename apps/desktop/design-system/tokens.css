@@ -485,6 +485,11 @@
 :root,
 .dark,
 .ph-root {
+  /* Single focus indicator for every control. --ring is >= 3:1 against the
+     page and card surfaces in every seed and mode (WCAG 1.4.11 / 2.4.11). */
+  --focus-ring: var(--ring);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
   --secondary: var(--surface-container);
   --secondary-foreground: var(--foreground);
   --scrollbar-thumb: color-mix(in srgb, var(--primary) 45%, transparent);

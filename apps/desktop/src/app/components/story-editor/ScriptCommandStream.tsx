@@ -658,7 +658,7 @@ function ScriptCommandCompactRow({
                   onSelectNode(node);
                 }}
                 aria-pressed={selectedNodeId === node.id}
-                className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="block w-full rounded text-left"
               >
                 {isDialogue ? (
                   <span className="text-on-surface">
@@ -710,7 +710,7 @@ function ScriptCommandCompactRow({
                           e.stopPropagation();
                           onSelectNode(lineNode);
                         }}
-                        className={`flex items-center gap-1.5 w-full rounded text-left text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                        className={`flex items-center gap-1.5 w-full rounded text-left text-[11px] transition-colors ${
                           lineSelected ? 'font-semibold text-primary' : 'text-on-surface-variant/80 hover:text-foreground'
                         }`}
                       >

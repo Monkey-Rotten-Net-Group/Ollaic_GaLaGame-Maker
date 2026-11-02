@@ -215,7 +215,6 @@
   font-family: var(--ph-font-sans);
   font-size: 12px;
   font-weight: 600;
-  outline: none;
   transition: all 0.18s ease;
 }
 
@@ -958,7 +957,6 @@
   font-family: var(--ph-font-sans);
   font-size: 13px;
   font-weight: 600;
-  outline: none;
   box-sizing: border-box;
 }
 

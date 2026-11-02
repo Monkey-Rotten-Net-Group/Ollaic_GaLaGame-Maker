@@ -1320,7 +1320,7 @@ export function AssetManager() {
                       placeholder="搜索素材名称..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-input-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      className="w-full pl-10 pr-4 py-2 bg-input-background border border-border rounded"
                     />
                   </div>
                 )}
@@ -2078,7 +2078,7 @@ export function AssetManager() {
                         type="text"
                         value={aliasForAsset(selectedAsset)}
                         onChange={(e) => handleAliasChange(selectedAsset, e.target.value)}
-                        className="w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+                        className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
                         placeholder={activeTab === 'scene' ? '例：教室 · 白天' : '例：悲伤主旋律'}
                         aria-label="素材显示名称"
                       />
@@ -2145,7 +2145,7 @@ export function AssetManager() {
                         placeholder={selectedAsset.category === 'background'
                           ? '描述要生成或重绘的背景：地点、时间、天气、氛围、镜头角度、画面主体。'
                           : '备注这段音频的用途，例如：战斗场景循环、角色出场主题。'}
-                        className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6"
                       />
                     </div>
                   )}
@@ -2452,7 +2452,7 @@ function AssetAiGenerateDialog({
               <select
                 value={effectiveModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
               >
                 {configuredModels.map((model) => (
                   <option key={model} value={model}>{model}</option>
@@ -2464,7 +2464,7 @@ function AssetAiGenerateDialog({
                 value={effectiveModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
                 placeholder={isImageGeneration ? '先在图片 AI 设置中选择模型' : '先在音频 AI 设置中选择模型'}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
               />
             )}
           </FieldBlock>
@@ -2617,10 +2617,10 @@ function VoiceCardDetails({
             readOnly={Boolean(draft.voiceAsset)}
             onChange={(e) => setFilenameDraft(e.target.value)}
             onBlur={(e) => commitFilenameChange(e.target.value)}
-            className={`w-full px-3 py-2 bg-input-background border rounded-md text-sm font-mono-family focus:outline-none focus:ring-2 ${
+            className={`w-full px-3 py-2 bg-input-background border rounded-md text-sm font-mono-family ${
               hasFilenameConflict
-                ? 'border-destructive/60 focus:ring-destructive/30'
-                : 'border-border focus:ring-primary/50'
+                ? 'border-destructive/60'
+                : 'border-border'
             }`}
             aria-label="音频文件名"
           />
@@ -2643,7 +2643,7 @@ function VoiceCardDetails({
           <input
             value={draft.character}
             onChange={(e) => update({ character: e.target.value })}
-            className="w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+            className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
             placeholder="例：Alice"
           />
         </div>
@@ -2655,7 +2655,7 @@ function VoiceCardDetails({
           <select
             value={draft.emotion || '默认'}
             onChange={(e) => update({ emotion: e.target.value })}
-            className="w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+            className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
           >
             {voiceEmotionOptions.map((emotion) => (
               <option key={emotion} value={emotion}>{emotion}</option>
@@ -2671,7 +2671,7 @@ function VoiceCardDetails({
             value={draft.text}
             onChange={(e) => update({ text: e.target.value })}
             rows={4}
-            className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6"
           />
         </div>
 
@@ -2814,7 +2814,7 @@ function SceneCardDetails({
             type="text"
             value={draft.title}
             onChange={(e) => update({ title: e.target.value })}
-            className="w-full px-3 py-2 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm"
+            className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
             placeholder="例：教室 · 白天"
             aria-label="场景显示名称"
           />
@@ -2871,7 +2871,7 @@ function SceneCardDetails({
             onChange={(e) => update({ prompt: e.target.value })}
             rows={6}
             placeholder="描述要生成或重绘的背景：地点、时间、天气、氛围、镜头角度、画面主体。"
-            className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/50"
+            className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6"
           />
         </div>
 

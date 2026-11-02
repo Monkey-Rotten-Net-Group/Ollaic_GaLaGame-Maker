@@ -719,7 +719,7 @@ export function FlowStepInspector({
                     className="group px-4 py-3"
                     open={attempt.attempt === selected.attempt}
                   >
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 text-xs">
                       <span
                         className={cn(
                           "size-1.5 rounded-full",

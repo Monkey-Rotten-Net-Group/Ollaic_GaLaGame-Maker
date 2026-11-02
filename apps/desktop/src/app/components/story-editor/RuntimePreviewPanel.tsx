@@ -244,7 +244,7 @@ export function RuntimePreviewPanel({ preview, layout, dockLayout = 'split', hei
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-border bg-surface-container-low px-1.5 text-[10px] font-semibold text-primary transition-colors hover:bg-surface-container-high focus:outline-none"
+                    className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-border bg-surface-container-low px-1.5 text-[10px] font-semibold text-primary transition-colors hover:bg-surface-container-high"
                     title="切换画中画尺寸"
                     aria-label="切换画中画尺寸"
                   >

@@ -70,7 +70,7 @@ type PersistOptions = {
   keepSelection?: boolean;
 };
 
-const inputClass = 'w-full px-2.5 py-1.5 bg-input-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 text-xs';
+const inputClass = 'w-full px-2.5 py-1.5 bg-input-background border border-border rounded-md text-xs';
 const labelClass = 'block text-[10px] uppercase tracking-wider text-muted-foreground mb-1 font-mono-family';
 const spriteSuggestions = [
   { pose: '日常站姿', emotion: '微笑', prompt: 'standing pose, gentle smile, relaxed hands' },
@@ -869,7 +869,7 @@ export function CharacterPanel({
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="w-full pl-8 pr-2 py-2 text-xs rounded-md bg-input-background border border-border focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className="w-full pl-8 pr-2 py-2 text-xs rounded-md bg-input-background border border-border"
                   placeholder="搜索人物"
                 />
               </div>
@@ -1414,7 +1414,7 @@ export function CharacterPanel({
                               <input
                                 value={sprite.emotion}
                                 onChange={(e) => updateSprite(selected.id, index, 'emotion', e.target.value)}
-                                className="min-w-0 flex-1 bg-transparent text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-1 py-0.5"
+                                className="min-w-0 flex-1 bg-transparent text-xs font-semibold rounded px-1 py-0.5"
                                 placeholder="情绪标签"
                                 style={{ color }}
                               />
@@ -1495,7 +1495,7 @@ export function CharacterPanel({
                                   onChange={(e) => updateSprite(selected.id, index, 'prompt', e.target.value)}
                                   onBlur={() => setExpandedPromptIndex(null)}
                                   autoFocus
-                                  className="w-full h-14 resize-none text-[10px] font-mono-family bg-input-background border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                                  className="w-full h-14 resize-none text-[10px] font-mono-family bg-input-background border border-border rounded px-2 py-1"
                                   placeholder="提示词（如：微笑表情，嘴角上扬，眼睛微眯…）"
                                 />
                               ) : (
@@ -1837,7 +1837,7 @@ function SpriteAiGenerateDialog({
               <select
                 value={effectiveModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
               >
                 {configuredModels.map((model) => (
                   <option key={model} value={model}>{model}</option>
@@ -1848,7 +1848,7 @@ function SpriteAiGenerateDialog({
                 value={effectiveModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
                 placeholder="先在图片 AI 设置中选择模型"
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
               />
             )}
           </div>
