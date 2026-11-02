@@ -1,0 +1,620 @@
+/*
+ * Ollaic Design Tokens — tokens.css
+ * 由 apps/desktop 现有样式提取（2026-11-02）。已由 src/styles/index.css 在 theme.css 之前引入，
+ * 是全部颜色/语义变量的唯一来源；theme.css 只保留 @theme inline 映射、base 层和组件类。
+ * 作用域根：:root（应用全局）与 .ph-root（ProjectHome 有独立的明暗开关 ollaic-home-theme，
+ * 所以浅色语义值也要在 .ph-root:not(.dark) 上重新声明，见下方选择器）。
+ * 结构：primitive (--ol-*) → semantic（沿用 shadcn / 现有变量名）→ component 级别 scale (--ol-*)
+ * Seed 切换：:root[data-seed='crimson'|'teal'|'amber']；暗色：.dark（与 theme.css 一致）。
+ * 合并记录见 tokens.json 的 $extensions.com.ollaic.replaces 与 README.md。
+ */
+
+:root {
+  /* ---------- Primitive: color ---------- */
+  --ol-white: #ffffff;
+  --ol-black: #000000;
+  --ol-lavender-0: #ffffff;
+  --ol-lavender-10: #fcfbfe;
+  --ol-lavender-20: #faf7fd;
+  --ol-lavender-30: #f7f4fa;
+  --ol-lavender-40: #f5effb;
+  --ol-lavender-50: #f4f0f9;
+  --ol-lavender-60: #f1ecf7;
+  --ol-lavender-70: #efe8f8;
+  --ol-lavender-80: #eae3f2;
+  --ol-lavender-90: #e4deec;
+  --ol-lavender-100: #e2d9ec;
+  --ol-ink-500: #867d96;
+  --ol-ink-600: #625b70;
+  --ol-ink-700: #322d3a;
+  --ol-ink-850: #1f1c24;
+  --ol-ink-900: #1d1b22;
+  --ol-night-0: #121017;
+  --ol-night-10: #14111a;
+  --ol-night-20: #191522;
+  --ol-night-30: #1e1b26;
+  --ol-night-40: #24202e;
+  --ol-night-50: #282433;
+  --ol-night-60: #2b2637;
+  --ol-night-70: #342e42;
+  --ol-night-80: #3e374f;
+  --ol-night-text: #f2edf7;
+  --ol-night-text-muted: #b0a7c2;
+  --ol-violet-100: #eaddff;
+  --ol-violet-200: #c9b6fb;
+  --ol-violet-300: #b69df8;
+  --ol-violet-600: #65558f;
+  --ol-violet-700: #53447a;
+  --ol-violet-850: #2b1f47;
+  --ol-violet-900: #261454;
+  --ol-violet-950: #21005d;
+  --ol-violet-a14: rgba(101, 85, 143, 0.14);
+  --ol-violet-a18: rgba(101, 85, 143, 0.18);
+  --ol-violet-a11: rgba(101, 85, 143, 0.11);
+  --ol-violet-a38: rgba(101, 85, 143, 0.38);
+  --ol-violet-light-a15: rgba(208, 188, 255, 0.15);
+  --ol-violet-light-a18: rgba(208, 188, 255, 0.18);
+  --ol-rose-100: #f9d8e6;
+  --ol-rose-800: #5c1936;
+  --ol-rose-dark-bg: rgba(244, 114, 182, 0.2);
+  --ol-rose-dark-text: #fbcfe8;
+  --ol-crimson-bg-top: #fdfbfc;
+  --ol-crimson-background: #fcf6f8;
+  --ol-crimson-bg-bottom: #fbf0f4;
+  --ol-crimson-surface-low: #faf3f5;
+  --ol-crimson-surface: #f5e9ed;
+  --ol-crimson-surface-high: #eedde3;
+  --ol-crimson-surface-highest: #e6d0d8;
+  --ol-crimson-100: #fce4eb;
+  --ol-crimson-secondary-container: #f9e2e8;
+  --ol-crimson-600: #9e2a47;
+  --ol-crimson-700: #822039;
+  --ol-crimson-badge-text: #6e152d;
+  --ol-crimson-900: #4a0e1f;
+  --ol-crimson-on-secondary-container: #421220;
+  --ol-crimson-dark-primary: #ffb1c5;
+  --ol-crimson-dark-container: #552032;
+  --ol-crimson-dark-on-container: #ffd9e2;
+  --ol-crimson-a14: rgba(158, 42, 71, 0.14);
+  --ol-crimson-a18: rgba(158, 42, 71, 0.18);
+  --ol-crimson-glow: rgba(158, 42, 71, 0.1);
+  --ol-teal-bg-top: #fafdfe;
+  --ol-teal-background: #f4f9fb;
+  --ol-teal-bg-bottom: #eef7f9;
+  --ol-teal-surface-low: #f1f7f8;
+  --ol-teal-surface: #e8f1f3;
+  --ol-teal-surface-high: #dde9ec;
+  --ol-teal-surface-highest: #d0e1e5;
+  --ol-teal-100: #d3f3f7;
+  --ol-teal-secondary-container: #e0f3f6;
+  --ol-teal-badge-bg: #d9f3f6;
+  --ol-teal-600: #0f7685;
+  --ol-teal-700: #0b5f6b;
+  --ol-teal-badge-text: #084c57;
+  --ol-teal-900: #06343b;
+  --ol-teal-on-secondary-container: #08373e;
+  --ol-teal-dark-primary: #83d5e3;
+  --ol-teal-dark-on-primary: #00363e;
+  --ol-teal-dark-container: #004f59;
+  --ol-teal-a14: rgba(13, 122, 138, 0.14);
+  --ol-teal-a18: rgba(13, 122, 138, 0.18);
+  --ol-teal-glow: rgba(13, 122, 138, 0.1);
+  --ol-amber-bg-top: #fefcf9;
+  --ol-amber-background: #fbf7f0;
+  --ol-amber-bg-bottom: #faf2e6;
+  --ol-amber-surface-low: #faf5ee;
+  --ol-amber-surface: #f4ece0;
+  --ol-amber-surface-high: #ebe0d0;
+  --ol-amber-surface-highest: #e0d2be;
+  --ol-amber-100: #ffedd5;
+  --ol-amber-secondary-container: #faebd7;
+  --ol-amber-badge-bg: #fde8cd;
+  --ol-amber-600: #8c5212;
+  --ol-amber-700: #70400c;
+  --ol-amber-swatch: #b45309;
+  --ol-amber-badge-text: #5c2c06;
+  --ol-amber-900: #431407;
+  --ol-amber-on-secondary-container: #3b1906;
+  --ol-amber-dark-primary: #f5be7b;
+  --ol-amber-dark-on-primary: #452807;
+  --ol-amber-dark-container: #653d10;
+  --ol-amber-a15: rgba(180, 83, 9, 0.15);
+  --ol-amber-a18: rgba(180, 83, 9, 0.18);
+  --ol-amber-glow: rgba(180, 83, 9, 0.09);
+  --ol-red-600: #cf222e;
+  --ol-red-100: #ffebe9;
+  --ol-red-900: #6e1119;
+  --ol-red-dark: #f47296;
+  --ol-red-dark-on: #3b0718;
+  --ol-green-700: #006b56;
+  --ol-glow-lilac: rgba(168, 130, 235, 0.13);
+  --ol-glow-lilac-dark: rgba(168, 130, 235, 0.1);
+  --ol-glow-pink: rgba(244, 162, 194, 0.12);
+  --ol-glow-pink-dark: rgba(244, 114, 182, 0.07);
+  --ol-glow-sky: rgba(56, 189, 248, 0.08);
+  --ol-glow-orange: rgba(245, 158, 11, 0.07);
+  --ol-glow-pink-amber: rgba(244, 114, 182, 0.07);
+  --ol-status-emerald-300: oklch(84.5% 0.143 164.978);
+  --ol-status-emerald-400: oklch(76.5% 0.177 163.223);
+  --ol-status-emerald-500: oklch(69.6% 0.17 162.48);
+  --ol-status-emerald-700: oklch(50.8% 0.118 165.612);
+  --ol-status-amber-300: oklch(87.9% 0.169 91.605);
+  --ol-status-amber-500: oklch(76.9% 0.188 70.08);
+  --ol-status-amber-700: oklch(55.5% 0.163 48.998);
+  --ol-status-blue-300: oklch(80.9% 0.105 251.813);
+  --ol-status-blue-500: oklch(62.3% 0.214 259.815);
+  --ol-category-story: oklch(62% 0.14 350);
+  --ol-category-story-soft: oklch(62% 0.14 350 / 0.09);
+  --ol-category-scene: oklch(64% 0.12 275);
+  --ol-category-scene-soft: oklch(64% 0.12 275 / 0.09);
+  --ol-category-audio: oklch(66% 0.11 210);
+  --ol-category-audio-soft: oklch(66% 0.11 210 / 0.09);
+  --ol-category-control: oklch(72% 0.12 75);
+  --ol-category-control-soft: oklch(72% 0.12 75 / 0.09);
+  --ol-category-effects: oklch(62% 0.14 25);
+  --ol-category-effects-soft: oklch(62% 0.14 25 / 0.09);
+  --ol-emotion-happy: oklch(78% 0.1 65);
+  --ol-emotion-sad: oklch(72% 0.1 235);
+  --ol-emotion-angry: oklch(65% 0.18 25);
+  --ol-emotion-surprised: oklch(72% 0.13 305);
+  --ol-emotion-shy: oklch(78% 0.1 0);
+  --ol-emotion-serious: oklch(72% 0.1 165);
+  --ol-emotion-default: oklch(70% 0.02 250);
+  --ol-character-1: oklch(78% 0.1 65);
+  --ol-character-2: oklch(72% 0.1 50);
+  --ol-character-3: oklch(72% 0.06 165);
+  --ol-character-4: oklch(72% 0.1 235);
+  --ol-character-5: oklch(70% 0.12 305);
+  --ol-character-6: oklch(80% 0.14 90);
+  --ol-character-7: oklch(75% 0.13 0);
+  --ol-character-8: oklch(75% 0.1 160);
+
+  /* ---------- Typography ---------- */
+  --font-size: 16px;
+  --font-display: 'Fredoka', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular', 'Yuanti SC', 'STYuanti-SC-Bold', 'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Quicksand', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular', 'Yuanti SC', 'STYuanti-SC-Regular', 'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', 'Menlo', monospace;
+  --ol-font-size-2xs: 10px;
+  --ol-font-size-xs: 11px;
+  --ol-font-size-sm: 12px;
+  --ol-font-size-md: 13px;
+  --ol-font-size-base: 14px;
+  --ol-font-size-lg: 16px;
+  --ol-font-size-xl: 18px;
+  --ol-font-size-2xl: 20px;
+  --ol-font-size-display: 26px;
+  --ol-font-weight-normal: 400;
+  --ol-font-weight-medium: 500;
+  --ol-font-weight-semibold: 600;
+  --ol-font-weight-bold: 700;
+  --ol-font-weight-heading: 700;
+  --font-weight-normal: var(--ol-font-weight-normal);
+  --font-weight-medium: var(--ol-font-weight-medium);
+  --ol-leading-none: 1;
+  --ol-leading-tight: 1.25;
+  --ol-leading-heading: 1.35;
+  --ol-leading-normal: 1.5;
+  --ol-leading-relaxed: 1.625;
+  --ol-tracking-tight: -0.025em;
+  --ol-tracking-body: 0.01em;
+  --ol-tracking-label: 0.02em;
+  --ol-tracking-caps: 0.04em;
+  --ol-tracking-overline: 0.1em;
+
+  /* ---------- Spacing (4px 基准，与 Tailwind --spacing: 0.25rem 对齐) ---------- */
+  --ol-space-0: 0px;
+  --ol-space-0_5: 2px;
+  --ol-space-1: 4px;
+  --ol-space-1_5: 6px;
+  --ol-space-2: 8px;
+  --ol-space-2_5: 10px;
+  --ol-space-3: 12px;
+  --ol-space-4: 16px;
+  --ol-space-5: 20px;
+  --ol-space-6: 24px;
+  --ol-space-7: 28px;
+  --ol-space-8: 32px;
+  --ol-gutter: 18px;
+  --ol-topbar-height: 60px;
+  --ol-workspace-top: 66px;
+  --ol-island-height: 42px;
+  --ol-control-height-sm: 30px;
+  --ol-control-height: 34px;
+  --ol-agent-dock-width: 376px;
+
+  /* ---------- Radius ---------- */
+  --radius: 0.85rem;
+  --ol-radius-xs: 4px;
+  --ol-radius-sm: calc(var(--radius) - 4px);
+  --ol-radius-md: calc(var(--radius) - 2px);
+  --ol-radius-lg: var(--radius);
+  --ol-radius-xl: calc(var(--radius) + 4px);
+  --ol-radius-2xl: 20px;
+  --ol-radius-3xl: 24px;
+  --ol-radius-shell: 26px;
+  --ol-radius-full: 999px;
+
+  /* ---------- Elevation ---------- */
+  --ol-shadow-xs: 0 2px 8px -2px rgba(29, 27, 34, 0.04);
+  --ol-shadow-floating: 0 20px 48px rgba(29, 27, 34, 0.22);
+  --ol-shadow-button: 0 4px 12px rgba(29, 27, 34, 0.14);
+  --ol-shadow-glow: 0 0 20px color-mix(in srgb, var(--color-warm-glow) 60%, transparent);
+
+  /* ---------- Z-index ---------- */
+  --ol-z-base: 0;
+  --ol-z-raised: 10;
+  --ol-z-sticky: 20;
+  --ol-z-sheet: 30;
+  --ol-z-popover-catcher: 40;
+  --ol-z-chrome: 50;
+  --ol-z-modal: 60;
+  --ol-z-modal-nested: 70;
+  --ol-z-drag-capture: 100;
+  --ol-z-toast: 110;
+
+  /* ---------- Motion ---------- */
+  --ol-duration-press: 140ms;
+  --ol-duration-fast: 160ms;
+  --ol-duration-base: 180ms;
+  --ol-duration-moderate: 240ms;
+  --ol-duration-slow: 300ms;
+  --ol-duration-enter: 500ms;
+  --ol-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ol-ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ol-ease-tailwind: cubic-bezier(0.4, 0, 0.2, 1);
+  --ol-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ol-scale-press: 0.97;
+  --ol-lift-hover: -1px;
+  --ol-loop-spin: 1s;
+  --ol-loop-pulse-glow: 2s;
+  --ol-loop-float: 6s;
+
+  /* ---------- Blur / Icon ---------- */
+  --ol-blur-overlay: 4px;
+  --ol-blur-sm: 8px;
+  --ol-blur-glass: 12px;
+  --ol-blur-glass-strong: 16px;
+  --ol-icon-xs: 12px;
+  --ol-icon-sm: 14px;
+  --ol-icon-md: 16px;
+  --ol-icon-lg: 20px;
+  --ol-icon-xl: 24px;
+  /* 断点无法用于 @media 中的 var()，仅作文档；接入时写进 @theme 的 --breakpoint-* */
+  --ol-breakpoint-sm: 640px;
+  --ol-breakpoint-md: 768px;
+  --ol-breakpoint-lg: 1024px;
+  --ol-breakpoint-topbar: 1100px;
+  --ol-breakpoint-xl: 1280px;
+  --ol-breakpoint-wide: 1440px;
+  --ol-breakpoint-2xl: 1536px;
+  --ol-breakpoint-ultra: 1800px;
+  --ol-breakpoint-home-compact: 920px;
+
+}
+
+/* ---------- Semantic (light, default seed: violet) ---------- */
+:root,
+.ph-root:not(.dark) {
+  --background: var(--ol-lavender-20);
+  --foreground: var(--ol-ink-900);
+  --card: var(--ol-lavender-0);
+  --card-foreground: var(--ol-ink-900);
+  --popover: var(--ol-lavender-0);
+  --popover-foreground: var(--ol-ink-900);
+  --primary: var(--ol-violet-600);
+  --primary-foreground: var(--ol-white);
+  --primary-hover: var(--ol-violet-700);
+  --primary-container: var(--ol-violet-100);
+  --on-primary-container: var(--ol-violet-950);
+  --secondary-container: var(--ol-lavender-70);
+  --on-secondary-container: var(--ol-violet-850);
+  --tertiary: var(--ol-teal-600);
+  --tertiary-container: var(--ol-teal-100);
+  --on-tertiary-container: var(--ol-teal-900);
+  --muted: var(--ol-lavender-50);
+  --muted-foreground: var(--ol-ink-600);
+  --accent: var(--ol-violet-100);
+  --accent-foreground: var(--ol-violet-950);
+  --destructive: var(--ol-red-600);
+  --destructive-foreground: var(--ol-white);
+  --destructive-container: var(--ol-red-100);
+  --on-destructive-container: var(--ol-red-900);
+  --border: var(--ol-violet-a14);
+  --input: transparent;
+  --input-background: var(--ol-lavender-0);
+  --switch-background: var(--ol-lavender-100);
+  --ring: var(--ol-violet-600);
+  --outline: var(--ol-ink-500);
+  --outline-variant: var(--ol-violet-a18);
+  --surface-bright: var(--ol-lavender-0);
+  --surface-dim: var(--ol-lavender-90);
+  --surface-container-lowest: var(--ol-lavender-0);
+  --surface-container-low: var(--ol-lavender-30);
+  --surface-container: var(--ol-lavender-60);
+  --surface-container-high: var(--ol-lavender-80);
+  --surface-container-highest: var(--ol-lavender-100);
+  --on-surface: var(--ol-ink-900);
+  --on-surface-variant: var(--ol-ink-600);
+  --nav-active: var(--ol-crimson-600);
+  --nav-active-foreground: var(--ol-white);
+  --badge-soft-bg: var(--ol-rose-100);
+  --badge-soft-text: var(--ol-rose-800);
+  --ink-button: var(--ol-ink-850);
+  --ink-button-hover: var(--ol-ink-700);
+  --ink-button-foreground: var(--ol-white);
+  --success: var(--ol-status-emerald-700);
+  --success-solid: var(--ol-status-emerald-500);
+  --success-container: color-mix(in srgb, var(--ol-status-emerald-500) 10%, transparent);
+  --success-border: color-mix(in srgb, var(--ol-status-emerald-500) 30%, transparent);
+  --warning: var(--ol-status-amber-700);
+  --warning-solid: var(--ol-status-amber-500);
+  --warning-container: color-mix(in srgb, var(--ol-status-amber-500) 10%, transparent);
+  --warning-border: color-mix(in srgb, var(--ol-status-amber-500) 30%, transparent);
+  --info: var(--ol-teal-600);
+  --info-solid: var(--ol-status-blue-500);
+  --info-container: color-mix(in srgb, var(--ol-status-blue-500) 15%, transparent);
+  --scrim: color-mix(in srgb, var(--ol-black) 50%, transparent);
+  --preview-stage: #0b0f19;
+  --bg-top: var(--ol-lavender-10);
+  --bg-bottom: var(--ol-lavender-40);
+  --ph-glow-1: var(--ol-glow-lilac);
+  --ph-glow-2: var(--ol-glow-pink);
+  --glass-topbar: rgba(255, 255, 255, 0.9);
+  --glass-panel: rgba(255, 255, 255, 0.94);
+  --glass-panel-muted: rgba(247, 244, 250, 0.88);
+  --glass-overlay: rgba(255, 255, 255, 0.95);
+  --glass-search: rgba(247, 244, 250, 0.95);
+  --scrollbar-track: transparent;
+  --shadow-soft: rgba(29, 27, 34, 0.06);
+  --shadow-faint: rgba(29, 27, 34, 0.03);
+  --shadow-ink: rgba(29, 27, 34, 0.12);
+  /* 随明暗变化的复合阴影（暗色值在 .dark 中） */
+  --ol-shadow-island: 0 4px 20px -4px rgba(29, 27, 34, 0.06), 0 1px 4px 0 rgba(29, 27, 34, 0.03);
+  --ol-shadow-card: 0 10px 28px -8px rgba(29, 27, 34, 0.08), 0 2px 6px -1px rgba(29, 27, 34, 0.04);
+  --ol-shadow-hero: 0 20px 50px -16px rgba(29, 27, 34, 0.09), 0 4px 14px -2px rgba(29, 27, 34, 0.04);
+  --chart-1: var(--ol-violet-600);
+  --chart-2: var(--ol-teal-600);
+  --chart-3: var(--ol-green-700);
+  --chart-4: var(--ol-red-600);
+  --chart-5: var(--ol-crimson-600);
+
+  /* 指令类别 / 情绪 / 角色（沿用 theme.css 的 --color-* 名称，两模式相同） */
+  --color-story: var(--ol-category-story);
+  --color-story-soft: var(--ol-category-story-soft);
+  --color-scene: var(--ol-category-scene);
+  --color-scene-soft: var(--ol-category-scene-soft);
+  --color-audio: var(--ol-category-audio);
+  --color-audio-soft: var(--ol-category-audio-soft);
+  --color-control: var(--ol-category-control);
+  --color-control-soft: var(--ol-category-control-soft);
+  --color-effects: var(--ol-category-effects);
+  --color-effects-soft: var(--ol-category-effects-soft);
+  --color-emotion-happy: var(--ol-emotion-happy);
+  --color-emotion-sad: var(--ol-emotion-sad);
+  --color-emotion-angry: var(--ol-emotion-angry);
+  --color-emotion-surprised: var(--ol-emotion-surprised);
+  --color-emotion-shy: var(--ol-emotion-shy);
+  --color-emotion-serious: var(--ol-emotion-serious);
+  --color-emotion-default: var(--ol-emotion-default);
+  --color-character-1: var(--ol-character-1);
+  --color-character-2: var(--ol-character-2);
+  --color-character-3: var(--ol-character-3);
+  --color-character-4: var(--ol-character-4);
+  --color-character-5: var(--ol-character-5);
+  --color-character-6: var(--ol-character-6);
+  --color-character-7: var(--ol-character-7);
+  --color-character-8: var(--ol-character-8);
+  --color-warm-glow: oklch(75% 0.08 75);
+}
+
+/* ---------- Semantic (dark) ---------- */
+.dark {
+  --background: var(--ol-night-10);
+  --foreground: var(--ol-night-text);
+  --card: var(--ol-night-30);
+  --card-foreground: var(--ol-night-text);
+  --popover: var(--ol-night-30);
+  --popover-foreground: var(--ol-night-text);
+  --primary: var(--ol-violet-300);
+  --primary-foreground: var(--ol-violet-900);
+  --primary-hover: var(--ol-violet-200);
+  --primary-container: var(--ol-violet-a38);
+  --on-primary-container: var(--ol-violet-100);
+  --secondary-container: var(--ol-night-60);
+  --on-secondary-container: var(--ol-violet-100);
+  --tertiary: var(--ol-teal-dark-primary);
+  --tertiary-container: var(--ol-teal-dark-container);
+  --on-tertiary-container: var(--ol-teal-100);
+  --muted: var(--ol-night-40);
+  --muted-foreground: var(--ol-night-text-muted);
+  --accent: var(--ol-night-60);
+  --accent-foreground: var(--ol-night-text);
+  --destructive: var(--ol-red-dark);
+  --destructive-foreground: var(--ol-red-dark-on);
+  --destructive-container: color-mix(in srgb, var(--ol-red-dark) 15%, transparent);
+  --on-destructive-container: var(--ol-red-dark);
+  --border: var(--ol-violet-light-a15);
+  --input: var(--ol-violet-light-a15);
+  --input-background: var(--ol-night-40);
+  --switch-background: var(--ol-night-80);
+  --ring: var(--ol-violet-300);
+  --outline-variant: var(--ol-violet-light-a18);
+  --surface-bright: var(--ol-night-50);
+  --surface-dim: var(--ol-night-20);
+  --surface-container-lowest: var(--ol-night-30);
+  --surface-container-low: var(--ol-night-40);
+  --surface-container: var(--ol-night-60);
+  --surface-container-high: var(--ol-night-70);
+  --surface-container-highest: var(--ol-night-80);
+  --on-surface: var(--ol-night-text);
+  --on-surface-variant: var(--ol-night-text-muted);
+  --badge-soft-bg: var(--ol-rose-dark-bg);
+  --badge-soft-text: var(--ol-rose-dark-text);
+  --ink-button: var(--ol-night-text);
+  --ink-button-hover: var(--ol-white);
+  --ink-button-foreground: var(--ol-ink-900);
+  --success: var(--ol-status-emerald-400);
+  --warning: var(--ol-status-amber-300);
+  --warning-container: color-mix(in srgb, var(--ol-status-amber-500) 15%, transparent);
+  --info: var(--ol-status-blue-300);
+  --bg-top: var(--ol-night-0);
+  --bg-bottom: var(--ol-night-20);
+  --ph-glow-1: var(--ol-glow-lilac-dark);
+  --ph-glow-2: var(--ol-glow-pink-dark);
+  --glass-topbar: rgba(30, 27, 38, 0.9);
+  --glass-panel: rgba(30, 27, 38, 0.92);
+  --glass-panel-muted: rgba(36, 32, 46, 0.88);
+  --glass-overlay: rgba(30, 27, 38, 0.95);
+  --glass-search: rgba(36, 32, 46, 0.95);
+  --shadow-soft: rgba(0, 0, 0, 0.45);
+  --shadow-faint: rgba(0, 0, 0, 0.25);
+  --shadow-ink: rgba(0, 0, 0, 0.6);
+  --chart-1: var(--ol-violet-300);
+  --chart-2: var(--ol-teal-dark-primary);
+  --chart-3: var(--ol-status-emerald-400);
+  --chart-4: var(--ol-red-dark);
+  --chart-5: var(--ol-crimson-dark-primary);
+  --ol-shadow-island: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+  --ol-shadow-card: 0 12px 30px -8px rgba(0, 0, 0, 0.45);
+  --ol-shadow-hero: 0 24px 56px -14px rgba(0, 0, 0, 0.6);
+}
+
+/* ---------- 派生变量（引用其他语义变量） ----------
+ * CSS 自定义属性在声明它的元素上求值，所以凡是 var(--语义变量) 的派生值，
+ * 都要在每个作用域根（:root、.dark、.ph-root）上重新声明，否则嵌套的 .dark / seed 作用域会继承到外层的旧值。 */
+:root,
+.dark,
+.ph-root {
+  --secondary: var(--surface-container);
+  --secondary-foreground: var(--foreground);
+  --scrollbar-thumb: color-mix(in srgb, var(--primary) 45%, transparent);
+  --grid-dot: color-mix(in srgb, var(--primary) 14%, transparent);
+  --grid-line: color-mix(in srgb, var(--primary) 8%, transparent);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --ol-shadow-panel: 0 8px 24px -6px var(--shadow-soft);
+  --ol-shadow-sheet: -8px 0 24px var(--shadow-soft);
+  --ol-shadow-halo: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+  --ol-shadow-tab-active: 0 4px 12px -2px color-mix(in srgb, var(--primary) 38%, transparent);
+}
+.dark {
+  --sidebar-accent: var(--accent);
+}
+
+/* ---------- Seeds（仅覆盖 accent 与环境色；卡片保持白色） ---------- */
+:root {
+  --seed-swatch-violet: var(--ol-violet-600);
+  --seed-swatch-crimson: var(--ol-crimson-600);
+  --seed-swatch-teal: var(--ol-teal-600);
+  --seed-swatch-amber: var(--ol-amber-swatch);
+}
+:root:not(.dark)[data-seed='crimson'],
+.ph-root:not(.dark)[data-seed='crimson'] {
+  --bg-top: var(--ol-crimson-bg-top);
+  --bg-bottom: var(--ol-crimson-bg-bottom);
+  --ph-glow-1: var(--ol-crimson-glow);
+  --ph-glow-2: var(--ol-glow-orange);
+  --background: var(--ol-crimson-background);
+  --primary: var(--ol-crimson-600);
+  --primary-hover: var(--ol-crimson-700);
+  --primary-container: var(--ol-crimson-100);
+  --on-primary-container: var(--ol-crimson-900);
+  --secondary-container: var(--ol-crimson-secondary-container);
+  --on-secondary-container: var(--ol-crimson-on-secondary-container);
+  --ring: var(--ol-crimson-600);
+  --border: var(--ol-crimson-a14);
+  --outline-variant: var(--ol-crimson-a18);
+  --surface-container-low: var(--ol-crimson-surface-low);
+  --surface-container: var(--ol-crimson-surface);
+  --surface-container-high: var(--ol-crimson-surface-high);
+  --surface-container-highest: var(--ol-crimson-surface-highest);
+  --badge-soft-bg: var(--ol-crimson-100);
+  --badge-soft-text: var(--ol-crimson-badge-text);
+}
+:root.dark[data-seed='crimson'] {
+  --primary: var(--ol-crimson-dark-primary);
+  --primary-foreground: var(--ol-crimson-900);
+  --primary-container: var(--ol-crimson-dark-container);
+  --on-primary-container: var(--ol-crimson-dark-on-container);
+  --ring: var(--primary);
+}
+:root:not(.dark)[data-seed='teal'],
+.ph-root:not(.dark)[data-seed='teal'] {
+  --bg-top: var(--ol-teal-bg-top);
+  --bg-bottom: var(--ol-teal-bg-bottom);
+  --ph-glow-1: var(--ol-teal-glow);
+  --ph-glow-2: var(--ol-glow-sky);
+  --background: var(--ol-teal-background);
+  --primary: var(--ol-teal-600);
+  --primary-hover: var(--ol-teal-700);
+  --primary-container: var(--ol-teal-100);
+  --on-primary-container: var(--ol-teal-900);
+  --secondary-container: var(--ol-teal-secondary-container);
+  --on-secondary-container: var(--ol-teal-on-secondary-container);
+  --ring: var(--ol-teal-600);
+  --border: var(--ol-teal-a14);
+  --outline-variant: var(--ol-teal-a18);
+  --surface-container-low: var(--ol-teal-surface-low);
+  --surface-container: var(--ol-teal-surface);
+  --surface-container-high: var(--ol-teal-surface-high);
+  --surface-container-highest: var(--ol-teal-surface-highest);
+  --badge-soft-bg: var(--ol-teal-badge-bg);
+  --badge-soft-text: var(--ol-teal-badge-text);
+}
+:root.dark[data-seed='teal'] {
+  --primary: var(--ol-teal-dark-primary);
+  --primary-foreground: var(--ol-teal-dark-on-primary);
+  --primary-container: var(--ol-teal-dark-container);
+  --on-primary-container: var(--ol-teal-100);
+  --ring: var(--primary);
+}
+:root:not(.dark)[data-seed='amber'],
+.ph-root:not(.dark)[data-seed='amber'] {
+  --bg-top: var(--ol-amber-bg-top);
+  --bg-bottom: var(--ol-amber-bg-bottom);
+  --ph-glow-1: var(--ol-amber-glow);
+  --ph-glow-2: var(--ol-glow-pink-amber);
+  --background: var(--ol-amber-background);
+  --primary: var(--ol-amber-600);
+  --primary-hover: var(--ol-amber-700);
+  --primary-container: var(--ol-amber-100);
+  --on-primary-container: var(--ol-amber-900);
+  --secondary-container: var(--ol-amber-secondary-container);
+  --on-secondary-container: var(--ol-amber-on-secondary-container);
+  --ring: var(--ol-amber-600);
+  --border: var(--ol-amber-a15);
+  --outline-variant: var(--ol-amber-a18);
+  --surface-container-low: var(--ol-amber-surface-low);
+  --surface-container: var(--ol-amber-surface);
+  --surface-container-high: var(--ol-amber-surface-high);
+  --surface-container-highest: var(--ol-amber-surface-highest);
+  --badge-soft-bg: var(--ol-amber-badge-bg);
+  --badge-soft-text: var(--ol-amber-badge-text);
+}
+:root.dark[data-seed='amber'] {
+  --primary: var(--ol-amber-dark-primary);
+  --primary-foreground: var(--ol-amber-dark-on-primary);
+  --primary-container: var(--ol-amber-dark-container);
+  --on-primary-container: var(--ol-amber-100);
+  --ring: var(--primary);
+}
+
+/* ---------- 动效降级（现有代码中缺失，建议接入时一并启用） ---------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ol-duration-press: 0ms;
+    --ol-duration-fast: 0ms;
+    --ol-duration-base: 0ms;
+    --ol-duration-moderate: 0ms;
+    --ol-duration-slow: 0ms;
+    --ol-duration-enter: 0ms;
+    --ol-scale-press: 1;
+    --ol-lift-hover: 0px;
+  }
+}
