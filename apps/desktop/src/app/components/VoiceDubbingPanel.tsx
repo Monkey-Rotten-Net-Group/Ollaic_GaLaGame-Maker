@@ -16,6 +16,8 @@ import {
   type BatchTtsItem, type BatchTtsProgress,
 } from '../lib/ai-ipc';
 import { listCharacters } from '../lib/character-ipc';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
+import { describeError, toast } from '../lib/toast';
 import type { Character } from '../lib/character-types';
 
 interface Props {
@@ -112,6 +114,7 @@ export function VoiceDubbingPanel({
   onVoiceCardsChanged,
 }: Props) {
   const [characters, setCharacters] = useState<Character[]>([]);
+  const { confirm: confirmAction, confirmDialog } = useConfirmDialog();
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [groupMode, setGroupMode] = useState<GroupMode>('scene');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -283,7 +286,7 @@ export function VoiceDubbingPanel({
       onVoiceCardsChanged();
     } catch (e) {
       console.error('Batch TTS failed:', e);
-      alert(`批量生成失败: ${e}`);
+      toast.error('批量生成配音失败', { description: describeError(e) });
     } finally {
       unlisten();
       setBatchRunning(false);
@@ -295,13 +298,13 @@ export function VoiceDubbingPanel({
   const handleSingleGenerate = useCallback(async (card: VoiceAssetCard) => {
     const ttsConfig = await getAiTtsConfig().catch(() => null);
     if (!ttsConfig || !ttsConfig.model.trim()) {
-      alert('请先在 AI 设置中配置 TTS 供应商和模型。');
+      toast.info('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;
     }
     const configuredModels = parseConfiguredModels(ttsConfig.model);
     const modelToUse = configuredModels[0] || ttsConfig.model.trim();
     if (!modelToUse) {
-      alert('请先在 AI 设置中配置 TTS 供应商和模型。');
+      toast.info('请先在 AI 设置中配置 TTS 供应商和模型。');
       return;
     }
     setGeneratingId(card.id);
@@ -322,7 +325,7 @@ export function VoiceDubbingPanel({
       onVoiceCardsChanged();
     } catch (e) {
       console.error('Single TTS failed:', e);
-      alert(`生成失败: ${e}`);
+      toast.error('生成配音失败', { description: describeError(e) });
     } finally {
       unlisten?.();
       setGeneratingId(null);
@@ -356,21 +359,29 @@ export function VoiceDubbingPanel({
 
   // Delete voice card
   const handleDelete = useCallback(async (card: VoiceAssetCard) => {
-    if (!window.confirm(`确定删除配音卡 "${card.character}: ${card.text.slice(0, 20)}..." 吗？`)) return;
+    const ok = await confirmAction({
+      title: '删除配音卡？',
+      description: `「${card.character}：${card.text.slice(0, 20)}${card.text.length > 20 ? '…' : ''}」将被删除。`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteVoiceCard(projectPath, card.id);
       onVoiceCardsChanged();
       if (selectedVoiceCard?.id === card.id) onSelectVoiceCard(null);
     } catch (e) {
       console.error('Delete voice card failed:', e);
+      toast.error('删除配音卡失败', { description: describeError(e) });
     }
-  }, [projectPath, selectedVoiceCard, onSelectVoiceCard, onVoiceCardsChanged]);
+  }, [projectPath, selectedVoiceCard, onSelectVoiceCard, onVoiceCardsChanged, confirmAction]);
 
   const pendingCount = voiceCards.filter((c) => !isGenerated(c)).length;
   const doneCount = voiceCards.filter((c) => isGenerated(c)).length;
 
   return (
     <div className="flex h-full flex-col bg-surface-container-lowest">
+      {confirmDialog}
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2">
         <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">

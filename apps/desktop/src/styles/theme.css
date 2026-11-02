@@ -206,6 +206,80 @@
 }
 
 @layer components {
+  /* Shared toast (src/app/components/Toaster.tsx). Opaque card surface so text
+     keeps --foreground contrast; tone shows via accent bar, icon and tint. */
+  .ollaic-toaster {
+    position: fixed;
+    top: 4.5rem;
+    right: 1.25rem;
+    z-index: var(--ol-z-toast);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: min(22rem, calc(100vw - 2.5rem));
+    pointer-events: none;
+  }
+
+  .ollaic-toast {
+    --toast-accent: var(--info);
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+    padding: 0.75rem 0.75rem 0.75rem 0.875rem;
+    border: 1px solid color-mix(in srgb, var(--toast-accent) 35%, var(--border));
+    border-left: 3px solid var(--toast-accent);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--toast-accent) 6%, var(--card));
+    color: var(--foreground);
+    box-shadow: var(--ol-shadow-card);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  .ollaic-toast--success {
+    --toast-accent: var(--success);
+  }
+
+  .ollaic-toast--error {
+    --toast-accent: var(--destructive);
+  }
+
+  .ollaic-toast__icon {
+    margin-top: 0.125rem;
+    flex-shrink: 0;
+    color: var(--toast-accent);
+  }
+
+  .ollaic-toast__title {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .ollaic-toast__description {
+    margin-top: 0.125rem;
+    color: var(--muted-foreground);
+    overflow-wrap: anywhere;
+    white-space: pre-line;
+  }
+
+  .ollaic-toast__close {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin: -0.25rem -0.25rem 0 0;
+    border-radius: calc(var(--radius) - 2px);
+    color: var(--muted-foreground);
+  }
+
+  .ollaic-toast__close:hover {
+    background: var(--accent);
+    color: var(--foreground);
+  }
+
   /* Composite fields (icon + bare input): show the focus ring on the wrapper. */
   .focus-ring-within:has(:focus-visible) {
     outline: var(--focus-ring-width) solid var(--focus-ring);

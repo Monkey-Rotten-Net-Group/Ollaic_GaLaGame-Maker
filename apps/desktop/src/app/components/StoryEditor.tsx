@@ -6,6 +6,8 @@ import { Bot, FileText, FolderOpen, GitBranch, Loader2, PanelRightClose, PanelRi
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AiSettingsDialog } from './AiSettingsDialog';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
+import { describeError, toast } from '../lib/toast';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
 import { ProjectMetadataDialog } from './ProjectMetadataDialog';
 import { SnapshotManagerDialog } from './SnapshotManagerDialog';
@@ -230,8 +232,7 @@ export function StoryEditor() {
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   // Transient success toast for single-scene export, rendered by React so its
   // dismissal timer is cleaned up on unmount (no stray DOM nodes).
-  const [exportToast, setExportToast] = useState<string | null>(null);
-  const exportToastTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const { confirm: confirmAction, confirmDialog } = useConfirmDialog();
   const [sceneManagerOpen, setSceneManagerOpen] = useState(false);
   const [newSceneOpen, setNewSceneOpen] = useState(false);
   const [charactersForAi, setCharactersForAi] = useState<Character[]>([]);
@@ -643,10 +644,6 @@ export function StoryEditor() {
     };
   }, [autoSaveEnabled, projectPath, dirtyRef]);
 
-  // Clear the export-toast dismissal timer on unmount.
-  useEffect(() => () => {
-    if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
-  }, []);
 
   // ---------------------------------------------------------------------------
   // Open project folder
@@ -782,7 +779,12 @@ export function StoryEditor() {
 
   const handleDeleteScene = useCallback(async (sceneName: string) => {
     if (!projectPath) return;
-    const ok = window.confirm(`确定删除场景 "${sceneName}" 吗？此操作不可恢复。`);
+    const ok = await confirmAction({
+      title: '删除场景？',
+      description: `「${sceneName}」将被删除，此操作不可恢复。`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
     if (!ok) return;
     try {
       const path = await getScenePath(projectPath, sceneName);
@@ -798,9 +800,9 @@ export function StoryEditor() {
       void refreshProjectInfo();
     } catch (e) {
       console.error('Delete scene failed:', e);
-      alert(`删除场景失败: ${e}`);
+      toast.error('删除场景失败', { description: describeError(e) });
     }
-  }, [projectPath, currentSceneName, handleSwitchScene, refreshProjectInfo]);
+  }, [projectPath, currentSceneName, handleSwitchScene, refreshProjectInfo, confirmAction]);
 
   const handleRenameScene = useCallback(async (oldName: string) => {
     if (!projectPath) return;
@@ -816,7 +818,7 @@ export function StoryEditor() {
       }
     } catch (e) {
       console.error('Rename scene failed:', e);
-      alert(`重命名场景失败: ${e}`);
+      toast.error('重命名场景失败', { description: describeError(e) });
     }
   }, [projectPath, currentSceneName, refreshProjectInfo]);
 
@@ -872,13 +874,10 @@ export function StoryEditor() {
 
       console.log('导出成功:', savePath);
 
-      // Show success notification (React-rendered; timer cleared on unmount).
-      setExportToast(`✓ 已导出: ${filename}`);
-      if (exportToastTimerRef.current) clearTimeout(exportToastTimerRef.current);
-      exportToastTimerRef.current = setTimeout(() => setExportToast(null), 3000);
+      toast.success(`已导出：${filename}`);
     } catch (e) {
       console.error('导出场景失败:', e);
-      alert(`导出场景失败: ${e}`);
+      toast.error('导出场景失败', { description: describeError(e) });
     }
   }, [nodes, currentSceneName]);
 
@@ -1215,15 +1214,6 @@ export function StoryEditor() {
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="h-full story-shell">
-        {exportToast && (
-          <div
-            role="status"
-            className="fixed top-20 right-5 z-[9999] rounded-lg px-5 py-3 text-sm text-white shadow-lg"
-            style={{ background: 'rgba(34, 197, 94, 0.9)' }}
-          >
-            {exportToast}
-          </div>
-        )}
         <OllaicTopBar
           projectId={projectId}
           activeSection="edit"
@@ -1487,6 +1477,7 @@ export function StoryEditor() {
           onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />
 
+        {confirmDialog}
         <AlertDialog open={unsavedConfirmOpen} onOpenChange={(open) => { if (!open) handleUnsavedCancel(); }}>
           <AlertDialogContent>
             <AlertDialogHeader>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import {
   Upload,
@@ -298,6 +299,7 @@ export function AssetManager() {
   const navigate = useNavigate();
   const { projectId } = useParams();
   const [searchParams] = useSearchParams();
+  const { confirm: confirmAction, confirmDialog } = useConfirmDialog();
 
   const [activeTab, setActiveTab] = useState<TabId>(
     searchParams.get('tab') === 'character' ? 'character' : 'scene',
@@ -729,7 +731,13 @@ export function AssetManager() {
       const usageWarning = usages.length > 0
         ? `\n该素材仍被 ${usages.length} 处剧本引用，删除后这些引用将失效。`
         : '';
-      if (!confirm(`确定删除 "${target.name}"？（不可恢复）${usageWarning}`)) return;
+      const ok = await confirmAction({
+        title: '删除素材？',
+        description: `「${target.name}」将被删除，此操作不可恢复。${usageWarning}`,
+        confirmLabel: '删除',
+        destructive: true,
+      });
+      if (!ok) return;
       await flushAssetMetadataSaves(projectPath);
       await deleteAsset(projectPath, target.category, target.name);
       setAssets(prev => prev.filter(a => a.path !== target.path));
@@ -739,7 +747,7 @@ export function AssetManager() {
     } catch (e) {
       setError(String(e));
     }
-  }, [applyMetadata, selectedAsset, projectPath]);
+  }, [applyMetadata, selectedAsset, projectPath, confirmAction]);
 
   const handleRename = useCallback(async () => {
     if (!selectedAsset || !projectPath) return;
@@ -756,7 +764,11 @@ export function AssetManager() {
         ? await findAssetUsages(projectPath, selectedAsset.name, selectedAsset.category)
         : [];
       if (usages.length > 0) {
-        const ok = confirm(`该图片被 ${usages.length} 处剧本引用。重命名后将同步更新这些引用。\n\n${selectedAsset.name} -> ${fullNewName}`);
+        const ok = await confirmAction({
+          title: '重命名并更新引用？',
+          description: `该图片被 ${usages.length} 处剧本引用，重命名后将同步更新这些引用。\n\n${selectedAsset.name} → ${fullNewName}`,
+          confirmLabel: '重命名',
+        });
         if (!ok) return;
       }
       const info = await renameAsset(projectPath, selectedAsset.category, selectedAsset.name, fullNewName);
@@ -780,7 +792,7 @@ export function AssetManager() {
     } catch (e) {
       setError(String(e));
     }
-  }, [applyMetadata, projectPath, selectedAsset, selectedSceneCard]);
+  }, [applyMetadata, projectPath, selectedAsset, selectedSceneCard, confirmAction]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -1065,8 +1077,14 @@ export function AssetManager() {
     setEditingSceneCard(null);
   }, [persistMetadata]);
 
-  const handleDeleteCgCard = useCallback((card: SceneAssetCard) => {
-    if (!confirm(`确定删除 CG "${card.title || card.targetStem || card.id}"？\n绑定的图片文件不会被删除。`)) return;
+  const handleDeleteCgCard = useCallback(async (card: SceneAssetCard) => {
+    const ok = await confirmAction({
+      title: '删除 CG 卡？',
+      description: `「${card.title || card.targetStem || card.id}」将被删除。绑定的图片文件不会被删除。`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!ok) return;
     const currentMetadata = metadataRef.current;
     const nextCgCards = { ...(currentMetadata.cgCards ?? {}) };
     delete nextCgCards[card.id];
@@ -1080,7 +1098,7 @@ export function AssetManager() {
       setSelectedCgCard(null);
       setEditingSceneCard(null);
     }
-  }, [persistMetadata, selectedCgCard]);
+  }, [persistMetadata, selectedCgCard, confirmAction]);
 
   const handleSaveVoiceCard = useCallback((card: VoiceAssetCard) => {
     const currentMetadata = metadataRef.current;
@@ -1109,8 +1127,14 @@ export function AssetManager() {
     setVoiceCards((current) => current.map((item) => item.id === card.id ? normalizedCard : item));
   }, [persistMetadata]);
 
-  const handleDeleteSceneCard = useCallback((card: SceneAssetCard) => {
-    if (!confirm(`确定删除场景卡 "${card.title || card.targetStem || card.id}"？\n绑定的图片文件不会被删除。`)) return;
+  const handleDeleteSceneCard = useCallback(async (card: SceneAssetCard) => {
+    const ok = await confirmAction({
+      title: '删除场景卡？',
+      description: `「${card.title || card.targetStem || card.id}」将被删除。绑定的图片文件不会被删除。`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!ok) return;
     const currentMetadata = metadataRef.current;
     const nextSceneCards = { ...(currentMetadata.sceneCards ?? {}) };
     delete nextSceneCards[card.id];
@@ -1124,7 +1148,7 @@ export function AssetManager() {
       setSelectedSceneCard(null);
       setEditingSceneCard(null);
     }
-  }, [persistMetadata, selectedSceneCard]);
+  }, [persistMetadata, selectedSceneCard, confirmAction]);
 
   const applySceneBackgroundReference = useCallback(async (sceneFile: string, assetName: string) => {
     if (!projectPath) return;
@@ -1182,6 +1206,7 @@ export function AssetManager() {
 
   return (
     <div className="h-full story-shell">
+      {confirmDialog}
       <OllaicTopBar
         projectId={projectId}
         activeSection="assets"
@@ -1433,7 +1458,7 @@ export function AssetManager() {
                         if (asset && !card) {
                           void handleDelete(asset);
                         } else if (card) {
-                          handleDeleteSceneCard(card);
+                          void handleDeleteSceneCard(card);
                         }
                       };
                       if (viewMode === 'list') {
@@ -1542,7 +1567,7 @@ export function AssetManager() {
                         setSelectedAsset(null);
                         setSelectedVoiceCard(null);
                       };
-                      const handleRemove = () => { if (card) handleDeleteCgCard(card); };
+                      const handleRemove = () => { if (card) void handleDeleteCgCard(card); };
                       if (viewMode === 'list') {
                         return (
                           <div
