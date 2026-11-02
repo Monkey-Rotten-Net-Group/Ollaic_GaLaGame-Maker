@@ -335,8 +335,8 @@ pub async fn run(
         std::env::var("OLLAIC_HARNESS_NODE").unwrap_or_else(|_| "node".into()),
     )
     .arg("--import")
-    .arg(desktop.join("scripts/agent-harness-register.mjs"))
-    .arg(desktop.join("scripts/agent-harness-editor.mjs"))
+    .arg("./scripts/agent-harness-register.mjs")
+    .arg("./scripts/agent-harness-editor.mjs")
     .current_dir(desktop)
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
