@@ -3,7 +3,15 @@
  * core: how pipeline events map to step/run statuses.
  */
 
-import type { PipelineEvent, PipelineEventRecord, RunState, RunStatus, StepRunHistory, StepStatus } from './pipeline-types';
+import type {
+  FlowScope,
+  PipelineEvent,
+  PipelineEventRecord,
+  RunState,
+  RunStatus,
+  StepRunHistory,
+  StepStatus,
+} from './pipeline-types';
 
 export function recordsFromSnapshot(snapshot: RunState): PipelineEventRecord[] {
   const events: PipelineEventRecord[] = [{
@@ -69,6 +77,7 @@ export interface FlowStepView {
 }
 
 export interface FlowState {
+  scope?: FlowScope;
   runId: string | null;
   runStatus: RunStatus;
   startedAt: number | null;
@@ -91,6 +100,7 @@ export const DEFAULT_RECIPE_STEPS: ReadonlyArray<{ id: string; kind: string; dep
 
 export function initialFlowState(): FlowState {
   return {
+    scope: { type: 'project' },
     runId: null,
     runStatus: 'idle',
     startedAt: null,
@@ -120,6 +130,7 @@ export type FlowAction = PipelineEvent
 export function reduceFlowEvent(state: FlowState, event: FlowAction): FlowState {
   if (event.type === 'stateHydrated') {
     return {
+      scope: event.state.scope ?? { type: 'project' },
       runId: event.state.runId,
       runStatus: event.state.status,
       startedAt: event.state.startedAt,

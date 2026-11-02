@@ -329,7 +329,12 @@ export function FlowBoardView({
       (step) => step.status === "running" || step.status === "failed",
     ) ?? state.steps.find((step) => step.status === "pending");
   const phases = configuring
-    ? FLOW_PHASES
+    ? FLOW_PHASES.map((phase) => ({
+        ...phase,
+        ids: phase.ids.filter((id) =>
+          DEFAULT_RECIPE_STEPS.some((step) => step.id === id),
+        ),
+      }))
     : FLOW_PHASES.map((phase, index) => ({
         ...phase,
         ids: state.steps
@@ -337,7 +342,9 @@ export function FlowBoardView({
             if (isAssetQueueStep(step)) return index === 2;
             return (
               index ===
-              (["plan", "memory", "outline", "character"].includes(step.id)
+              (["plan", "memory", "outline", "character", "anchorPlan"].includes(
+                step.id,
+              )
                 ? 0
                 : 1)
             );
@@ -345,9 +352,20 @@ export function FlowBoardView({
           .map((step) => step.id),
       })).filter((phase) => phase.ids.length);
 
+  const canRunSetup =
+    !checking &&
+    Boolean(capabilities) &&
+    (!capabilities?.chatError || allowLocalFallback) &&
+    Boolean(prompt.trim());
+
   const prepare = async () => {
     setSelectedStepId(null);
     if (await start(selectedIds)) setNewConfiguration(false);
+  };
+
+  const prepareSetup = async () => {
+    setSelectedStepId(null);
+    if (await runSetup(prompt)) setNewConfiguration(false);
   };
 
   return (
@@ -359,11 +377,17 @@ export function FlowBoardView({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold">
-              {configuring ? "安排这次生产" : "生产进度"}
+              {configuring
+                ? "安排这次生产"
+                : state.scope?.type === "setup"
+                  ? "Stage 1 · 立项企划与角色定锚"
+                  : state.scope?.type === "scene"
+                    ? `Stage 2 · 单场制作 (${state.scope.sceneId})`
+                    : "生产进度"}
             </h1>
             <p className="mt-1 text-xs text-muted-foreground">
               {configuring
-                ? "选择需要执行的步骤，检查接口后再运行。"
+                ? "选择需要执行的步骤，或直接启动 Stage 1 完成立项定锚后再逐场制作。"
                 : activeStep
                   ? `${activeStep.status === "pending" ? "下一步" : "当前步骤"}：${stepTitle(activeStep.id)}`
                   : "查看本次生产结果与运行记录。"}
@@ -371,13 +395,24 @@ export function FlowBoardView({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {configuring ? (
-              <Button
-                onClick={prepare}
-                disabled={blocked || busy || loading || !canPrepare}
-              >
-                {busy ? <Loader2 className="animate-spin" /> : <ArrowRight />}{" "}
-                准备流程
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={prepareSetup}
+                  disabled={blocked || busy || loading || !canRunSetup}
+                  title="仅执行 Stage 1（故事规划、世界观、大纲、角色与基础锚定立绘），完成后进入 Stage 2 逐场制作"
+                >
+                  {busy ? <Loader2 className="animate-spin" /> : <Play />}{" "}
+                  启动 Stage 1：立项与角色定锚
+                </Button>
+                <Button
+                  onClick={prepare}
+                  disabled={blocked || busy || loading || !canPrepare}
+                >
+                  {busy ? <Loader2 className="animate-spin" /> : <ArrowRight />}{" "}
+                  准备流程
+                </Button>
+              </>
             ) : (
               <>
                 {running && !recoverable && (
@@ -535,13 +570,34 @@ export function FlowBoardView({
                   aria-label="故事概览"
                   className="rounded-xl border border-border bg-surface-container-low p-4"
                 >
-                  <h2 className="mb-2 text-sm font-semibold">故事概览</h2>
-                  <p className="text-sm leading-6">{plan.synopsis}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-sm font-semibold">故事概览</h2>
+                    {state.scope?.type === "scene" && (
+                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                        Stage 1 全局设定已锁定 · 当前正执行单场制作 (
+                        {state.scope.sceneId})
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm leading-6">{plan.synopsis}</p>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {plan.characters?.length ?? 0} 角色 /{" "}
                     {plan.scenes?.length ?? 0} 场景 /{" "}
                     {plan.assetPlan?.length ?? 0} 资产需求
                   </p>
+                  {plan.characters && plan.characters.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-2.5 text-xs">
+                      <span className="text-muted-foreground">已定锚角色：</span>
+                      {plan.characters.map((char) => (
+                        <span
+                          key={char.id}
+                          className="rounded-md border border-border/70 bg-surface-container-lowest px-2 py-0.5 font-medium text-foreground"
+                        >
+                          {char.name || char.id}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
 

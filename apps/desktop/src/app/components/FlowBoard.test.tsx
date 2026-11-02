@@ -1089,6 +1089,77 @@ describe("FlowBoard", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("入场模拟变量")).toBeInTheDocument();
   });
+
+  it("launches Stage 1 setup directly via pipeline_run_setup and renders anchorPlan in Stage 1", async () => {
+    const setupRun: RunState = {
+      ...runState("running"),
+      scope: { type: "setup" },
+      steps: [
+        {
+          def: {
+            id: "plan",
+            kind: "plan",
+            dependsOn: [],
+            agent: null,
+            prompt: "",
+          },
+          status: "succeeded",
+          attempt: 1,
+        },
+        {
+          def: {
+            id: "anchorPlan",
+            kind: "asset",
+            dependsOn: ["character"],
+            agent: "anchorPlanner",
+            prompt: "",
+          },
+          status: "running",
+          attempt: 1,
+        },
+      ],
+    };
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "pipeline_get_capabilities")
+        return Promise.resolve({
+          chatError: null,
+          assetError: null,
+        } as unknown);
+      if (cmd === "pipeline_list_runs") return Promise.resolve([] as unknown);
+      if (cmd === "pipeline_run_setup")
+        return Promise.resolve("run_setup_1" as unknown);
+      if (cmd === "pipeline_get_state")
+        return Promise.resolve(setupRun as unknown);
+      if (cmd === "pipeline_get_plan") return Promise.resolve(null as unknown);
+      return Promise.resolve(undefined);
+    });
+
+    const user = userEvent.setup();
+    render(<FlowBoard projectPath="/tmp/proj" />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("production brief")).toBeEnabled(),
+    );
+    await user.type(
+      screen.getByLabelText("production brief"),
+      "天台与磁带的悬疑恋爱故事",
+    );
+    const setupBtn = screen.getByRole("button", {
+      name: /启动 Stage 1：立项与角色定锚/,
+    });
+    expect(setupBtn).toBeEnabled();
+    await user.click(setupBtn);
+
+    expect(mockedInvoke).toHaveBeenCalledWith("pipeline_run_setup", {
+      projectPath: "/tmp/proj",
+      prompt: "天台与磁带的悬疑恋爱故事",
+      allowLocalFallback: false,
+    });
+    expect(
+      await screen.findByText("Stage 1 · 立项企划与角色定锚"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("角色立绘定锚")).toBeInTheDocument();
+  });
 });
 
 function withinCard(container: HTMLElement, buttonText: string): HTMLElement {
