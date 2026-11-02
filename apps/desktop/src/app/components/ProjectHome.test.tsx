@@ -274,6 +274,23 @@ describe('M3 project home', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('asks for confirmation before permanently removing a recycled project', async () => {
+    const user = userEvent.setup();
+    render(<ProjectHome />);
+    await user.click(screen.getByRole('button', { name: '回收站（1）' }));
+    await user.click(screen.getByRole('button', { name: '永久移除 旧日来信' }));
+    const dialog = await screen.findByRole('alertdialog', { name: '彻底移除项目？' });
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(screen.getByRole('button', { name: '打开项目 旧日来信' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '永久移除 旧日来信' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: '彻底移除' }),
+    );
+    expect(screen.getByText('回收站是空的')).toBeInTheDocument();
+    expect(localStorage.getItem('webgal-projects')).not.toContain('旧日来信');
+  });
+
   it('edits project details from its card and supports Escape to dismiss creation', async () => {
     const user = userEvent.setup();
     render(<ProjectHome />);

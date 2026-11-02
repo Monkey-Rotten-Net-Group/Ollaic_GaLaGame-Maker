@@ -35,6 +35,7 @@ import {
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
 import { AiSettingsDialog } from './AiSettingsDialog';
 import { saveProjectMemory } from '../lib/project-memory';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import './ProjectHome.css';
 
 export interface Project {
@@ -250,6 +251,7 @@ export function ProjectHome() {
   const navigate = useNavigate();
 
   const [projects, setProjects] = useState<Project[]>(() => loadProjectsFromStorage());
+  const { confirm, confirmDialog } = useConfirmDialog();
   const projectsRef = useRef<Project[]>(projects);
 
   const updateProjects = (updater: (prev: Project[]) => Project[]) => {
@@ -568,7 +570,14 @@ export function ProjectHome() {
     updateProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, deleted: false } : p)));
   };
 
-  const handlePermanentDelete = (project: Project) => {
+  const handlePermanentDelete = async (project: Project) => {
+    const confirmed = await confirm({
+      title: '彻底移除项目？',
+      description: `「${project.name}」将从项目列表中永久移除，无法从回收站还原。磁盘上的项目文件夹不会被删除。`,
+      confirmLabel: '彻底移除',
+      destructive: true,
+    });
+    if (!confirmed) return;
     updateProjects((prev) => prev.filter((p) => p.id !== project.id));
     window.localStorage.removeItem(`project-path-${project.id}`);
   };
@@ -1129,7 +1138,7 @@ export function ProjectHome() {
                             aria-label={`永久移除 ${project.name}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              handlePermanentDelete(project);
+                              void handlePermanentDelete(project);
                             }}
                           >
                             <Trash2 size={12} />
@@ -1389,6 +1398,7 @@ export function ProjectHome() {
         open={aiSettingsOpen}
         onClose={() => setAiSettingsOpen(false)}
       />
+      {confirmDialog}
     </div>
   );
 }
