@@ -33,12 +33,60 @@ function assertRange(startLine: number, endLine: number, total: number): void {
   }
 }
 
-function normalizeAnchorCandidate(value: string): string {
+function normalizeScriptLine(value: string): string {
   return value
     .trim()
-    .replace(/^\d+:\s*/, '')
     .replace(/;+\s*$/, '')
     .trim();
+}
+
+function stripDisplayLinePrefix(value: string, lines: string[]): string | null {
+  const match = /^(\d+):\s+(.+)$/.exec(value.trim());
+  if (!match) return null;
+  const [, digits, rawRemainder] = match;
+  const speakerPrefix = `${digits}:`;
+  if (lines.some((line) => line.trim().startsWith(speakerPrefix))) {
+    return null;
+  }
+  const remainder = normalizeScriptLine(rawRemainder);
+  if (!remainder) return null;
+  if (remainder.startsWith(';') || remainder === 'end' || remainder.includes(':')) {
+    return remainder;
+  }
+  return null;
+}
+
+function resolveCandidateAgainstLines(
+  lines: string[],
+  lineNo: number,
+  candidate: string,
+  rawAnchor: string,
+): ResolvedLine | null {
+  if (lineNo <= lines.length && lines[lineNo - 1] === candidate) {
+    return { line: lineNo, corrected: false };
+  }
+
+  const start = Math.max(1, lineNo - 3);
+  const end = Math.min(lines.length, lineNo + 3);
+  const nearbyMatches: number[] = [];
+  for (let line = start; line <= end; line += 1) {
+    if (lines[line - 1] === candidate) nearbyMatches.push(line);
+  }
+  if (nearbyMatches.length === 1) return { line: nearbyMatches[0], corrected: true };
+  if (nearbyMatches.length > 1) {
+    throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${rawAnchor}`);
+  }
+
+  const matches: number[] = [];
+  lines.forEach((line, index) => {
+    if (line === candidate) matches.push(index + 1);
+  });
+  if (matches.length === 1) return { line: matches[0], corrected: true };
+  if (matches.length > 1) {
+    throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${rawAnchor}`);
+  }
+
+  return null;
 }
 
 export function resolveLineWithAnchor(
@@ -56,48 +104,33 @@ export function resolveLineWithAnchor(
     return { line: lineNo, corrected: false };
   }
 
-  if (lineNo <= lines.length && lines[lineNo - 1] === anchorText) {
-    return { line: lineNo, corrected: false };
-  }
+  const exactMatch = resolveCandidateAgainstLines(lines, lineNo, anchorText, anchorText);
+  if (exactMatch) return exactMatch;
 
-  const start = Math.max(1, lineNo - 3);
-  const end = Math.min(lines.length, lineNo + 3);
-  for (let line = start; line <= end; line += 1) {
-    if (lines[line - 1] === anchorText) return { line, corrected: true };
-  }
-
-  const matches: number[] = [];
-  lines.forEach((line, index) => {
-    if (line === anchorText) matches.push(index + 1);
-  });
-  if (matches.length === 1) return { line: matches[0], corrected: true };
-  if (matches.length > 1) {
-    throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
-  }
-
-  // Tolerate common model formatting noise: copied `22: ` line-number prefixes
-  // or omitted trailing `;` semicolons.
-  const normalizedAnchor = normalizeAnchorCandidate(anchorText);
+  // Tolerate omitted trailing `;` semicolons while preserving speaker/command prefixes,
+  // and only strip copied `22: ` display line numbers when the remainder is still a
+  // complete WebGAL line and the number is not a speaker in the script.
+  const normalizedLines = lines.map(normalizeScriptLine);
+  const normalizedAnchor = normalizeScriptLine(anchorText);
   if (normalizedAnchor.length > 0) {
-    if (
-      lineNo <= lines.length &&
-      normalizeAnchorCandidate(lines[lineNo - 1]) === normalizedAnchor
-    ) {
-      return { line: lineNo, corrected: false };
-    }
-    for (let line = start; line <= end; line += 1) {
-      if (normalizeAnchorCandidate(lines[line - 1]) === normalizedAnchor) {
-        return { line, corrected: true };
-      }
-    }
-    const normalizedMatches: number[] = [];
-    lines.forEach((line, index) => {
-      if (normalizeAnchorCandidate(line) === normalizedAnchor) normalizedMatches.push(index + 1);
-    });
-    if (normalizedMatches.length === 1) return { line: normalizedMatches[0], corrected: true };
-    if (normalizedMatches.length > 1) {
-      throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
-    }
+    const normalizedMatch = resolveCandidateAgainstLines(
+      normalizedLines,
+      lineNo,
+      normalizedAnchor,
+      anchorText,
+    );
+    if (normalizedMatch) return normalizedMatch;
+  }
+
+  const strippedAnchor = stripDisplayLinePrefix(anchorText, lines);
+  if (strippedAnchor) {
+    const strippedMatch = resolveCandidateAgainstLines(
+      normalizedLines,
+      lineNo,
+      strippedAnchor,
+      anchorText,
+    );
+    if (strippedMatch) return strippedMatch;
   }
 
   throw new EditorPatchError(`无法定位 anchorText：${anchorText}`);

@@ -250,6 +250,103 @@ function contextBudgetForCapability(capability: ProviderCapability): ContextBudg
   };
 }
 
+function formatUserTurnContent(
+  historyMessages: ChatMessage[],
+  currentSceneName: string,
+  text: string,
+): string {
+  const hasCrossSceneHistory = historyMessages.some(
+    (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
+  );
+  return hasCrossSceneHistory
+    ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
+    : text;
+}
+
+export interface HistoryBudgetPartition {
+  retainedCount: number;
+  compactable: ChatMessage[];
+  compactedIds: Set<string>;
+  retainedMessages: ChatMessage[];
+  fallback: SessionDigest;
+  effectiveDigest: SessionDigest;
+  trace: ContextTrace;
+}
+
+export function partitionHistoryForBudget(
+  allMessages: ChatMessage[],
+  baseDigest: SessionDigest | null,
+  system: string,
+  currentSceneName: string,
+  text: string,
+  tools: ReturnType<typeof toolDefs>,
+  budget: ContextBudgetConfig,
+  maxRetainedCount = 24,
+  digestOverride?: SessionDigest | null,
+): HistoryBudgetPartition {
+  const meaningful = allMessages.filter((message) => message.id !== INITIAL_AI_MESSAGE.id);
+  const buildCandidateTrace = (
+    retainedMeaningful: ChatMessage[],
+    candidateDigest: SessionDigest | null,
+  ): { retainedMessages: ChatMessage[]; trace: ContextTrace } => {
+    const retainedIds = new Set(retainedMeaningful.map((message) => message.id));
+    const retainedMessages = allMessages.filter(
+      (message) => message.id === INITIAL_AI_MESSAGE.id || retainedIds.has(message.id),
+    );
+    const requestMessages: AiChatMessage[] = [
+      { role: 'system', content: system },
+      ...buildConversationMessages(retainedMessages, candidateDigest),
+      { role: 'user', content: formatUserTurnContent(retainedMessages, currentSceneName, text) },
+    ];
+    return {
+      retainedMessages,
+      trace: buildContextTrace(requestMessages, tools, budget),
+    };
+  };
+
+  const zeroDigest = digestOverride
+    ? { ...digestOverride, sourceMessageIds: meaningful.map((message) => message.id) }
+    : buildLocalSessionDigest(baseDigest, meaningful);
+  const zeroCandidate = buildCandidateTrace([], zeroDigest);
+  const initialRetained = Math.min(meaningful.length - 1, Math.max(0, maxRetainedCount));
+
+  for (let retainedCount = initialRetained; retainedCount >= 0; retainedCount -= 1) {
+    const compactable = meaningful.slice(0, meaningful.length - retainedCount);
+    const retainedMeaningful = meaningful.slice(meaningful.length - retainedCount);
+    const sourceMessageIds = compactable.map((message) => message.id);
+    const compactedIds = new Set(sourceMessageIds);
+    const fallback = buildLocalSessionDigest(baseDigest, compactable);
+    const effectiveDigest = digestOverride
+      ? { ...digestOverride, sourceMessageIds }
+      : fallback;
+    const { retainedMessages, trace } = buildCandidateTrace(retainedMeaningful, effectiveDigest);
+    const fitsBudget = zeroCandidate.trace.shouldCompact
+      ? !trace.overBudget
+      : !trace.shouldCompact && !trace.overBudget;
+    if (fitsBudget || retainedCount === 0) {
+      return {
+        retainedCount,
+        compactable,
+        compactedIds,
+        retainedMessages,
+        fallback,
+        effectiveDigest,
+        trace,
+      };
+    }
+  }
+
+  return {
+    retainedCount: 0,
+    compactable: meaningful,
+    compactedIds: new Set(meaningful.map((message) => message.id)),
+    retainedMessages: zeroCandidate.retainedMessages,
+    fallback: buildLocalSessionDigest(baseDigest, meaningful),
+    effectiveDigest: zeroDigest,
+    trace: zeroCandidate.trace,
+  };
+}
+
 function classifyAiError(raw: string): AiErrorState {
   const lower = raw.toLowerCase();
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid api key')) {
@@ -740,20 +837,39 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
-    const historyMessages = historyOverride ?? messages;
-    const hasCrossSceneHistory = historyMessages.some(
-      (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
-    );
-    const userTurnContent = hasCrossSceneHistory
-      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
-      : text;
-    const convo: AiChatMessage[] = [
-      { role: 'system', content: buildAgentSystemContext(attachedUploadIds, latestMemory) },
-      ...buildConversationMessages(historyMessages, digestOverride === undefined ? digest : digestOverride),
-      { role: 'user', content: userTurnContent },
-    ];
+    const system = buildAgentSystemContext(attachedUploadIds, latestMemory);
     const contextBudget = contextBudgetForCapability(capability);
+    let historyMessages = historyOverride ?? messages;
+    let activeDigest = digestOverride === undefined ? digest : digestOverride;
+    let convo: AiChatMessage[] = [
+      { role: 'system', content: system },
+      ...buildConversationMessages(historyMessages, activeDigest),
+      { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+    ];
     trace.context = buildContextTrace(convo, toolDefs(), contextBudget);
+    const meaningfulHistory = historyMessages.filter((m) => m.id !== INITIAL_AI_MESSAGE.id);
+    if (trace.context.overBudget && meaningfulHistory.length > 0) {
+      const fitted = partitionHistoryForBudget(
+        historyMessages,
+        activeDigest,
+        system,
+        currentSceneName,
+        text,
+        toolDefs(),
+        contextBudget,
+        meaningfulHistory.length - 1,
+      );
+      activeDigest = fitted.effectiveDigest;
+      historyMessages = fitted.retainedMessages;
+      setDigest(activeDigest);
+      compactMessages(fitted.compactedIds);
+      convo = [
+        { role: 'system', content: system },
+        ...buildConversationMessages(historyMessages, activeDigest),
+        { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+      ];
+      trace.context = fitted.trace;
+    }
 
     // Append a finished turn (its text + tool calls) as a step on the assistant
     // message so text is never discarded and tool activity is shown inline.
@@ -975,7 +1091,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       trace.outcome = 'pending_preview';
     }
     void writeAgentTrace(trace);
-  }, [assets, buildAgentSystemContext, buildStagingContext, currentSceneName, digest, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setMessages]);
+  }, [assets, buildAgentSystemContext, buildStagingContext, compactMessages, currentSceneName, digest, ownsRun, projectId, sceneHeaders, finalizeChangeSet, messages, projectPath, setDigest, setMessages]);
 
   // --- JSON patch fallback for providers without function calling ---------
   const runLegacyTurn = useCallback(async (
@@ -1012,20 +1128,39 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
-    const historyMessages = historyOverride ?? messages;
-    const hasCrossSceneHistory = historyMessages.some(
-      (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
-    );
-    const userTurnContent = hasCrossSceneHistory
-      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
-      : text;
-    const convo: AiChatMessage[] = [
-      { role: 'system', content: buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory) },
-      ...buildConversationMessages(historyMessages, digestOverride === undefined ? digest : digestOverride),
-      { role: 'user', content: userTurnContent },
-    ];
+    const system = buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory);
     const contextBudget = contextBudgetForCapability(capability);
+    let historyMessages = historyOverride ?? messages;
+    let activeDigest = digestOverride === undefined ? digest : digestOverride;
+    let convo: AiChatMessage[] = [
+      { role: 'system', content: system },
+      ...buildConversationMessages(historyMessages, activeDigest),
+      { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+    ];
     trace.context = buildContextTrace(convo, [], contextBudget);
+    const meaningfulHistory = historyMessages.filter((m) => m.id !== INITIAL_AI_MESSAGE.id);
+    if (trace.context.overBudget && meaningfulHistory.length > 0) {
+      const fitted = partitionHistoryForBudget(
+        historyMessages,
+        activeDigest,
+        system,
+        currentSceneName,
+        text,
+        [],
+        contextBudget,
+        meaningfulHistory.length - 1,
+      );
+      activeDigest = fitted.effectiveDigest;
+      historyMessages = fitted.retainedMessages;
+      setDigest(activeDigest);
+      compactMessages(fitted.compactedIds);
+      convo = [
+        { role: 'system', content: system },
+        ...buildConversationMessages(historyMessages, activeDigest),
+        { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+      ];
+      trace.context = fitted.trace;
+    }
     for (let attempt = 0; attempt <= MAX_LEGACY_REPAIRS; attempt += 1) {
       if (!ownsRun(runId)) return;
       setStatus(attempt === 0 ? 'generating' : 'tooling');
@@ -1127,7 +1262,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         setError({ kind: 'other', retryable: true, message: `自动修正 ${MAX_LEGACY_REPAIRS} 次后仍未通过校验：\n${failure.message}` });
       }
     }
-  }, [assets, buildLegacySystemContext, buildStagingContext, currentSceneName, digest, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage]);
+  }, [assets, buildLegacySystemContext, buildStagingContext, compactMessages, currentSceneName, digest, ownsRun, projectId, projectPath, sceneHeaders, finalizeChangeSet, messages, replaceAssistantMessage, setDigest]);
 
   const summarizeSessionIfNeeded = useCallback(async (
     runId: string,
@@ -1136,8 +1271,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     capability: ProviderCapability,
   ): Promise<{ digest: SessionDigest; compactedIds: Set<string>; retainedMessages: ChatMessage[] } | null> => {
     const meaningful = messages.filter((message) => message.id !== INITIAL_AI_MESSAGE.id);
-    const compactable = meaningful.slice(0, -24);
-    if (compactable.length === 0) return null;
+    if (meaningful.length === 0) return null;
     const budget = contextBudgetForCapability(capability);
     const currentMemory = projectPath ? await readProjectMemory(projectPath).catch(() => memory) : memory;
     if (!ownsRun(runId)) return null;
@@ -1148,33 +1282,89 @@ export function useAiAgent(params: UseAiAgentParams) {
     const system = capability.chatTools
       ? buildAgentSystemContext(attachedUploadIds, currentMemory)
       : buildLegacySystemContext(attachedUploadIds, inlineUploads, currentMemory);
+    const tools = capability.chatTools ? toolDefs() : [];
     const requestMessages: AiChatMessage[] = [
       { role: 'system', content: system },
       ...buildConversationMessages(messages, digest),
-      { role: 'user', content: text },
+      { role: 'user', content: formatUserTurnContent(messages, currentSceneName, text) },
     ];
-    const fullTrace = buildContextTrace(requestMessages, capability.chatTools ? toolDefs() : [], budget);
-    if (!fullTrace.shouldCompact && meaningful.length < 180) return null;
-    const sourceMessageIds = compactable.map((message) => message.id);
-    const compactedIds = new Set(sourceMessageIds);
-    const retainedMessages = messages.filter((message) => !compactedIds.has(message.id));
-    const fallback = buildLocalSessionDigest(digest, compactable);
-    const olderConversation = buildConversationMessages(compactable, digest);
+    const fullTrace = buildContextTrace(requestMessages, tools, budget);
+    if (!fullTrace.shouldCompact && !fullTrace.overBudget && meaningful.length < 180) return null;
+
+    const initialPartition = partitionHistoryForBudget(
+      messages,
+      digest,
+      system,
+      currentSceneName,
+      text,
+      tools,
+      budget,
+      24,
+    );
+    const sourceMessageIds = initialPartition.compactable.map((message) => message.id);
+    const summarizerSystem: AiChatMessage = {
+      role: 'system',
+      content: '你是编辑会话摘要器。只输出 JSON，不要 Markdown。保留用户明确确认的剧情事实、写作决定、已完成操作、待确认事项和下一步。不要编造，不要把模型推测写成事实。字段必须是 version=1、goal、decisions、completed、openQuestions、nextStep、sourceMessageIds、updatedAt。',
+    };
+    const summarizerUser: AiChatMessage = {
+      role: 'user',
+      content: '请把以上会话压缩为结构化 SessionDigest JSON。',
+    };
+    let olderConversation = buildConversationMessages(initialPartition.compactable, digest);
+    if (buildContextTrace([summarizerSystem, ...olderConversation, summarizerUser], [], budget).overBudget) {
+      for (let startIdx = 1; startIdx <= initialPartition.compactable.length; startIdx += 1) {
+        const foldedDigest = buildLocalSessionDigest(digest, initialPartition.compactable.slice(0, startIdx));
+        const tailMessages = initialPartition.compactable.slice(startIdx);
+        const candidateOlder = buildConversationMessages(tailMessages, foldedDigest);
+        if (
+          !buildContextTrace([summarizerSystem, ...candidateOlder, summarizerUser], [], budget).overBudget
+          || startIdx === initialPartition.compactable.length
+        ) {
+          olderConversation = candidateOlder;
+          break;
+        }
+      }
+    }
+
     try {
       const result = await aiChatTurn(runId, [
-        {
-          role: 'system',
-          content: '你是编辑会话摘要器。只输出 JSON，不要 Markdown。保留用户明确确认的剧情事实、写作决定、已完成操作、待确认事项和下一步。不要编造，不要把模型推测写成事实。字段必须是 version=1、goal、decisions、completed、openQuestions、nextStep、sourceMessageIds、updatedAt。',
-        },
+        summarizerSystem,
         ...olderConversation,
-        { role: 'user', content: '请把以上会话压缩为结构化 SessionDigest JSON。' },
+        summarizerUser,
       ], []);
       if (!ownsRun(runId) || cancelledRef.current) return null;
       if (result.text) {
         const parsed = parseDigestResponse(result.text, sourceMessageIds);
         if (parsed) {
-          setDigest(parsed);
-          return { digest: parsed, compactedIds, retainedMessages };
+          let postPartition = partitionHistoryForBudget(
+            messages,
+            digest,
+            system,
+            currentSceneName,
+            text,
+            tools,
+            budget,
+            initialPartition.retainedCount,
+            parsed,
+          );
+          if (postPartition.trace.overBudget) {
+            postPartition = partitionHistoryForBudget(
+              messages,
+              digest,
+              system,
+              currentSceneName,
+              text,
+              tools,
+              budget,
+              initialPartition.retainedCount,
+            );
+          }
+          setDigest(postPartition.effectiveDigest);
+          return {
+            digest: postPartition.effectiveDigest,
+            compactedIds: postPartition.compactedIds,
+            retainedMessages: postPartition.retainedMessages,
+          };
         }
       }
     } catch {
@@ -1182,9 +1372,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       // The local digest is the intentional fallback when summary generation fails.
     }
     if (!ownsRun(runId) || cancelledRef.current) return null;
-    setDigest(fallback);
-    return { digest: fallback, compactedIds, retainedMessages };
-  }, [buildAgentSystemContext, buildLegacySystemContext, digest, memory, messages, ownsRun, projectPath, setDigest, uploads]);
+    setDigest(initialPartition.fallback);
+    return {
+      digest: initialPartition.fallback,
+      compactedIds: initialPartition.compactedIds,
+      retainedMessages: initialPartition.retainedMessages,
+    };
+  }, [buildAgentSystemContext, buildLegacySystemContext, currentSceneName, digest, memory, messages, ownsRun, projectPath, setDigest, uploads]);
 
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();

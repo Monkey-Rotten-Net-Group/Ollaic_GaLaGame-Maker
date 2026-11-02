@@ -100,12 +100,16 @@ vi.mock('../lib/ai-uploads-ipc', () => ({
   deleteAiUpload: vi.fn(async () => {}),
 }));
 
-vi.mock('../lib/story-agent', () => ({
-  buildAssetContext: vi.fn(() => ''),
-  buildNumberedScriptContext: vi.fn(() => ''),
-  buildConversationMessages: vi.fn((messages: unknown[]) => messages),
-  hasAssetContextTruncation: vi.fn(() => false),
-}));
+vi.mock('../lib/story-agent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/story-agent')>();
+  return {
+    ...actual,
+    buildAssetContext: vi.fn(() => ''),
+    buildNumberedScriptContext: vi.fn(() => ''),
+    buildConversationMessages: vi.fn(actual.buildConversationMessages),
+    hasAssetContextTruncation: vi.fn(() => false),
+  };
+});
 
 vi.mock('../lib/editor-patch', () => ({
   extractEditorResponse: vi.fn(() => null),
