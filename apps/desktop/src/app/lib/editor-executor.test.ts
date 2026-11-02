@@ -53,6 +53,29 @@ describe('resolveLineWithAnchor', () => {
       ),
     ).toEqual({ line: 2, corrected: true });
   });
+
+  it('preserves numeric speaker names and rejects mismatched or ambiguous normalized anchors', () => {
+    const applied = applyEditorPatch('1:Hello;\n2:Hello;', {
+      type: 'replace',
+      file: 'start.txt',
+      startLine: 2,
+      endLine: 2,
+      anchorText: '1:Hello',
+      text: '1:Changed;',
+    });
+    expect(applied).toEqual({
+      content: '1:Changed;\n2:Hello;',
+      lineDelta: 0,
+      corrected: true,
+    });
+
+    expect(() =>
+      resolveLineWithAnchor(['1:Hello;', '2:Hello;'], 2, '3:Hello'),
+    ).toThrow('无法定位 anchorText');
+    expect(() =>
+      resolveLineWithAnchor(['1:Hello;', '2:Other;', '1:Hello;'], 2, '1:Hello'),
+    ).toThrow('anchorText 匹配到多行');
+  });
 });
 
 describe('applyEditorPatch', () => {

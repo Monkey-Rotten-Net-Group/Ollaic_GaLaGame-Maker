@@ -202,6 +202,57 @@ describe('list_scenes and read_scene tools', () => {
       nextScenes: [],
     });
   });
+
+  it('strips command flags and inline comments when extracting scene transitions and chapters', async () => {
+    const scripts: Record<string, string> = {
+      '/tmp/project/game/scene/a.txt':
+        'intro:A线 -hold; inline comment\nchangeScene:b.txt; continue the chapter',
+      '/tmp/project/game/scene/b.txt': 'intro:B线;\ncallScene:c.txt -when=flag; note',
+      '/tmp/project/game/scene/c.txt': ':终点;\nend;',
+      '/tmp/project/game/scene/start.txt':
+        'choose:Go:a.txt|Stay:b.txt|Inspect:local_label -when=ready; branch comment',
+    };
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
+      if (cmd === 'list_scenes') {
+        return ['a.txt', 'b.txt', 'c.txt', 'start.txt'];
+      }
+      if (cmd === 'get_scene_path') {
+        return `/tmp/project/game/scene/${args.sceneName}`;
+      }
+      if (cmd === 'read_file_text') {
+        return scripts[args.path] ?? '';
+      }
+      return undefined;
+    });
+
+    const result = (await getTool('list_scenes')!.run(
+      {},
+      { projectPath: '/tmp/project', currentSceneName: 'start.txt' },
+    )) as {
+      scenes: Array<{ file: string; chapter: string; nextScenes: string[] }>;
+    };
+
+    expect(result.scenes).toEqual([
+      expect.objectContaining({
+        file: 'start.txt',
+        nextScenes: ['a.txt', 'b.txt'],
+      }),
+      expect.objectContaining({
+        file: 'a.txt',
+        chapter: 'A线',
+        nextScenes: ['b.txt'],
+      }),
+      expect.objectContaining({
+        file: 'b.txt',
+        chapter: 'B线',
+        nextScenes: ['c.txt'],
+      }),
+      expect.objectContaining({
+        file: 'c.txt',
+        nextScenes: [],
+      }),
+    ]);
+  });
 });
 
 describe('isSessionDigest', () => {
