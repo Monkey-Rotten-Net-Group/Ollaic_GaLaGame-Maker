@@ -13,11 +13,14 @@
 | 中 | 9 | 组件不统一、10/11px 小字、CJK 粗细失效、点击区域、z-index、toast、动效降级、导航不一致、在线字体 |
 | 低 | 5 | ::selection、i18n 残留、空状态样式不一、Loader 不统一、placeholder 对比 |
 
+**已修复**：H1、H4、H5、H6、M6（2026-11-02，见文末“已修复”一节）。
+
 ---
 
 ## 高
 
 ### H1 全局焦点框几乎看不见（1.72:1），且覆盖了正确的焦点样式
+- **状态：已修复**（`c353c1c`：新增 `--focus-ring` token，全局只保留一条 `@layer base` 的 `:focus-visible`，对比度 5.01–11.19:1）。
 - 证据：`src/styles/animations.css:51-54` 是**不在 layer 中**的 `:focus-visible { outline: 2px solid color-mix(var(--color-warm-glow) 70%, transparent) }`。`src/styles/theme.css:194-201` 位于 `@layer base`（第 111 行开始），给 button/input/textarea/select 的 `var(--ring)` 焦点框会被这条未分层规则覆盖（未分层样式优先于任何 layer）。
 - 计算：warm-glow = oklch(75% 0.08 75) ≈ #cca774，70% 叠在白底上，对比 **1.72:1**，低于 WCAG 1.4.11 / 2.4.11 要求的 3:1。用 ring 的版本是 3.28:1，可以达标。
 - 另外，非 ui 组件里只有 4 行用了 `focus-visible:`，289 个原生 `<button>` 全靠这条全局规则。
@@ -47,11 +50,13 @@
 - 修复：禁止给文字颜色加透明度。次要层级只用 `text-muted-foreground`（6.09:1）。更弱的装饰性信息改用 `--outline` #867d96（3.90:1，只用于 ≥14px 粗体或非必要信息），或者干脆去掉。
 
 ### H4 永久移除项目没有确认
+- **状态：已修复**（`9296951`：ProjectHome 使用 `ui/alert-dialog` 二次确认，确认按钮为 destructive）。
 - 证据：`ProjectHome.tsx:1129-1132` 的“永久移除”按钮点击后直接调用 `handlePermanentDelete`（`ProjectHome.tsx:571-574`），会从列表中删除并 `localStorage.removeItem('project-path-…')`，没有任何确认或撤销。
 - 对比：同类操作“删除会话”有 Radix 确认框（`AiAssistantPanel.tsx:598-616`）。
 - 修复：用 `ui/alert-dialog` 二次确认，确认按钮使用 `--destructive`；或在回收站中提供撤销 toast。
 
 ### H5 用原生 `alert()` / `confirm()` 做错误提示和危险操作确认
+- **状态：已修复**（`5decdc0`：AssetManager、StoryEditor、VoiceDubbingPanel 改用 `useConfirmDialog` 与共享 toast；`useFlowRunController.ts` 的 `window.confirm` 和两处 `prompt()` 未在本次范围内）。
 - 证据：
   - `alert`：`StoryEditor.tsx:801、819、881`；`VoiceDubbingPanel.tsx:286、298、304、325`。
   - `confirm`：`AssetManager.tsx:732、759、1069、1113`；`StoryEditor.tsx:785`；`VoiceDubbingPanel.tsx:359`。
@@ -62,6 +67,7 @@
 - 修复：危险确认统一用 `AlertDialog`；错误用统一的 toast（见 M6）或内联 `role="alert"` 横幅（`ProjectHome.tsx:958` 的 `ph-banner--error` 是现成样式）。
 
 ### H6 两套互不同步的明暗开关
+- **状态：已修复**（`a2c85e9`：app settings 是唯一主题来源，首页开关写入 app 设置，旧的 `ollaic-home-theme` 被忽略并清除）。
 - 证据：
   - 首页有自己的开关：`ProjectHome.tsx:272-286`（`ollaic-home-theme`），作用在 `.ph-root.dark`（`ProjectHome.tsx:715`），按钮在 `ProjectHome.tsx:845-853`。
   - 应用全局主题写在 `<html>`：`app-settings.ts:57-59`、`AppSettingsDialog.tsx:428、445`。默认值 `theme: 'dark'`（`app-settings.ts:19`）。
@@ -119,6 +125,7 @@
 - 修复：统一用 `--ol-z-*` 档位（tokens.css：sheet 30 / chrome 50 / modal 60 / modal-nested 70 / drag-capture 100 / toast 110），在 `@theme` 注册为 `z-modal` 等工具类，ui 浮层随宿主层级提升。
 
 ### M6 只有一个手写 toast：颜色硬编码，对比度不足
+- **状态：已修复**（`5decdc0`：新增 `lib/toast.ts` + `components/Toaster.tsx`，`aria-live` 通知区，颜色用 `--success` / `--destructive` / `--info`，层级用 `--ol-z-toast`，错误不自动消失）。
 - 证据：`StoryEditor.tsx:1218-1225` 用 `style={{ background: 'rgba(34, 197, 94, 0.9)' }}` 配白字，对比 **2.13:1**；3 秒自动消失（`StoryEditor.tsx:878`）；用 `z-[9999]`。其他页面的成功/失败反馈靠 `alert` 或内联文字。
 - 修复：做一个统一的 Toast/Banner 组件：
   - 颜色用 `--success-container` / `--success`（emerald-700，白底上约 5.3:1）以及 `--warning*`、`--info*`、`--destructive-container`。
@@ -192,3 +199,14 @@
 7. M5、M6 层级与 toast
 8. M7 动效降级
 9. M1、M8 组件与外框统一
+
+## 已修复（2026-11-02，分支 feat/scene-centric-workflow，未推送）
+| 项 | 提交 | 改动 |
+|---|---|---|
+| H1 焦点框 | `c353c1c` | tokens.css 新增 `--focus-ring` / `--focus-ring-width` / `--focus-ring-offset`；删除 animations.css 未分层规则；theme.css 只保留一条 `:focus-visible`；ui 组件与业务组件去掉 `outline-none` / `ring-*` 焦点类；组合输入用 `.focus-ring-within`，脚本编辑区用 `.focus-ring-inset` |
+| H4 永久移除确认 | `9296951`、`c6e2873` | 新增 `ConfirmDialog` 与 `useConfirmDialog`；ProjectHome 永久移除前确认 |
+| H5 原生 alert/confirm | `5decdc0` | AssetManager、StoryEditor、VoiceDubbingPanel 的确认改用 AlertDialog，错误改用 toast |
+| M6 toast | `5decdc0` | 共享 Toaster 替换 StoryEditor 的绿色 `z-[9999]` toast |
+| H6 主题单一来源 | `a2c85e9` | 删除首页独立主题状态，开关调用 `saveAppTheme`；清除旧 `ollaic-home-theme` |
+
+仍待处理：`useFlowRunController.ts` 中的 `window.confirm`，AssetManager / StoryEditor 重命名用的 `prompt()`。

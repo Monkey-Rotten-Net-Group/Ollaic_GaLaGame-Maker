@@ -291,7 +291,7 @@ primitive（原始色板/数值，--ol-*）
 | `--sidebar-accent-foreground` | `var(--foreground)` | `var(--foreground)` |  |
 | `--sidebar-border` | `var(--border)` | `var(--border)` |  |
 | `--sidebar-ring` | `var(--ring)` | `var(--ring)` |  |
-| `--warm-glow` | `oklch(75% 0.08 75)` | `oklch(75% 0.08 75)` | theme.css:129；用于 ::selection、:focus-visible（animations.css）与 pulse-glow |
+| `--warm-glow` | `oklch(75% 0.08 75)` | `oklch(75% 0.08 75)` | theme.css:129；用于 ::selection 与 pulse-glow（焦点框已改用 `--focus-ring`） |
 
 ### 3.3 Seed 主题
 
@@ -679,7 +679,7 @@ Tailwind 4 的 `--spacing: 0.25rem`（4px）是基础单位。TSX 中最常用�
 | 模态框 | 8 个自制遮罩（`fixed inset-0`）：AppSettingsDialog.tsx:372、AssetManager.tsx:2427、CharacterPanel.tsx:1673 / 1809、VoiceDubbingPanel.tsx:598、AiSettingsDialog.tsx:266、ProjectMetadataDialog.tsx:99、SnapshotManagerDialog.tsx:108、ScenePreviewDialog.tsx:87；遮罩透明度 50/55/60%，层级 z-50/60/70，模糊 none/xs/sm | 全部改用 `ui/Dialog`（自带焦点陷阱、Esc、动画），遮罩用 `--scrim`，层级用 `--ol-z-modal` |
 | 输入框 | `ui/Input` 0 次使用；72 个原生 `<input>`、22 个 `<textarea>`（只有 2 处用 `ui/Textarea`）、21 个原生 `<select>` | 统一用 Input / Textarea；新增 Select 组件（可基于 Radix Select） |
 | 状态标签 / Badge | 无 Badge 组件；状态色直接写 Tailwind 色板（190 处，98 种类名） | 新增 `Badge`（cva：`neutral / primary / success / warning / info / danger / soft`），字号 2xs、`rounded-full` |
-| Toast | StoryEditor.tsx:1219-1222 自制 toast（`z-[9999]`、`rgba(34,197,94,0.9)`） | 新增 Toast 组件，背景 `--success-solid`，层级 `--ol-z-toast` |
+| Toast | ~~StoryEditor.tsx:1219-1222 自制 toast（`z-[9999]`、`rgba(34,197,94,0.9)`）~~ **已修复**：`lib/toast.ts` + `components/Toaster.tsx`（`--success` / `--destructive` / `--info`，`--ol-z-toast`） | 用 `toast.success / error / info`，不要再自制 |
 | 右侧抽屉 | SceneManagerPanel.tsx:65、FlowBoard.tsx:872、AssetManager.tsx:1983、theme.css:860 四种侧影 | 新增 Sheet 组件（或基于 Dialog），阴影 `--ol-shadow-sheet` |
 
 ---
@@ -717,8 +717,8 @@ Tailwind 4 的 `--spacing: 0.25rem`（4px）是基础单位。TSX 中最常用�
 | # | 问题 | 位置 | 应映射到 |
 |---|---|---|---|
 | D8 | 自制模态框 8 个，遮罩/层级/模糊各不相同 | 见 11.4 | `ui/Dialog` + `--scrim` + `--ol-z-modal` |
-| D9 | `z-[9999]` toast、`z-[100]` 拖拽遮罩、z-[60]/[70] 弹窗 | StoryEditor.tsx:1221、:1285；RuntimePreviewPanel.tsx:221；AiSettingsDialog.tsx:266；ProjectMetadataDialog.tsx:99；SnapshotManagerDialog.tsx:108 | `--ol-z-*` |
-| D10 | 三种不同的焦点样式：animations.css:51-54 全局 `:focus-visible` 用 warm-glow 70%；theme.css:480-487 按钮/输入用 `ring` 与白色混合；shadcn 组件用 `ring-[3px] ring-ring/50` | 见左 | 统一用 `--ring`，宽度 2px、offset 2px |
+| D9 | ~~`z-[9999]` toast~~（已修复）、`z-[100]` 拖拽遮罩、z-[60]/[70] 弹窗 | StoryEditor.tsx:1221、:1285；RuntimePreviewPanel.tsx:221；AiSettingsDialog.tsx:266；ProjectMetadataDialog.tsx:99；SnapshotManagerDialog.tsx:108 | `--ol-z-*` |
+| D10 | 三种不同的焦点样式：animations.css:51-54 全局 `:focus-visible` 用 warm-glow 70%；theme.css:480-487 按钮/输入用 `ring` 与白色混合；shadcn 组件用 `ring-[3px] ring-ring/50` | 见左 | **已修复**：`--focus-ring`（= `--ring`）、`--focus-ring-width` 2px、`--focus-ring-offset` 2px，全局一条 `:focus-visible`；组合输入用 `.focus-ring-within`，贴边用 `.focus-ring-inset` |
 | D11 | `::selection` 文字色为 `var(--card)`（亮色为白色）配 40% 暖光背景，亮色模式下对比度很低 | animations.css:45-48 | 文字色改为 `--foreground` |
 | D12 | 阴影使用 Tailwind 默认纯黑（`shadow-sm` 16、`shadow-2xl` 11、`shadow-lg` 9、`shadow-md` 4 等），以及 5 种任意值阴影 | 如 AppSettingsDialog.tsx:373、ui/popover.tsx:33、SceneGraph.tsx:305 | `--ol-shadow-*` |
 | D13 | 近似重复颜色：`--muted-foreground #625b70` ≈ `--on-surface-variant #605a6b`；`--switch-background #e2dce9` ≈ `--surface-container-highest #e2d9ec`；暗色 `--muted/--input-background #252130` ≈ `--surface-container-low #24202e`；暗色 `--accent/--secondary-container #2d283a` ≈ `--surface-container #2b2637` | theme.css:48/95、58/86、248/268、245/269 | 已在 primitive 层合并（见 3.1 replaces 列） |
@@ -767,6 +767,11 @@ Tailwind 4 的 `--spacing: 0.25rem`（4px）是基础单位。TSX 中最常用�
 4. 在 ESLint 中加规则（如 `eslint-plugin-tailwindcss` 的 `no-arbitrary-value` 或自定义正则）阻止新增任意字号、原生色板类和硬编码 hex。
 
 ---
+
+### 已修复（2026-11-02）
+- D10 焦点样式统一（`--focus-ring`），对应 UX-REVIEW H1。
+- Toast 基础组件（`toast` + `Toaster`）与确认对话框（`ConfirmDialog` + `useConfirmDialog`），对应 UX-REVIEW H4、H5、M6。危险操作用 `confirm({ destructive: true })`，错误用 `toast.error`。
+- 主题单一来源：`app-settings.ts` 的 `saveAppSettings` / `saveAppTheme` / `applyAppAppearance`，对应 UX-REVIEW H6。
 
 ## 14. 未能确定的事项
 
