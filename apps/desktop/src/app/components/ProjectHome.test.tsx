@@ -79,21 +79,35 @@ describe('M3 project home', () => {
     },
   );
 
-  it('restores and persists the home theme across remounts', async () => {
+  it('follows the app theme and writes the home toggle to app settings', async () => {
     const user = userEvent.setup();
-    localStorage.setItem('ollaic-home-theme', 'dark');
+    const savedTheme = () => JSON.parse(localStorage.getItem('webgal-app-settings') ?? '{}').theme;
+    localStorage.setItem('webgal-app-settings', JSON.stringify({ theme: 'dark', language: 'en' }));
     const initial = render(<ProjectHome />);
     expect(initial.container.querySelector('.ph-root')).toHaveClass('dark');
     await user.click(screen.getByRole('button', { name: '切换到浅色模式' }));
-    expect(localStorage.getItem('ollaic-home-theme')).toBe('light');
+    expect(savedTheme()).toBe('light');
+    expect(JSON.parse(localStorage.getItem('webgal-app-settings') ?? '{}').language).toBe('en');
+    expect(document.documentElement).not.toHaveClass('dark');
     initial.unmount();
     const light = render(<ProjectHome />);
     expect(light.container.querySelector('.ph-root')).not.toHaveClass('dark');
     await user.click(screen.getByRole('button', { name: '切换到深色模式' }));
-    expect(localStorage.getItem('ollaic-home-theme')).toBe('dark');
+    expect(savedTheme()).toBe('dark');
+    expect(document.documentElement).toHaveClass('dark');
     light.unmount();
     const dark = render(<ProjectHome />);
     expect(dark.container.querySelector('.ph-root')).toHaveClass('dark');
+    dark.unmount();
+    document.documentElement.classList.remove('dark');
+  });
+
+  it('ignores and clears the legacy home-only theme', () => {
+    localStorage.setItem('webgal-app-settings', JSON.stringify({ theme: 'light' }));
+    localStorage.setItem('ollaic-home-theme', 'dark');
+    const { container } = render(<ProjectHome />);
+    expect(container.querySelector('.ph-root')).not.toHaveClass('dark');
+    expect(localStorage.getItem('ollaic-home-theme')).toBeNull();
   });
 
   it('saves the project description as initial world memory', async () => {
