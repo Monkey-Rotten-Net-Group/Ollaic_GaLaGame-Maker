@@ -22,7 +22,15 @@ import {
   X,
   Award,
   Eye,
+  BookOpen,
+  Boxes,
+  GitBranch,
+  Workflow,
+  CornerDownLeft,
+  Plus,
 } from 'lucide-react';
+import { toast } from '../lib/toast';
+import { AppSettingsDialog } from './AppSettingsDialog';
 import {
   listAssets,
   listAllAssets,
@@ -325,6 +333,7 @@ export function AssetManager() {
   const [voiceCards, setVoiceCards] = useState<VoiceAssetCard[]>([]);
   const [selectedVoiceCard, setSelectedVoiceCard] = useState<VoiceAssetCard | null>(null);
   const [aiAssetPrompt, setAiAssetPrompt] = useState('');
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   // BGM references scanned from scene scripts: filename + whether the file exists.
   const [bgmReferences, setBgmReferences] = useState<{ filename: string; exists: boolean }[]>([]);
 
@@ -351,6 +360,11 @@ export function AssetManager() {
   );
 
   // Load project path
+  const projectName = useMemo(() => {
+    if (!projectPath) return projectId || 'WebGAL 工程';
+    return projectPath.split(/[/\\]/).filter(Boolean).pop() || projectId || 'WebGAL 工程';
+  }, [projectPath, projectId]);
+
   useEffect(() => {
     const path = localStorage.getItem(`project-path-${projectId}`);
     if (path) {
@@ -674,15 +688,53 @@ export function AssetManager() {
     });
   }, [assets, searchQuery, metadata]);
 
-  // Tab counts from real files only. Planning cards such as scene cards and
-  // dubbing tasks have their own workspace and should not inflate asset counts.
+  // Tab counts reflect total cards in library (files + planned cards)
   const tabCounts = {
-    scene: allAssets.filter(a => a.category === 'background').length,
-    cg: Object.keys(metadata.cgCards ?? {}).length,
+    scene: sceneLibraryItems.length,
+    cg: cgLibraryItems.length,
     music: allAssets.filter(a => a.category === 'bgm' || a.category === 'vocal').length,
     character: characterCount,
     dubbing: 0,
   };
+
+  const handleCopyAssetCommand = useCallback((asset: AssetInfo) => {
+    const isAudio = isAudioExt(asset.extension);
+    const cmd = isAudio
+      ? (asset.category === 'vocal' ? `playEffect:${asset.name};` : `bgm:${asset.name};`)
+      : `changeBg:${asset.name} -next;`;
+    void navigator.clipboard.writeText(cmd);
+    toast.success(`已复制指令：${cmd}`);
+  }, []);
+
+  const totalCategorySizeMb = useMemo(() => {
+    const categoryFilter = activeTab === 'scene' ? 'background' : activeTab === 'cg' ? 'background' : activeTab === 'music' ? 'bgm' : 'figure';
+    const bytes = allAssets
+      .filter((a) => a.category === categoryFilter || (activeTab === 'music' && a.category === 'vocal'))
+      .reduce((sum, a) => sum + (a.size || 0), 0);
+    return (bytes / (1024 * 1024)).toFixed(1);
+  }, [allAssets, activeTab]);
+
+  const currentCategoryCount = useMemo(() => {
+    if (activeTab === 'scene') return sceneLibraryItems.length;
+    if (activeTab === 'cg') return cgLibraryItems.length;
+    if (activeTab === 'music') return assets.length;
+    if (activeTab === 'character') return characterCount;
+    return 0;
+  }, [activeTab, sceneLibraryItems.length, cgLibraryItems.length, assets.length, characterCount]);
+
+  const displayStoragePath = useMemo(() => {
+    if (!projectPath) return '—';
+    const sub = activeTab === 'scene' ? 'background' : activeTab === 'cg' ? 'background' : activeTab === 'music' ? 'bgm' : 'figure';
+    return `${projectPath}/game/${sub}`.replace(/\\/g, '/');
+  }, [projectPath, activeTab]);
+
+  const categoryUnitName = useMemo(() => {
+    if (activeTab === 'scene') return '场景背景';
+    if (activeTab === 'cg') return 'CG 图像';
+    if (activeTab === 'music') return '音频文件';
+    if (activeTab === 'character') return '角色立绘';
+    return '素材';
+  }, [activeTab]);
 
   const importConfig = getImportConfig(activeTab, musicCategory);
   const isDubbingWorkspace = activeTab === 'music' && musicCategory === 'dubbing';
@@ -1209,10 +1261,19 @@ export function AssetManager() {
       {confirmDialog}
       <OllaicTopBar
         projectId={projectId}
-        activeSection="assets"
+        projectName={projectName}
         title="素材库"
+        activeView="assets"
+        onViewChange={(v) => {
+          if (v === 'editor') navigate(`/editor/${projectId}`);
+          else if (v === 'worldline') navigate(`/editor/${projectId}?view=worldline`);
+          else if (v === 'workflow') navigate(`/editor/${projectId}?view=workflow`);
+        }}
         onRun={() => navigate(`/editor/${projectId}?action=preview`)}
         onPublish={() => navigate(`/editor/${projectId}?action=export`)}
+        onSettings={() => setAppSettingsOpen(true)}
+        agentOpen={false}
+        onToggleAgent={() => navigate(`/editor/${projectId}?action=agent`)}
       />
 
       {!projectPath ? (
@@ -1223,9 +1284,11 @@ export function AssetManager() {
           </div>
         </div>
       ) : (
-        <div className="ollaic-workspace flex bg-surface-container-lowest">
-          <main className="relative flex-1 flex flex-col overflow-hidden bg-surface">
-            <div className="flex h-12 items-center gap-1 border-b border-border bg-surface-container-low px-4">
+        <div className="ollaic-workspace flex flex-col bg-surface-container-lowest">
+          {/* 1. Single-line Toolbar (Height 44px) */}
+          <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface-container-low px-4 gap-3 select-none">
+            {/* Left: Category Pills */}
+            <div className="flex items-center gap-1 overflow-x-auto py-0.5">
               {tabConfig.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
@@ -1238,144 +1301,164 @@ export function AssetManager() {
                     setSelectedVoiceCard(null);
                     setEditingSceneCard(null);
                   }}
-                  className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold tracking-wide transition-colors ${
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold tracking-wide transition-all ${
                     activeTab === id
-                      ? 'ollaic-layered-tab-active text-foreground'
-                      : 'text-muted-foreground hover:bg-surface-container-highest hover:text-foreground'
+                      ? 'bg-surface-container-lowest text-primary shadow-xs ring-1 ring-border/80'
+                      : 'text-muted-foreground hover:bg-surface-container hover:text-foreground'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                  <span className="rounded border border-border px-1 text-[10px] text-muted-foreground">{tabCounts[id]}</span>
+                  <Icon className="size-3.5" />
+                  <span>{label}</span>
+                  {tabCounts[id] !== undefined && (
+                    <span className="rounded-full bg-surface-container px-1.5 py-0.2 text-[10px] text-muted-foreground font-mono">
+                      {tabCounts[id]}
+                    </span>
+                  )}
                 </button>
               ))}
-            </div>
-            <div className="flex h-10 items-center gap-2 border-b border-border bg-surface-container-lowest px-4">
-              <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
-                {projectPath}
-              </span>
-              {showAiAction && activeTab !== 'character' && (
-                <button
-                  onClick={() => {
-                    if (activeTab === 'scene') {
-                      handleNewSceneCard();
-                      return;
-                    }
-                    if (activeTab === 'cg') {
-                      handleNewCgCard();
-                      return;
-                    }
-                    setEditingSceneCard(null);
-                    setAiAssetPrompt('');
-                    setAiGenerateOpen(true);
-                  }}
-                  className="ollaic-command border-primary/30 bg-primary/10 text-primary"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {aiActionLabel}
-                </button>
-              )}
-              {importConfig && activeTab !== 'character' && (
-                <button
-                  onClick={handleImport}
-                  disabled={!projectPath || importing}
-                  className="ollaic-command ollaic-command-primary ollaic-chamfer-tr disabled:opacity-50"
-                >
-                  {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  {importing ? '导入中...' : importConfig.buttonLabel}
-                </button>
-              )}
-            </div>
-            {activeTab === 'dubbing' ? (
-              <VoiceDubbingPanel
-                projectPath={projectPath}
-                voiceCards={voiceCards}
-                vocalAssetNames={vocalAssetNames}
-                selectedVoiceCard={selectedVoiceCard}
-                onSelectVoiceCard={(card) => {
-                  setSelectedVoiceCard(card);
-                  setSelectedAsset(null);
-                  setSelectedSceneCard(null);
-                  setEditingSceneCard(null);
-                }}
-                onVoiceCardsChanged={async () => {
-                  await loadAllAssets(projectPath);
-                  const m = await loadAssetMetadata(projectPath);
-                  applyMetadata(m);
-                }}
-              />
-            ) : activeTab === 'character' ? (
-              <CharacterPanel
-                projectPath={projectPath}
-                embedded
-                onCharacterCountChange={setCharacterCount}
-                figureLibraryRefreshToken={figureLibraryRefreshToken}
-              />
-            ) : (
-              <>
-            {/* Toolbar */}
-            <div className="px-4 py-3 border-b border-border bg-surface-container-lowest flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4 flex-1">
-                {activeTab === 'music' && (
-                  <div className="flex items-center gap-1 bg-secondary/50 rounded-md p-1 flex-shrink-0">
-                    {musicTabs.map((tab) => (
-                      <button
-                        key={tab.id}
-                        type="button"
+
+              {/* Music sub-categories */}
+              {activeTab === 'music' && (
+                <div className="ml-2 flex items-center rounded-lg border border-border/80 bg-surface-container-lowest p-0.5 text-xs font-medium">
+                  {musicTabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
                       onClick={() => {
                         setMusicCategory(tab.id);
                         setSelectedAsset(null);
                         setSelectedSceneCard(null);
                         setSelectedVoiceCard(null);
                       }}
-                        className={`px-3 py-1.5 rounded text-xs transition-colors ${
-                          musicCategory === tab.id ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
-                        }`}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {!isDubbingWorkspace && (
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="搜索素材名称..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-input-background border border-border rounded"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {!isDubbingWorkspace && (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-secondary/50 rounded-md p-1">
-                  <button
-                    onClick={() => setViewMode('grid')}
-                    className={`p-2 rounded transition-colors ${
-                      viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
-                    }`}
-                    aria-label="切换为网格视图"
-                  >
-                    <Grid3x3 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className={`p-2 rounded transition-colors ${
-                      viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
-                    }`}
-                    aria-label="切换为列表视图"
-                  >
-                    <List className="w-4 h-4" />
-                  </button>
+                      className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
+                        musicCategory === tab.id ? 'bg-primary text-primary-foreground font-semibold shadow-2xs' : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
-              </div>
               )}
             </div>
+
+            {/* Middle: Compact Search Box */}
+            {activeTab !== 'character' && (
+              <div className="relative flex-1 max-w-xs hidden md:flex items-center">
+                <Search className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground opacity-70" />
+                <input
+                  type="text"
+                  placeholder="搜索素材名称..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-7 w-full rounded-lg border border-border/80 bg-surface-container-lowest pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:ring-1 focus:ring-primary/20 transition-all outline-none"
+                />
+              </div>
+            )}
+
+            {/* Right: View Mode & Action Buttons */}
+            {activeTab !== 'character' && (
+              <div className="flex shrink-0 items-center gap-2">
+                {/* Grid / List Switcher */}
+                <div className="flex items-center rounded-lg border border-border/80 bg-surface-container-lowest p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('grid')}
+                    className={`p-1 rounded transition-colors ${
+                      viewMode === 'grid' ? 'bg-surface-container text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    aria-label="切换为网格视图"
+                    title="网格视图"
+                  >
+                    <Grid3x3 className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('list')}
+                    className={`p-1 rounded transition-colors ${
+                      viewMode === 'list' ? 'bg-surface-container text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    aria-label="切换为列表视图"
+                    title="列表视图"
+                  >
+                    <List className="size-3.5" />
+                  </button>
+                </div>
+
+                {/* Primary Actions (新建场景 / 新建 CG) */}
+                {showAiAction && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeTab === 'scene') {
+                        handleNewSceneCard();
+                        return;
+                      }
+                      if (activeTab === 'cg') {
+                        handleNewCgCard();
+                        return;
+                      }
+                      setEditingSceneCard(null);
+                      setAiAssetPrompt('');
+                      setAiGenerateOpen(true);
+                    }}
+                    className="flex h-7 items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-all shadow-2xs"
+                  >
+                    <Plus className="size-3.5" />
+                    <span>{aiActionLabel}</span>
+                  </button>
+                )}
+
+                {/* Import Action (上传背景 / 上传音频 - 降级为次级按钮，消灭双实心紫按钮冲突) */}
+                {importConfig && (
+                  <button
+                    type="button"
+                    onClick={handleImport}
+                    disabled={!projectPath || importing}
+                    className="flex h-7 items-center gap-1 rounded-lg border border-border/80 bg-surface-container-low px-2.5 text-xs font-semibold text-foreground hover:bg-surface-container transition-all shadow-2xs disabled:opacity-50"
+                  >
+                    {importing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+                    <span>{importing ? '导入中…' : importConfig.buttonLabel}</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Main Master-Detail Body Area */}
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            {activeTab === 'dubbing' ? (
+              <div className="flex-1 min-h-0 overflow-auto">
+                <VoiceDubbingPanel
+                  projectPath={projectPath}
+                  voiceCards={voiceCards}
+                  vocalAssetNames={vocalAssetNames}
+                  selectedVoiceCard={selectedVoiceCard}
+                  onSelectVoiceCard={(card) => {
+                    setSelectedVoiceCard(card);
+                    setSelectedAsset(null);
+                    setSelectedSceneCard(null);
+                    setEditingSceneCard(null);
+                  }}
+                  onVoiceCardsChanged={async () => {
+                    await loadAllAssets(projectPath);
+                    const m = await loadAssetMetadata(projectPath);
+                    applyMetadata(m);
+                  }}
+                />
+              </div>
+            ) : activeTab === 'character' ? (
+              <div className="flex-1 min-h-0 overflow-auto">
+                <CharacterPanel
+                  projectPath={projectPath}
+                  embedded
+                  onCharacterCountChange={setCharacterCount}
+                  figureLibraryRefreshToken={figureLibraryRefreshToken}
+                />
+              </div>
+            ) : (
+              <>
+                {/* Left Column: Master Grid / List (72% ~ 75%) */}
+                <div className="flex-1 min-w-0 overflow-auto p-4 flex flex-col">
 
             {/* Error banner */}
             {error && (
@@ -1413,12 +1496,10 @@ export function AssetManager() {
               </div>
             )}
 
-            {/* Assets Display */}
-            <div className="flex-1 overflow-auto p-4">
-              {loading ? (
-                <div className="h-full flex items-center justify-center">
-                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </div>
+            {loading ? (
+              <div className="h-full flex items-center justify-center py-20">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
               ) : activeTab === 'scene' ? (
                 sceneLibraryItems.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
@@ -1513,9 +1594,25 @@ export function AssetManager() {
                             {thumbnail ? (
                               <img src={thumbnail} alt={title} className="h-full w-full object-cover" />
                             ) : (
-                              <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                                <Image className="h-10 w-10 opacity-40" />
-                                <span className="text-xs">{card ? '未生成背景图' : '预览不可用'}</span>
+                              <div className="flex h-full flex-col items-center justify-center gap-1.5 p-3 text-center text-muted-foreground bg-surface-container-low/40">
+                                <Sparkles className="size-6 text-primary/50 mb-0.5" />
+                                <span className="text-xs font-semibold text-foreground/80">{card?.title || '待生成背景'}</span>
+                                {card && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSaveSceneCard(card);
+                                      setEditingSceneCard(card);
+                                      setAiAssetPrompt(card.prompt || '');
+                                      setAiGenerateOpen(true);
+                                    }}
+                                    className="mt-1 flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[10.5px] font-semibold text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                                  >
+                                    <Plus className="size-3" />
+                                    <span>点击 AI 生成背景</span>
+                                  </button>
+                                )}
                               </div>
                             )}
                             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1620,9 +1717,25 @@ export function AssetManager() {
                             {thumbnail ? (
                               <img src={thumbnail} alt={title} className="h-full w-full object-cover" />
                             ) : (
-                              <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-                                <Award className="h-10 w-10 opacity-40" />
-                                <span className="text-xs">未生成 CG 图</span>
+                              <div className="flex h-full flex-col items-center justify-center gap-1.5 p-3 text-center text-muted-foreground bg-surface-container-low/40">
+                                <Award className="size-6 text-primary/50 mb-0.5" />
+                                <span className="text-xs font-semibold text-foreground/80">{card?.title || '待生成 CG'}</span>
+                                {card && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSaveCgCard(card);
+                                      setEditingSceneCard(card);
+                                      setAiAssetPrompt(card.prompt || '');
+                                      setAiGenerateOpen(true);
+                                    }}
+                                    className="mt-1 flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[10.5px] font-semibold text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                                  >
+                                    <Plus className="size-3" />
+                                    <span>点击 AI 生成 CG</span>
+                                  </button>
+                                )}
                               </div>
                             )}
                             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1999,234 +2112,315 @@ export function AssetManager() {
                 </div>
               )}
             </div>
-              </>
-            )}
-          </main>
 
-          {/* Right Sidebar - Details */}
-          {activeTab !== 'character' && (
-          <aside className="mb-4 mr-4 w-80 overflow-hidden rounded border border-border bg-surface-bright/90 shadow-[-4px_0_24px_var(--shadow-faint)] backdrop-blur-xl">
-            {selectedCgCard ? (
-              <SceneCardDetails
-                card={selectedCgCard}
-                projectPath={projectPath}
-                backgroundAssets={allAssets.filter((asset) => asset.category === 'background')}
-                getThumbnail={getThumbnail}
-                references={cgCardReferences}
-                referenceUploading={referenceUploading}
-                onReferenceUpload={handleSceneCardReferenceUpload}
-                onReferenceRemove={handleSceneCardReferenceRemove}
-                onSave={handleSaveCgCard}
-                onGenerate={(card) => {
-                  handleSaveCgCard(card);
-                  setEditingSceneCard(card);
-                  setAiAssetPrompt('');
-                  setAiGenerateOpen(true);
-                }}
-                onOpenUsage={openUsage}
-              />
-            ) : selectedSceneCard ? (
-              <SceneCardDetails
-                card={selectedSceneCard}
-                projectPath={projectPath}
-                backgroundAssets={allAssets.filter((asset) => asset.category === 'background')}
-                getThumbnail={getThumbnail}
-                references={sceneCardReferences}
-                referenceUploading={referenceUploading}
-                onReferenceUpload={handleSceneCardReferenceUpload}
-                onReferenceRemove={handleSceneCardReferenceRemove}
-                onSave={handleSaveSceneCard}
-                onGenerate={(card) => {
-                  handleSaveSceneCard(card);
-                  setEditingSceneCard(card);
-                  setAiAssetPrompt('');
-                  setAiGenerateOpen(true);
-                }}
-                onOpenUsage={openUsage}
-              />
-            ) : selectedVoiceCard ? (
-              <VoiceCardDetails
-                card={selectedVoiceCard}
-                projectPath={projectPath}
-                vocalAssetNames={vocalAssetNames}
-                onSave={handleSaveVoiceCard}
-                onGenerate={(card) => {
-                  handleSaveVoiceCard(card);
-                  setEditingSceneCard(null);
-                  setAiAssetPrompt('');
-                  setAiGenerateOpen(true);
-                }}
-              />
-            ) : selectedAsset ? (
-              <div className="h-full overflow-auto">
-                <div className="flex h-10 items-center justify-between border-b border-border bg-surface-container-high px-4">
-                  <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">属性检视器</span>
-                  <button type="button" onClick={() => setSelectedAsset(null)} className="text-muted-foreground hover:text-foreground" aria-label="关闭素材详情">
-                    <X className="h-4 w-4" />
+            {/* Right Column: Fixed Inspector Panel (25% ~ 28%) */}
+            <aside className="w-80 lg:w-96 shrink-0 border-l border-border bg-surface-container-lowest flex flex-col min-h-0 select-none">
+              <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-surface-container-low/50 px-3.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/80">
+                  <Eye className="size-3.5 text-primary opacity-80" />
+                  <span>属性检视器</span>
+                </div>
+                {(selectedAsset || selectedSceneCard || selectedCgCard || selectedVoiceCard) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAsset(null);
+                      setSelectedSceneCard(null);
+                      setSelectedCgCard(null);
+                      setSelectedVoiceCard(null);
+                      setEditingSceneCard(null);
+                    }}
+                    className="rounded p-1 text-muted-foreground hover:bg-surface-container hover:text-foreground transition-colors"
+                    aria-label="关闭素材详情"
+                    title="清除选择"
+                  >
+                    <X className="size-3.5" />
                   </button>
-                </div>
-              <div className="p-4">
-                <div className="mb-6">
-                  <div className="ollaic-blueprint ollaic-hard-shadow aspect-video rounded overflow-hidden bg-surface-dim mb-4 border border-border">
-                    {getThumbnail(selectedAsset) ? (
-                      <img
-                        src={getThumbnail(selectedAsset)!}
-                        alt={selectedAsset.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        {isAudioExt(selectedAsset.extension) ? (
-                          <Music className="w-16 h-16 text-muted-foreground" />
-                        ) : (
-                          <Image className="w-16 h-16 text-muted-foreground/30" />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <h2 className="text-xl mb-2 font-display-family">
-                    {selectedAsset.name}
-                  </h2>
-                  <p className="text-xs text-muted-foreground truncate font-mono-family">
-                    {selectedAsset.path}
-                  </p>
-                </div>
+                )}
+              </div>
 
-                <div className="space-y-4 mb-6">
-                  {(activeTab === 'scene' || activeTab === 'music') && (
+              <div className="flex-1 overflow-auto p-4">
+                {selectedCgCard ? (
+                  <SceneCardDetails
+                    card={selectedCgCard}
+                    projectPath={projectPath}
+                    backgroundAssets={allAssets.filter((asset) => asset.category === 'background')}
+                    getThumbnail={getThumbnail}
+                    references={cgCardReferences}
+                    referenceUploading={referenceUploading}
+                    onReferenceUpload={handleSceneCardReferenceUpload}
+                    onReferenceRemove={handleSceneCardReferenceRemove}
+                    onSave={handleSaveCgCard}
+                    onGenerate={(card) => {
+                      handleSaveCgCard(card);
+                      setEditingSceneCard(card);
+                      setAiAssetPrompt('');
+                      setAiGenerateOpen(true);
+                    }}
+                    onOpenUsage={openUsage}
+                  />
+                ) : selectedSceneCard ? (
+                  <SceneCardDetails
+                    card={selectedSceneCard}
+                    projectPath={projectPath}
+                    backgroundAssets={allAssets.filter((asset) => asset.category === 'background')}
+                    getThumbnail={getThumbnail}
+                    references={sceneCardReferences}
+                    referenceUploading={referenceUploading}
+                    onReferenceUpload={handleSceneCardReferenceUpload}
+                    onReferenceRemove={handleSceneCardReferenceRemove}
+                    onSave={handleSaveSceneCard}
+                    onGenerate={(card) => {
+                      handleSaveSceneCard(card);
+                      setEditingSceneCard(card);
+                      setAiAssetPrompt('');
+                      setAiGenerateOpen(true);
+                    }}
+                    onOpenUsage={openUsage}
+                  />
+                ) : selectedVoiceCard ? (
+                  <VoiceCardDetails
+                    card={selectedVoiceCard}
+                    projectPath={projectPath}
+                    vocalAssetNames={vocalAssetNames}
+                    onSave={handleSaveVoiceCard}
+                    onGenerate={(card) => {
+                      handleSaveVoiceCard(card);
+                      setEditingSceneCard(null);
+                      setAiAssetPrompt('');
+                      setAiGenerateOpen(true);
+                    }}
+                  />
+                ) : selectedAsset ? (
+                  <div className="space-y-4">
+                    {/* Large Preview */}
+                    <div className="aspect-video w-full overflow-hidden rounded-lg border border-border bg-surface-dim relative">
+                      {getThumbnail(selectedAsset) ? (
+                        <img
+                          src={getThumbnail(selectedAsset)!}
+                          alt={selectedAsset.name}
+                          className="h-full w-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          {isAudioExt(selectedAsset.extension) ? (
+                            <Music className="size-12 text-muted-foreground/40" />
+                          ) : (
+                            <Image className="size-12 text-muted-foreground/30" />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div>
-                      <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
-                        显示名称
-                      </label>
-                      <input
-                        type="text"
-                        value={aliasForAsset(selectedAsset)}
-                        onChange={(e) => handleAliasChange(selectedAsset, e.target.value)}
-                        className="w-full px-3 py-2 bg-input-background border border-border rounded-md text-sm"
-                        placeholder={activeTab === 'scene' ? '例：教室 · 白天' : '例：悲伤主旋律'}
-                        aria-label="素材显示名称"
-                      />
-                      <p className="mt-1 text-[10px] text-muted-foreground">
-                        设置后，剧本编辑器的素材选择弹窗会优先显示这个名称。
+                      <h2 className="text-sm font-bold font-display-family truncate text-foreground">
+                        {aliasForAsset(selectedAsset) || selectedAsset.name}
+                      </h2>
+                      <p className="text-[10.5px] font-mono text-muted-foreground truncate">
+                        {selectedAsset.path}
                       </p>
                     </div>
-                  )}
 
-                  {selectedAsset.category !== 'vocal' && (
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-xs uppercase tracking-wide text-muted-foreground">
-                          {activeTab === 'music' ? '参考音频' : '参考图'}
+                    {/* Display name alias */}
+                    {(activeTab === 'scene' || activeTab === 'music') && (
+                      <div>
+                        <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                          显示名称
                         </label>
-                        <button
-                          type="button"
-                          onClick={handleReferenceUpload}
-                          disabled={referenceUploading}
-                          className="px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 text-xs flex items-center gap-1 disabled:opacity-50"
-                        >
-                          {referenceUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                          上传
-                        </button>
+                        <input
+                          type="text"
+                          value={aliasForAsset(selectedAsset)}
+                          onChange={(e) => handleAliasChange(selectedAsset, e.target.value)}
+                          className="w-full px-2.5 py-1 bg-input-background border border-border rounded-md text-xs font-medium"
+                          placeholder={activeTab === 'scene' ? '例：教室 · 白天' : '例：悲伤主旋律'}
+                          aria-label="素材显示名称"
+                        />
                       </div>
-                      <div className="space-y-2">
-                        {referencesForAsset(selectedAsset).length === 0 ? (
-                          <div className="text-xs text-muted-foreground rounded-md border border-dashed border-border p-3">暂无参考资料。</div>
-                        ) : referencesForAsset(selectedAsset).map((filename) => {
-                          const sourcePath = referenceFilePath(projectPath, selectedAsset.category, selectedAsset.name, filename);
-                          if (!sourcePath) return null;
-                          return (
-                            <div key={filename} className="flex items-center gap-2 rounded-md bg-secondary/20 p-2">
-                              {selectedAsset.category !== 'background' ? (
-                                <audio controls src={convertFileSrc(sourcePath)} className="min-w-0 flex-1 h-8" />
-                              ) : (
-                                <img src={convertFileSrc(sourcePath)} alt="" className="w-10 h-10 rounded object-cover bg-secondary" />
-                              )}
-                              <span className="min-w-0 flex-1 truncate text-xs font-mono-family">{filename}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleReferenceRemove(filename)}
-                                className="p-1 rounded hover:bg-destructive/10"
-                                aria-label="删除参考资料"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
-                              </button>
+                    )}
+
+                    {/* References */}
+                    {selectedAsset.category !== 'vocal' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-[11px] font-semibold text-muted-foreground">
+                            {activeTab === 'music' ? '参考音频' : '参考图'}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleReferenceUpload}
+                            disabled={referenceUploading}
+                            className="px-2 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 text-[11px] font-semibold flex items-center gap-1 disabled:opacity-50"
+                          >
+                            {referenceUploading ? <Loader2 className="size-3 animate-spin" /> : <Upload className="size-3" />}
+                            上传
+                          </button>
+                        </div>
+                        <div className="space-y-1.5">
+                          {referencesForAsset(selectedAsset).length === 0 ? (
+                            <div className="text-[11px] text-muted-foreground rounded border border-dashed border-border p-2">
+                              暂无参考资料。
                             </div>
-                          );
-                        })}
+                          ) : referencesForAsset(selectedAsset).map((filename) => {
+                            const sourcePath = referenceFilePath(projectPath, selectedAsset.category, selectedAsset.name, filename);
+                            if (!sourcePath) return null;
+                            return (
+                              <div key={filename} className="flex items-center gap-2 rounded bg-surface-container-low p-1.5 text-xs">
+                                {selectedAsset.category !== 'background' ? (
+                                  <audio controls src={convertFileSrc(sourcePath)} className="min-w-0 flex-1 h-7" />
+                                ) : (
+                                  <img src={convertFileSrc(sourcePath)} alt="" className="size-8 rounded object-cover" />
+                                )}
+                                <span className="min-w-0 flex-1 truncate text-[11px] font-mono">{filename}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleReferenceRemove(filename)}
+                                  className="p-1 rounded text-muted-foreground hover:text-destructive"
+                                  aria-label="删除参考资料"
+                                >
+                                  <Trash2 className="size-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Script Usages */}
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                        剧本引用 ({displayedAssetUsages.length})
+                      </label>
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                        {displayedAssetUsages.length === 0 ? (
+                          <div className="text-[11px] text-muted-foreground rounded border border-dashed border-border p-2">
+                            未在剧本中找到引用。
+                          </div>
+                        ) : displayedAssetUsages.map((usage, index) => (
+                          <button
+                            key={`${usage.sceneFile}-${usage.lineNumber}-${index}`}
+                            type="button"
+                            onClick={() => openUsage(usage)}
+                            className="w-full rounded bg-surface-container-low p-2 text-left hover:bg-primary/10 transition-colors"
+                          >
+                            <div className="text-[11px] font-medium text-primary">{usage.sceneFile} 第 {usage.lineNumber} 行</div>
+                            <div className="mt-0.5 truncate text-[10px] text-muted-foreground font-mono">{usage.lineContent}</div>
+                          </button>
+                        ))}
                       </div>
                     </div>
-                  )}
 
-                  {selectedAsset.category !== 'vocal' && (
-                    <div>
-                      <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
-                        描述
-                      </label>
-                      <textarea
-                        value={descriptionForAsset(selectedAsset)}
-                        onChange={(e) => handleDescriptionChange(selectedAsset, e.target.value)}
-                        rows={6}
-                        placeholder={selectedAsset.category === 'background'
-                          ? '描述要生成或重绘的背景：地点、时间、天气、氛围、镜头角度、画面主体。'
-                          : '备注这段音频的用途，例如：战斗场景循环、角色出场主题。'}
-                        className="w-full resize-y rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-6"
-                      />
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="text-xs uppercase tracking-wide text-muted-foreground block mb-2">
-                      剧本引用
-                    </label>
-                    <div className="space-y-2">
-                      {displayedAssetUsages.length === 0 ? (
-                        <div className="text-xs text-muted-foreground rounded-md border border-dashed border-border p-3">未在剧本中找到引用。</div>
-                      ) : displayedAssetUsages.map((usage, index) => (
+                    {/* High-value Actions */}
+                    <div className="pt-2 space-y-1.5 border-t border-border">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyAssetCommand(selectedAsset)}
+                        className="w-full h-8 rounded-lg bg-surface-container-low hover:bg-surface-container text-foreground text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                        title="复制或插入此素材的 WebGAL 剧本调用指令"
+                      >
+                        <CornerDownLeft className="size-3.5 text-primary" />
+                        <span>复制剧本引用指令</span>
+                      </button>
+                      {supportsAssetGeneration(selectedAsset) && (
                         <button
-                          key={`${usage.sceneFile}-${usage.lineNumber}-${index}`}
                           type="button"
-                          onClick={() => openUsage(usage)}
-                          className="w-full rounded-md bg-secondary/20 p-2 text-left hover:bg-primary/10 transition-colors"
+                          onClick={() => handleGenerateFromAsset(selectedAsset)}
+                          className="w-full h-8 rounded-lg bg-primary text-primary-foreground text-xs font-semibold flex items-center justify-center gap-1.5 transition-all hover:bg-primary/90"
+                          aria-label="AI 生成"
+                          title="使用当前素材作为提示词或参考图进行 AI 生成"
                         >
-                          <div className="text-xs text-primary">{usage.sceneFile} 第 {usage.lineNumber} 行</div>
-                          <div className="mt-1 truncate text-[10px] text-muted-foreground font-mono-family">{usage.lineContent}</div>
+                          <Sparkles className="size-3.5" />
+                          <span>AI 生成</span>
                         </button>
-                      ))}
+                      )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleRename}
+                          className="flex-1 h-7 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground flex items-center justify-center gap-1"
+                          aria-label="重命名素材"
+                        >
+                          <Edit3 className="size-3" />
+                          <span>重命名</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(selectedAsset)}
+                          className="flex-1 h-7 rounded-lg border border-destructive/30 text-destructive text-xs hover:bg-destructive/10 flex items-center justify-center gap-1"
+                        >
+                          <Trash2 className="size-3" />
+                          <span>删除素材</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-4 text-left select-none">
+                    <div className="rounded-lg border border-border/80 bg-surface-container-low p-3.5 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <Boxes className="size-4 text-primary" />
+                        <span>{categoryUnitName}概览</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                        <div className="rounded border border-border/60 bg-surface-container-lowest p-2">
+                          <span className="text-muted-foreground block text-[10px]">卡片总数</span>
+                          <span className="font-mono font-bold text-sm text-foreground">{currentCategoryCount}</span>
+                        </div>
+                        <div className="rounded border border-border/60 bg-surface-container-lowest p-2">
+                          <span className="text-muted-foreground block text-[10px]">磁盘占用</span>
+                          <span className="font-mono font-bold text-sm text-foreground">{totalCategorySizeMb} MB</span>
+                        </div>
+                      </div>
+                    </div>
 
-                <div className="space-y-2">
-                  <button
-                    onClick={handleRename}
-                    className="w-full px-4 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-all flex items-center justify-center gap-2"
-                    aria-label="重命名素材"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    重命名
-                  </button>
-                  {supportsAssetGeneration(selectedAsset) && (
-                    <button
-                      onClick={() => handleGenerateFromAsset(selectedAsset)}
-                      className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-all flex items-center justify-center gap-2"
-                      aria-label="AI 生成"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      AI 生成
-                    </button>
-                  )}
-                </div>
+                    <div className="rounded-lg border border-dashed border-border/80 p-3 text-[11px] text-muted-foreground space-y-1.5">
+                      <p className="font-semibold text-foreground/80 flex items-center gap-1">
+                        <Eye className="size-3.5 text-primary opacity-80" />
+                        <span>检视提示</span>
+                      </p>
+                      <p className="text-[10.5px] leading-relaxed">
+                        点击左侧任意卡片，可在此检视高清大图、引用位置与生成参数，并直接插入剧本或生成变体。
+                      </p>
+                    </div>
+
+                    {showAiAction && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (activeTab === 'scene') handleNewSceneCard();
+                          else if (activeTab === 'cg') handleNewCgCard();
+                          else {
+                            setEditingSceneCard(null);
+                            setAiAssetPrompt('');
+                            setAiGenerateOpen(true);
+                          }
+                        }}
+                        className="w-full h-8 rounded-lg border border-primary/30 bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-primary/20 transition-all shadow-2xs"
+                      >
+                        <Plus className="size-3.5" />
+                        <span>{aiActionLabel}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              </div>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-6 text-center">
-                <Image className="w-16 h-16 mb-4 opacity-50" />
-                <p className="text-sm">选择一个素材查看详情</p>
-              </div>
+            </aside>
+              </>
             )}
-          </aside>
-          )}
+          </div>
+
+          {/* 3. Bottom Status Bar (Height 24px) */}
+          <footer className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-surface-container-low px-4 text-[10.5px] text-muted-foreground select-none font-mono">
+            <div className="flex min-w-0 items-center gap-2 truncate">
+              <span className="truncate">存储路径: {displayStoragePath}</span>
+              <span className="opacity-40">•</span>
+              <span className="shrink-0">共 {currentCategoryCount} 个{categoryUnitName}</span>
+              <span className="opacity-40">•</span>
+              <span className="shrink-0">已用 {totalCategorySizeMb} MB</span>
+            </div>
+            <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-60">WebGAL Asset Manager</span>
+          </footer>
         </div>
       )}
       <AssetAiGenerateDialog
@@ -2306,6 +2500,10 @@ export function AssetManager() {
         }}
         className="hidden"
         aria-label="音频播放器"
+      />
+      <AppSettingsDialog
+        open={appSettingsOpen}
+        onClose={() => setAppSettingsOpen(false)}
       />
     </div>
   );
