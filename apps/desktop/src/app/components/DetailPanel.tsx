@@ -100,18 +100,24 @@ export function DetailPanel({
 
   return (
     <div className="flex-1 border-r border-border bg-card/50 backdrop-blur-sm flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <div>
-          <h3 className="text-xs uppercase tracking-widest text-muted-foreground mb-1 font-mono-family">
-            指令编辑
-          </h3>
-          <div className="text-base font-medium font-display-family">
-            {commandLabels[node.type]}
-          </div>
+      {/* Header - Exactly 40px (h-10) aligned with left and right columns */}
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3.5 bg-surface-container-low/70 select-none">
+        <div className="flex min-w-0 items-center gap-1.5 truncate">
+          <span className="text-xs font-semibold text-foreground truncate">
+            指令编辑 · {commandLabels[node.type]}
+          </span>
+          <span className="rounded bg-surface-container px-1.5 py-0.2 text-[10px] font-mono text-muted-foreground font-semibold shrink-0">
+            #{node.id}
+          </span>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-secondary/50 transition-colors" aria-label="关闭">
-          <X className="w-4 h-4 text-muted-foreground" />
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-muted-foreground hover:bg-surface-container hover:text-foreground transition-colors shrink-0"
+          aria-label="关闭"
+          title="关闭面板"
+        >
+          <X className="size-3.5" />
         </button>
       </div>
 
@@ -157,31 +163,24 @@ export function DetailPanel({
               onChange={(e) => onUpdateNode({ when: e.target.value || undefined })}
               className={`${inputClass} font-mono-family`}
               placeholder="例: score>10"
-              
+
               aria-label="条件"
             />
           </div>
         </div>
-
-        {/* Raw content preview */}
-        <div className="pt-3 border-t border-border">
-          <label className={`${labelClass} font-mono-family`}>
-            节点 ID
-          </label>
-          <div className="text-xs text-muted-foreground font-mono-family">
-            {node.id}
-          </div>
-        </div>
       </div>
 
-      {/* Actions */}
-      <div className="p-4 border-t border-border space-y-2">
+      {/* Actions - Subtle and refined */}
+      <div className="p-3 border-t border-border flex items-center justify-end">
         <button
+          type="button"
           onClick={onDeleteNode}
-          className="w-full px-4 py-2 bg-destructive/10 text-destructive rounded-md hover:bg-destructive/20 transition-colors text-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
           aria-label="删除指令"
+          title="删除此指令"
         >
-          删除指令
+          <Trash2 className="size-3.5" />
+          <span>删除指令</span>
         </button>
       </div>
     </div>
