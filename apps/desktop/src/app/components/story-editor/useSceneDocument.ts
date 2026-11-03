@@ -248,6 +248,7 @@ export function useSceneDocument() {
     pushHistory,
     undo,
     redo,
+    commitEditedNodes,
     insertNode,
     createUnlockNode,
     updateSelectedNode,

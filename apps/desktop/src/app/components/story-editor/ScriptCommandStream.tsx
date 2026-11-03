@@ -559,15 +559,15 @@ function ScriptCommandCompactRow({
 
   const rowBgClass = isBackground
     ? selected
-      ? 'border-emerald-500 bg-emerald-500/15 shadow-sm'
-      : 'border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10'
+      ? 'border-emerald-500 bg-emerald-500/15 shadow-2xs rounded-lg'
+      : 'border-b border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 rounded-md'
     : isBranch
       ? selected
-        ? 'border-amber-500 bg-amber-500/15 shadow-sm'
-        : 'border-amber-500/25 bg-amber-500/5 hover:bg-amber-500/10'
+        ? 'border-amber-500 bg-amber-500/15 shadow-2xs rounded-lg'
+        : 'border-b border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 rounded-md'
       : selected
-        ? 'border-primary bg-primary/10 shadow-sm'
-        : 'border-border bg-card hover:bg-surface-container-low hover:border-primary/30 shadow-[0_2px_8px_-2px_rgba(29,27,34,0.04)]';
+        ? 'border-primary/60 bg-primary/10 shadow-2xs ring-1 ring-primary/30 rounded-lg text-foreground font-medium'
+        : 'border-b border-border/25 bg-transparent hover:bg-surface-container-low/60 rounded-md text-foreground/90';
 
   return (
     <div
@@ -587,7 +587,7 @@ function ScriptCommandCompactRow({
               // Menu portals bubble through React but are outside the row.
               if (event.currentTarget.contains(event.target as Node)) onSelectNode(node);
             }}
-            className={`flex min-h-10 w-full items-center gap-3 rounded-2xl border px-3.5 py-2 text-xs transition-all cursor-pointer ${rowBgClass}`}
+            className={`flex min-h-7 w-full items-center gap-2.5 px-2.5 py-1 text-xs transition-all cursor-pointer ${rowBgClass}`}
           >
             {/* Index & hover Play button */}
             <div className="relative flex h-5 w-7 shrink-0 items-center justify-center font-mono text-[11px] font-bold text-muted-foreground">
@@ -1088,47 +1088,29 @@ export function ScriptCommandStream({
   return (
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
       <div className="pointer-events-none absolute inset-0 opacity-[0.03] ollaic-dot-grid" />
-      <div className="relative z-10 flex h-11 shrink-0 items-center justify-between border-b border-border bg-card/80 px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 text-xs font-extrabold tracking-wide text-on-surface-variant">
-            {isCompact ? '剧本视图' : '指令卡片'}
-          </span>
-          <div className="flex gap-2">
-            {(() => {
-              const header = sceneHeaders?.[currentSceneName];
-              const chapter = header?.chapter?.trim() || '';
-              if (chapter) {
-                return (
-                  <span className="rounded-full bg-secondary/12 px-2.5 py-0.5 text-[10.5px] font-bold text-primary">
-                    {chapter}
-                  </span>
-                );
-              }
-              return null;
-            })()}
-            <span className="rounded-full bg-surface-container px-2.5 py-0.5 text-[10.5px] font-bold text-on-surface-variant">
-              {currentSceneName.replace(/\.txt$/, '')}
+      {/* Sub-bar - Exactly 40px (h-10) aligned with DetailPanel and Agent headers */}
+      <div className="relative z-10 flex h-10 shrink-0 items-center justify-between border-b border-border bg-surface-container-low/70 px-4 text-xs select-none">
+        <div className="flex items-center gap-2">
+          {query ? (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10.5px] font-bold text-primary">
+              匹配: {visibleNodes.length} / {nodes.length}
             </span>
-          </div>
+          ) : (
+            <span className="text-xs font-semibold text-foreground/80">
+              大纲分节 · 共 {sections.length} 个小节
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-3 text-on-surface-variant/60">
+        <div className="flex items-center gap-2">
           {hasMultipleSections && !query && (
             <button
               type="button"
               onClick={collapsedSectionIds.size > 0 ? expandAllSections : collapseAllSections}
-              className="rounded-full border border-border bg-surface-container-low px-3 py-0.5 text-[11px] font-bold text-muted-foreground hover:bg-surface-container hover:text-foreground transition-colors"
+              className="rounded-md border border-border/70 bg-surface-container px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-surface-container-high transition-colors cursor-pointer"
             >
               {collapsedSectionIds.size > 0 ? '全部展开' : '全部折叠'}
             </button>
           )}
-          {query && (
-            <span className="rounded-full bg-primary-container/50 px-2.5 py-0.5 text-[10.5px] font-bold text-primary">
-              {visibleNodes.length} / {nodes.length}
-            </span>
-          )}
-          <span className="font-mono-family text-[11px] font-bold text-muted-foreground">
-            {nodes.length} 条指令
-          </span>
         </div>
       </div>
 
@@ -1221,7 +1203,7 @@ export function ScriptCommandStream({
                 )}
 
                 {!isSectionCollapsed && (
-                  <div className={isCompact ? 'space-y-1.5' : 'space-y-6'}>
+                  <div className={isCompact ? 'space-y-0.5' : 'space-y-6'}>
                     {section.items.map(({ node, index }) => {
                       if (absorbedIds.has(node.id)) return null;
                       const Icon = commandIconFor(node.type);
