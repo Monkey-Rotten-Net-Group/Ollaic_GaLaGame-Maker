@@ -859,6 +859,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         contextBudget,
         meaningfulHistory.length - 1,
       );
+      if (fitted.trace.overBudget) {
+        throw new Error(
+          'This request exceeds the model context window even after removing conversation history. Shorten the active scene or prompt, then try again.',
+        );
+      }
       activeDigest = fitted.effectiveDigest;
       historyMessages = fitted.retainedMessages;
       setDigest(activeDigest);
@@ -869,6 +874,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
       ];
       trace.context = fitted.trace;
+    }
+    if (trace.context.overBudget) {
+      throw new Error(
+        'This request exceeds the model context window even after removing conversation history. Shorten the active scene or prompt, then try again.',
+      );
     }
 
     // Append a finished turn (its text + tool calls) as a step on the assistant
@@ -1150,6 +1160,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         contextBudget,
         meaningfulHistory.length - 1,
       );
+      if (fitted.trace.overBudget) {
+        throw new Error(
+          'This request exceeds the model context window even after removing conversation history. Shorten the active scene or prompt, then try again.',
+        );
+      }
       activeDigest = fitted.effectiveDigest;
       historyMessages = fitted.retainedMessages;
       setDigest(activeDigest);
@@ -1160,6 +1175,11 @@ export function useAiAgent(params: UseAiAgentParams) {
         { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
       ];
       trace.context = fitted.trace;
+    }
+    if (trace.context.overBudget) {
+      throw new Error(
+        'This request exceeds the model context window even after removing conversation history. Shorten the active scene or prompt, then try again.',
+      );
     }
     for (let attempt = 0; attempt <= MAX_LEGACY_REPAIRS; attempt += 1) {
       if (!ownsRun(runId)) return;
@@ -1359,6 +1379,23 @@ export function useAiAgent(params: UseAiAgentParams) {
               initialPartition.retainedCount,
             );
           }
+          if (postPartition.trace.overBudget) return null;
+          const summarizedIds = new Set(parsed.sourceMessageIds);
+          const summaryMissesCompactedHistory = [...postPartition.compactedIds]
+            .some((id) => !summarizedIds.has(id));
+          if (summaryMissesCompactedHistory) {
+            postPartition = partitionHistoryForBudget(
+              messages,
+              digest,
+              system,
+              currentSceneName,
+              text,
+              tools,
+              budget,
+              initialPartition.retainedCount,
+            );
+          }
+          if (postPartition.trace.overBudget) return null;
           setDigest(postPartition.effectiveDigest);
           return {
             digest: postPartition.effectiveDigest,
@@ -1372,6 +1409,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       // The local digest is the intentional fallback when summary generation fails.
     }
     if (!ownsRun(runId) || cancelledRef.current) return null;
+    if (initialPartition.trace.overBudget) return null;
     setDigest(initialPartition.fallback);
     return {
       digest: initialPartition.fallback,
