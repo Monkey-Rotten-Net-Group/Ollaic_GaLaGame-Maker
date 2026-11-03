@@ -59,4 +59,19 @@ describe('partitionHistoryForBudget', () => {
     );
     expect(result.trace.overBudget).toBe(false);
   });
+
+  it('reports when system and current prompt exceed the budget without history', () => {
+    const result = partitionHistoryForBudget(
+      history(1, 20),
+      null,
+      'a'.repeat(140_000),
+      'start.txt',
+      'continue',
+      [],
+      BUDGET,
+    );
+
+    expect(result.retainedCount).toBe(0);
+    expect(result.trace.overBudget).toBe(true);
+  });
 });
