@@ -1,9 +1,10 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowUp, Brain, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Square, Trash2, Wand2,
-  Bot, Check, ChevronDown, Sliders, Sparkles, Workflow,
+  Bot, Check, ChevronDown, Pin, Sliders, Sparkles, Workflow, X,
 } from 'lucide-react';
 import type { SceneHeader } from '../../lib/webgal-ipc';
+import type { WebGalNode } from '../../lib/webgal-types';
 import { useChatModelSelection } from '../../hooks/useChatModelSelection';
 import { useAiAgent } from '../../hooks/useAiAgent';
 import type { useFlowRunController } from '../../hooks/useFlowRunController';
@@ -24,6 +25,14 @@ export interface AiAssistantPanelProps {
   aiAgent: ReturnType<typeof useAiAgent>;
   projectPath: string | null;
   sceneHeaders: Record<string, SceneHeader>;
+  currentSceneName?: string;
+  selectedNode?: WebGalNode | null;
+  selectedNodeIndex?: number;
+  onClearContext?: () => void;
+  onClose?: () => void;
+  onToggleWorkflowBoard?: () => void;
+  onInsertSnippet?: (text: string) => void;
+  onDiffSnippet?: (text: string) => void;
   onOpenSettings: () => void;
   onOpenMemory: () => void;
   onSend: (text: string) => void;
@@ -155,7 +164,7 @@ const AiInputBox = memo(function AiInputBox({
   return (
     <>
       {traySlot}
-      <div className="relative mt-2">
+      <div className="relative mt-1">
         {/* Slash Command Suggestions Palette */}
         {slashMenuOpen && matchingCommands.length > 0 && (
           <div
@@ -230,13 +239,13 @@ const AiInputBox = memo(function AiInputBox({
           aria-label="AI 创作输入"
         />
         {(attachSlot || modelSlot) && (
-          <div className="absolute bottom-3 left-2.5 flex items-center gap-1.5">
+          <div className="absolute bottom-2.5 left-2.5 right-11 flex min-w-0 items-center gap-1.5 overflow-hidden">
             {attachSlot}
             <button
               type="button"
               onClick={onTogglePlanMode}
               disabled={locked || busy}
-              className={`flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+              className={`flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors disabled:opacity-40 ${
                 isPlanMode
                   ? 'border-primary/40 bg-primary/15 text-primary shadow-xs'
                   : 'border-border bg-surface-container-low text-muted-foreground hover:bg-secondary-container/60 hover:text-foreground'
@@ -244,17 +253,17 @@ const AiInputBox = memo(function AiInputBox({
               title="规划模式：触发 Stage 1 企划定锚或全剧规划 (/workflow)"
               aria-pressed={isPlanMode}
             >
-              <Sparkles className="h-3 w-3" />
-              <span>规划模式</span>
+              <Sparkles className="h-3 w-3 shrink-0" />
+              <span className="hidden xs:inline">规划模式</span>
             </button>
-            {modelSlot}
+            <div className="min-w-0 flex-1 truncate">{modelSlot}</div>
           </div>
         )}
         <button
           type="button"
           onClick={submit}
           disabled={locked || (!busy && (!draft.trim() || pending))}
-          className="absolute bottom-3 right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-secondary-container text-black transition-colors hover:bg-secondary-container/80 disabled:opacity-40"
+          className="absolute bottom-2.5 right-2.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary-container text-black transition-colors hover:bg-secondary-container/80 disabled:opacity-40"
           aria-label={busy ? '停止生成' : '发送（Enter）'}
           title={busy ? '停止生成' : '发送（Enter）'}
         >
@@ -265,10 +274,46 @@ const AiInputBox = memo(function AiInputBox({
   );
 });
 
+function getNodeTypeLabel(node: WebGalNode | null | undefined): string {
+  if (!node) return '行';
+  switch (node.type) {
+    case 'dialogue':
+      return node.character ? `${node.character} 对白` : '对白';
+    case 'changeBg':
+      return '背景';
+    case 'changeFigure':
+      return '立绘';
+    case 'bgm':
+      return '音乐';
+    case 'playEffect':
+      return '音效';
+    case 'choose':
+      return '分支';
+    case 'changeScene':
+      return '跳转';
+    case 'comment':
+      return '注释';
+    case 'intro':
+      return '黑底字';
+    case 'setVar':
+      return '变量';
+    default:
+      return node.type;
+  }
+}
+
 export function AiAssistantPanel({
   aiAgent,
   projectPath,
   sceneHeaders,
+  currentSceneName,
+  selectedNode,
+  selectedNodeIndex,
+  onClearContext,
+  onClose,
+  onToggleWorkflowBoard,
+  onInsertSnippet,
+  onDiffSnippet,
   onOpenSettings,
   onOpenMemory,
   onSend,
@@ -299,99 +344,227 @@ export function AiAssistantPanel({
 
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
 
+  const [contextScope, setContextScope] = useState<'node' | 'scene' | 'full'>('node');
+
+  useEffect(() => {
+    if (selectedNode) {
+      setContextScope('node');
+    }
+  }, [selectedNode?.id]);
+
+  const nodeIndexLabel =
+    selectedNodeIndex !== undefined && selectedNodeIndex >= 0
+      ? String(selectedNodeIndex + 1).padStart(2, '0')
+      : '01';
+  const nodeTypeLabel = getNodeTypeLabel(selectedNode);
+  const sceneChapter = currentSceneName ? sceneHeaders?.[currentSceneName]?.chapter : '';
+
   return (
     <aside className={`flex min-h-0 flex-1 flex-col bg-surface-container-lowest ${embedded ? 'w-full' : 'w-80 shrink-0 border-l border-border'}`}>
-      <div className="flex h-10 items-center justify-between border-b border-border px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary-container/35 text-[var(--nav-active)]">
-            <Wand2 className="h-3.5 w-3.5" />
-          </div>
-          <span className="truncate text-sm font-semibold text-on-surface" title={activeSession?.title}>
-            {activeSession?.title ?? 'AI 创作助手'}
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button type="button" onClick={onOpenMemory} disabled={!projectPath || aiAgent.committing} className="ollaic-icon-button h-7 w-7 disabled:opacity-40" aria-label="管理项目记忆" title="项目记忆"><Brain className="h-4 w-4" /></button>
+      {/* Solid Single-line Header (Height 40px) */}
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-3 gap-2 bg-surface-container-low/80 select-none">
+        {/* Left: Assistant Session Dropdown */}
+        <DropdownMenu open={sessionMenuOpen} onOpenChange={setSessionMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={aiAgent.busy || aiAgent.committing}
+              className="flex min-w-0 max-w-[170px] sm:max-w-[200px] items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-foreground hover:bg-surface-container transition-colors disabled:opacity-50"
+              title={`当前会话: ${activeSession?.title || '新对话'} (点击切换历史)`}
+              aria-label="切换 Agent 会话"
+            >
+              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                <Bot className="size-3.5" />
+              </div>
+              <span className="truncate text-xs font-bold text-foreground">
+                Agent · {activeSession?.title ?? '新对话'}
+              </span>
+              <ChevronDown className="size-3 shrink-0 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuItem
+              onClick={() => {
+                setSessionMenuOpen(false);
+                aiAgent.startNewSession();
+              }}
+              className="cursor-pointer"
+            >
+              <MessageSquarePlus className="h-4 w-4 mr-1.5 text-primary" />
+              <span>新建会话</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs text-muted-foreground">历史会话</DropdownMenuLabel>
+            <div className="max-h-64 overflow-y-auto">
+              {aiAgent.sessions.map((session) => (
+                <div
+                  key={session.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setSessionMenuOpen(false);
+                    aiAgent.selectSession(session.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSessionMenuOpen(false);
+                      aiAgent.selectSession(session.id);
+                    }
+                  }}
+                  className={`group flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs text-foreground hover:bg-secondary-container/45 ${
+                    session.id === aiAgent.activeId ? 'bg-secondary-container/50 font-semibold' : ''
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                  {session.id === aiAgent.activeId && (
+                    <Check className="h-3.5 w-3.5 text-primary shrink-0 mr-0.5" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSessionMenuOpen(false);
+                      setRenameTarget(session);
+                      setRenameValue(session.title);
+                    }}
+                    className="shrink-0 rounded p-0.5 text-foreground opacity-60 hover:bg-secondary-container hover:opacity-100"
+                    aria-label="重命名会话"
+                    title="重命名"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSessionMenuOpen(false);
+                      setDeleteTarget(session);
+                    }}
+                    className="shrink-0 rounded p-0.5 text-foreground opacity-60 hover:bg-error-container hover:text-on-error-container hover:opacity-100"
+                    aria-label="删除会话"
+                    title="删除"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Center: Quiet, leaving airy space */}
+        <div className="min-w-0 flex-1" />
+
+        {/* Right: Actions Group: [+], [🧠], [✕] */}
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={aiAgent.startNewSession}
             disabled={aiAgent.busy || aiAgent.committing}
-            className="ollaic-icon-button h-7 w-7 disabled:opacity-40"
-            aria-label="新建 AI 会话"
-            title="新建会话"
+            className="ollaic-icon-button h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-surface-container transition-all disabled:opacity-40"
+            aria-label="新建会话"
+            title="新建对话 (+)"
           >
-            <MessageSquarePlus className="h-4 w-4" />
+            <MessageSquarePlus className="size-4" />
           </button>
-          <DropdownMenu open={sessionMenuOpen} onOpenChange={setSessionMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                disabled={aiAgent.busy || aiAgent.committing}
-                className="ollaic-icon-button h-7 w-7 text-foreground disabled:opacity-40"
-                aria-label="AI 会话管理"
-                title="会话管理"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem onClick={() => { setSessionMenuOpen(false); aiAgent.startNewSession(); }}>
-                <MessageSquarePlus className="h-4 w-4" />
-                <span>新建会话</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>历史会话</DropdownMenuLabel>
-              <div className="max-h-64 overflow-y-auto">
-                {aiAgent.sessions.map((session) => (
-                  <div
-                    key={session.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => { setSessionMenuOpen(false); aiAgent.selectSession(session.id); }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setSessionMenuOpen(false);
-                        aiAgent.selectSession(session.id);
-                      }
-                    }}
-                    className={`group flex cursor-pointer items-center gap-1 rounded-sm px-2 py-1.5 text-sm text-foreground hover:bg-secondary-container/45 ${session.id === aiAgent.activeId ? 'bg-secondary-container/50' : ''}`}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSessionMenuOpen(false);
-                        setRenameTarget(session);
-                        setRenameValue(session.title);
-                      }}
-                      className="shrink-0 rounded p-0.5 text-foreground opacity-60 hover:bg-secondary-container hover:opacity-100"
-                      aria-label="重命名会话"
-                      title="重命名"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSessionMenuOpen(false);
-                        setDeleteTarget(session);
-                      }}
-                      className="shrink-0 rounded p-0.5 text-foreground opacity-60 hover:bg-error-container hover:text-on-error-container hover:opacity-100"
-                      aria-label="删除会话"
-                      title="删除"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <button
+            type="button"
+            onClick={onOpenMemory}
+            disabled={!projectPath || aiAgent.committing}
+            className="ollaic-icon-button h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-surface-container transition-all disabled:opacity-40"
+            aria-label="设定集与世界观记忆库"
+            title="角色卡与设定集记忆库"
+          >
+            <Brain className="size-4 text-primary" />
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="ollaic-icon-button h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-surface-container transition-all"
+              aria-label="收起面板"
+              title="收起 AI 面板"
+            >
+              <X className="size-4" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Persistent Context Tag (升级为行级响应式交互芯片) */}
+      {currentSceneName && (
+        <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/50 bg-surface-container-lowest px-3 text-[11px] text-muted-foreground select-none">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="text-[10px] opacity-70">关联:</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10.5px] font-medium text-primary hover:bg-primary/20 transition-all cursor-pointer shadow-2xs"
+                  title="点击切换 AI 上下文关联范围"
+                  aria-label="切换上下文关联范围"
+                >
+                  <Pin className="size-2.5 text-primary shrink-0" />
+                  <span className="font-mono font-semibold">
+                    {contextScope === 'node' && selectedNode
+                      ? `Line ${nodeIndexLabel} [${nodeTypeLabel}]`
+                      : contextScope === 'scene'
+                        ? `场景 (${sceneChapter || currentSceneName.replace(/\.txt$/, '')})`
+                        : `全文 (${currentSceneName.replace(/\.txt$/, '')}.txt)`}
+                  </span>
+                  <ChevronDown className="size-2.5 opacity-70 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 text-xs">
+                <DropdownMenuLabel className="text-[10.5px] text-muted-foreground">AI 关联范围</DropdownMenuLabel>
+                {selectedNode && (
+                  <DropdownMenuItem
+                    onClick={() => setContextScope('node')}
+                    className="flex items-center justify-between cursor-pointer text-xs"
+                  >
+                    <span className="font-mono">当前选中项 (Line {nodeIndexLabel} · {nodeTypeLabel})</span>
+                    {contextScope === 'node' && <Check className="size-3.5 text-primary" />}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => setContextScope('scene')}
+                  className="flex items-center justify-between cursor-pointer text-xs"
+                >
+                  <span>仅当前场景 ({sceneChapter || currentSceneName.replace(/\.txt$/, '')})</span>
+                  {contextScope === 'scene' && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setContextScope('full')}
+                  className="flex items-center justify-between cursor-pointer text-xs"
+                >
+                  <span>全文范围 ({currentSceneName})</span>
+                  {contextScope === 'full' && <Check className="size-3.5 text-primary" />}
+                </DropdownMenuItem>
+                {selectedNode && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setContextScope('full');
+                        onClearContext?.();
+                      }}
+                      className="text-muted-foreground cursor-pointer text-xs"
+                    >
+                      <X className="size-3 mr-1" />
+                      <span>清除选中行</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <span className="text-[10px] text-muted-foreground/60 font-mono">
+            {contextScope === 'node' && selectedNode ? '行级聚焦' : '场景级'}
+          </span>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {workflowController && (
@@ -411,6 +584,8 @@ export function AiAssistantPanel({
               stopped={message.stopped}
               diff={message.diff}
               attachments={message.attachments}
+              onInsertSnippet={onInsertSnippet}
+              onDiffSnippet={onDiffSnippet}
             />
           </div>
         ))}
@@ -457,7 +632,7 @@ export function AiAssistantPanel({
         )}
       </div>
 
-      <div className="border-t border-border bg-surface-container-low p-4">
+      <div className="border-t border-border bg-surface-container-low p-3.5">
         <AiInputBox
           value={aiAgent.input}
           busy={aiAgent.busy}
@@ -492,15 +667,15 @@ export function AiAssistantPanel({
                 <button
                   type="button"
                   disabled={aiAgent.busy || aiAgent.committing || modelSelection.switching}
-                  className="flex h-6 items-center gap-1 rounded-full border border-border bg-surface-container-low px-2 text-[11px] font-mono-family text-muted-foreground hover:bg-secondary-container/60 hover:text-foreground transition-colors disabled:opacity-40"
+                  className="flex h-6 min-w-0 max-w-[100px] xs:max-w-[125px] sm:max-w-[145px] items-center gap-1 rounded-full border border-border bg-surface-container-low px-2 text-[11px] font-mono-family text-muted-foreground hover:bg-secondary-container/60 hover:text-foreground transition-colors disabled:opacity-40"
                   title={`当前对话模型: ${currentModel || '默认'}`}
                   aria-label="切换对话模型"
                 >
-                  <Bot className="h-3 w-3 text-primary" />
-                  <span className="max-w-[110px] truncate">
+                  <Bot className="h-3 w-3 shrink-0 text-primary" />
+                  <span className="min-w-0 truncate">
                     {modelSelection.switching ? '切换中…' : currentModel || '选择模型'}
                   </span>
-                  <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+                  <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-60" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top" className="w-56">
