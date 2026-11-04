@@ -33,30 +33,106 @@ function assertRange(startLine: number, endLine: number, total: number): void {
   }
 }
 
-export function resolveLineWithAnchor(lines: string[], lineNo: number, anchorText?: string): ResolvedLine {
-  if (!Number.isInteger(lineNo) || lineNo < 1) throw new EditorPatchError(`行号 ${lineNo} 不是有效正整数`);
-  if (!anchorText) {
-    if (lineNo > lines.length) throw new EditorPatchError(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
-    return { line: lineNo, corrected: false };
-  }
+function normalizeScriptLine(value: string): string {
+  return value
+    .trim()
+    .replace(/;+\s*$/, '')
+    .trim();
+}
 
-  if (lineNo <= lines.length && lines[lineNo - 1] === anchorText) {
+function stripDisplayLinePrefix(value: string, lines: string[]): string | null {
+  const match = /^(\d+):\s+(.+)$/.exec(value.trim());
+  if (!match) return null;
+  const [, digits, rawRemainder] = match;
+  const speakerPrefix = `${digits}:`;
+  if (lines.some((line) => line.trim().startsWith(speakerPrefix))) {
+    return null;
+  }
+  const remainder = normalizeScriptLine(rawRemainder);
+  if (!remainder) return null;
+  if (remainder.startsWith(';') || remainder === 'end' || remainder.includes(':')) {
+    return remainder;
+  }
+  return null;
+}
+
+function resolveCandidateAgainstLines(
+  lines: string[],
+  lineNo: number,
+  candidate: string,
+  rawAnchor: string,
+): ResolvedLine | null {
+  if (lineNo <= lines.length && lines[lineNo - 1] === candidate) {
     return { line: lineNo, corrected: false };
   }
 
   const start = Math.max(1, lineNo - 3);
   const end = Math.min(lines.length, lineNo + 3);
+  const nearbyMatches: number[] = [];
   for (let line = start; line <= end; line += 1) {
-    if (lines[line - 1] === anchorText) return { line, corrected: true };
+    if (lines[line - 1] === candidate) nearbyMatches.push(line);
+  }
+  if (nearbyMatches.length === 1) return { line: nearbyMatches[0], corrected: true };
+  if (nearbyMatches.length > 1) {
+    throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${rawAnchor}`);
   }
 
   const matches: number[] = [];
   lines.forEach((line, index) => {
-    if (line === anchorText) matches.push(index + 1);
+    if (line === candidate) matches.push(index + 1);
   });
   if (matches.length === 1) return { line: matches[0], corrected: true };
+  if (matches.length > 1) {
+    throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${rawAnchor}`);
+  }
 
-  if (matches.length > 1) throw new EditorPatchError(`anchorText 匹配到多行，无法确定目标行：${anchorText}`);
+  return null;
+}
+
+export function resolveLineWithAnchor(
+  lines: string[],
+  lineNo: number,
+  anchorText?: string,
+): ResolvedLine {
+  if (!Number.isInteger(lineNo) || lineNo < 1) {
+    throw new EditorPatchError(`行号 ${lineNo} 不是有效正整数`);
+  }
+  if (!anchorText) {
+    if (lineNo > lines.length) {
+      throw new EditorPatchError(`行号 ${lineNo} 超出当前脚本范围 1-${lines.length}`);
+    }
+    return { line: lineNo, corrected: false };
+  }
+
+  const exactMatch = resolveCandidateAgainstLines(lines, lineNo, anchorText, anchorText);
+  if (exactMatch) return exactMatch;
+
+  // Tolerate omitted trailing `;` semicolons while preserving speaker/command prefixes,
+  // and only strip copied `22: ` display line numbers when the remainder is still a
+  // complete WebGAL line and the number is not a speaker in the script.
+  const normalizedLines = lines.map(normalizeScriptLine);
+  const normalizedAnchor = normalizeScriptLine(anchorText);
+  if (normalizedAnchor.length > 0) {
+    const normalizedMatch = resolveCandidateAgainstLines(
+      normalizedLines,
+      lineNo,
+      normalizedAnchor,
+      anchorText,
+    );
+    if (normalizedMatch) return normalizedMatch;
+  }
+
+  const strippedAnchor = stripDisplayLinePrefix(anchorText, lines);
+  if (strippedAnchor) {
+    const strippedMatch = resolveCandidateAgainstLines(
+      normalizedLines,
+      lineNo,
+      strippedAnchor,
+      anchorText,
+    );
+    if (strippedMatch) return strippedMatch;
+  }
+
   throw new EditorPatchError(`无法定位 anchorText：${anchorText}`);
 }
 

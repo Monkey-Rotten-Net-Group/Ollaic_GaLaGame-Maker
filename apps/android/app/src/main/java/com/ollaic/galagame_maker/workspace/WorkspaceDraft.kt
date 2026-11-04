@@ -2,23 +2,32 @@ package com.ollaic.galagame_maker.workspace
 
 import java.util.UUID
 
-enum class BlockKind { Dialogue, Narration, Note }
+enum class BlockKind { Dialogue, Narration, Note, Command }
 
 data class ScriptBlock(
   val id: String = UUID.randomUUID().toString(),
   val kind: BlockKind,
   val speaker: String = "",
   val text: String,
-)
+  val source: String? = null,
+  val command: String = "raw",
+  val preview: String? = null,
+) {
+  val isBlankLine: Boolean get() = kind == BlockKind.Command && text.isBlank()
+}
 
 data class DraftScene(
   val id: String = UUID.randomUUID().toString(),
   val name: String,
   val blocks: List<ScriptBlock> = emptyList(),
-)
+  val fileName: String = "",
+) {
+  val visibleBlocks: List<ScriptBlock> get() = blocks.filterNot { it.isBlankLine }
+}
 
 data class WorkspaceDraft(
   val scenes: List<DraftScene>,
+  // Preserve notes from legacy drafts and existing projects without an editor UI.
   val notes: String = "",
 ) {
   fun validate() {
@@ -27,7 +36,7 @@ data class WorkspaceDraft(
     scenes.forEach { scene ->
       require(scene.id.isNotBlank() && scene.name.isNotBlank()) { "Invalid scene" }
       require(scene.blocks.map { it.id }.distinct().size == scene.blocks.size) { "Duplicate block IDs" }
-      require(scene.blocks.all { it.id.isNotBlank() && it.text.isNotBlank() }) { "Invalid script block" }
+      require(scene.blocks.all { it.id.isNotBlank() && (it.source != null || it.kind == BlockKind.Command || it.text.isNotBlank()) }) { "Invalid script block" }
     }
   }
 }

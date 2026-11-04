@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-// UI drafts are separate from WebGAL project files and the future Rust adapter.
+// Library presentation metadata stays native; WebGAL content lives in the shared core.
 class HomeDraftStore(directory: File) {
   private val file = AtomicFile(File(directory, "native-home-drafts.json"))
   private val lock = Mutex()

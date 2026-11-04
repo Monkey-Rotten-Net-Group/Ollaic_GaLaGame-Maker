@@ -31,8 +31,6 @@ use tauri_plugin_opener::OpenerExt;
 use webgal::runtime_manager::{self, RuntimeInfo};
 use webgal::runtime_server::RuntimeServer;
 
-const DEFAULT_WEBGAL_VERSION: &str = "4.6.0";
-
 #[tauri::command]
 async fn get_runtime_url(server: tauri::State<'_, RuntimeServer>) -> Result<String, String> {
     Ok(server.url())
@@ -49,10 +47,9 @@ async fn set_runtime_project(
 
 #[tauri::command]
 async fn set_runtime_preview_entry(
-    server: tauri::State<'_, RuntimeServer>,
-    script: Option<String>,
+    _server: tauri::State<'_, RuntimeServer>,
+    _script: Option<String>,
 ) -> Result<(), String> {
-    server.set_preview_entry(script).await;
     Ok(())
 }
 
@@ -108,7 +105,7 @@ async fn install_runtime(
     server: tauri::State<'_, RuntimeServer>,
     version: Option<String>,
 ) -> Result<RuntimeInfo, String> {
-    let version = version.unwrap_or_else(|| DEFAULT_WEBGAL_VERSION.to_string());
+    let version = version.unwrap_or_else(|| ollaic_runtime::engine_version().to_string());
     let target = user_install_target(&app)?;
     runtime_manager::install(&version, &target).await?;
     server.set_template_dir(target.clone()).await;
@@ -218,10 +215,9 @@ pub fn run() {
             ai::commands::set_ai_image_config,
             ai::commands::get_ai_tts_config,
             ai::commands::set_ai_tts_config,
-            ai::commands::get_ai_video_config,
-            ai::commands::set_ai_video_config,
-            ai::commands::generate_video,
             ai::commands::validate_ai_config,
+            ai::commands::list_ai_chat_models,
+            ai::commands::list_ai_provider_profiles,
             ai::commands::ai_generate_image,
             ai::commands::ai_generate_tts,
             ai::commands::ai_chat_stream,

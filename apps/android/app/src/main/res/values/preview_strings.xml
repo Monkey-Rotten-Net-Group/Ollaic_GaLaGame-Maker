@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="preview_title">试玩预览</string>
+  <string name="preview_back">返回编辑器</string>
+  <string name="preview_restart">从头重新运行</string>
+  <string name="preview_fullscreen">全屏</string>
+  <string name="preview_exit_fullscreen">退出全屏</string>
+  <string name="preview_checking">准备引擎</string>
+  <string name="preview_engine_missing">尚未安装试玩引擎</string>
+  <string name="preview_downloading">正在下载引擎</string>
+  <string name="preview_installing">正在安装引擎</string>
+  <string name="preview_loading">正在加载游戏</string>
+  <string name="preview_paused">预览已暂停</string>
+  <string name="preview_failed">预览启动失败</string>
+  <string name="preview_download">下载引擎</string>
+  <string name="preview_import">导入引擎 ZIP</string>
+  <string name="preview_navigation_blocked">预览页面已离开本地游戏地址</string>
+  <string name="preview_renderer_failed">游戏渲染已停止，请重新加载</string>
+</resources>

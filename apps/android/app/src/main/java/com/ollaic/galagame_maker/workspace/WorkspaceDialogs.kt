@@ -1,73 +1,206 @@
 package com.ollaic.galagame_maker.workspace
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ollaic.galagame_maker.R
+import com.ollaic.core.*
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BlockEditorSheet(block: ScriptBlock?, onDismiss: () -> Unit, onSave: (BlockKind, String, String) -> Unit) {
-  var kind by rememberSaveable(block?.id) { mutableStateOf(block?.kind ?: BlockKind.Dialogue) }
-  var speaker by rememberSaveable(block?.id) { mutableStateOf(block?.speaker.orEmpty()) }
-  var text by rememberSaveable(block?.id) { mutableStateOf(block?.text.orEmpty()) }
-  ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).imePadding()) {
+fun BlockEditorSheet(block: ScriptBlock?, scenes: List<DraftScene>, sceneId: String?, assets: List<AssetInfo>, characters: List<CharacterInfo>,
+  root: File, enabled: Boolean, onImport: (String) -> Unit, onManageCharacters: () -> Unit, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+  val initial = remember(block) {
+    block?.source ?: block?.let { editLine("", it.kind.name, it.speaker, it.text) }.orEmpty()
+  }
+  val parsed = remember(block?.id) { runCatching { readCommand(initial) }.getOrNull() }
+  var edit by rememberSaveable(block?.id, stateSaver = CommandEditSaver) { mutableStateOf(parsed ?: newCommand(CommandKind.DIALOGUE)) }
+  var sourceMode by rememberSaveable(block?.id) { mutableStateOf(initial.isNotEmpty() && parsed == null) }
+  var original by rememberSaveable(block?.id) { mutableStateOf(initial) }
+  var source by rememberSaveable(block?.id) { mutableStateOf(initial) }
+  var observedSource by rememberSaveable(block?.id) { mutableStateOf(initial) }
+  var sourceConflict by rememberSaveable(block?.id) { mutableStateOf(false) }
+  var error by remember { mutableStateOf<String?>(null) }
+  var templates by remember { mutableStateOf(false) }
+
+  fun useProjectSource() {
+    val incoming = runCatching { readCommand(initial) }.getOrNull()
+    if (incoming != null) edit = incoming else sourceMode = true
+    original = initial
+    source = initial
+    observedSource = initial
+    sourceConflict = false
+    error = null
+  }
+
+  fun synchronize(): Boolean {
+    if (sourceConflict) return false
+    if (observedSource == initial) return true
+    val template = if (sourceMode) source else original
+    val merged = mergeCommandSource(observedSource, template, initial)
+    val before = runCatching { readCommand(observedSource) }.getOrNull()
+    val incoming = runCatching { readCommand(initial) }.getOrNull()
+    if (merged == null || (!sourceMode && (before == null || incoming == null))) {
+      sourceConflict = true
+      return false
+    }
+    if (!sourceMode) edit = mergeCommandFields(checkNotNull(before), edit, checkNotNull(incoming))
+    original = if (sourceMode) initial else merged
+    source = merged
+    observedSource = initial
+    error = null
+    return true
+  }
+
+  LaunchedEffect(initial) { synchronize() }
+  val sceneNames = scenes.map { it.fileName }
+  val labels = remember(scenes, sceneId) {
+    scenes.firstOrNull { it.id == sceneId }?.let { scene ->
+      scene.blocks.mapNotNull { block -> runCatching { readCommand(block.source.orEmpty()) }.getOrNull() }
+        .filter { it.kind == CommandKind.LABEL }.map { it.label }.distinct()
+    }.orEmpty()
+  }
+  val typeTitle = structuredCommands.firstOrNull { it.second == edit.kind }?.first ?: R.string.workspace_raw_command
+  EditorBottomSheet(onDismissRequest = onDismiss) {
+    Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 20.dp).imePadding()) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(if (block == null) R.string.workspace_add_block else R.string.workspace_edit_block), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        TextButton(enabled = text.isNotBlank(), onClick = { onSave(kind, speaker.trim(), text.trim()) }) {
+        TextButton(modifier = Modifier.testTag("command-save"), enabled = enabled && !sourceConflict && (!sourceMode || source.isNotBlank()), onClick = save@{
+          if (!synchronize()) return@save
+          try {
+            val rendered = if (sourceMode) source.also { require(it.isNotBlank()) } else editCommand(original, edit)
+            onSave(rendered)
+          } catch (failure: Exception) { error = failure.message }
+        }) {
           Icon(Icons.Outlined.Check, null, Modifier.size(18.dp))
           Spacer(Modifier.width(6.dp))
           Text(stringResource(R.string.home_save))
         }
       }
-      Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+      Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-          BlockKind.entries.forEachIndexed { index, value ->
-            SegmentedButton(selected = kind == value, onClick = { kind = value }, shape = SegmentedButtonDefaults.itemShape(index, BlockKind.entries.size)) {
-              Text(stringResource(value.title()))
+          listOf(R.string.command_form, R.string.workspace_source).forEachIndexed { index, title ->
+            val raw = index == 1
+            SegmentedButton(selected = sourceMode == raw, onClick = {
+              if (sourceMode != raw) try {
+                if (raw) source = runCatching { editCommand(original, edit) }.getOrElse { failure ->
+                  if (original.isEmpty() && edit == newCommand(edit.kind)) "" else throw failure
+                }
+                else {
+                  edit = if (source.isBlank()) newCommand(edit.kind) else readCommand(source)
+                  original = if (source.isBlank()) "" else source
+                }
+                sourceMode = raw
+                error = null
+              } catch (failure: Exception) { error = failure.message }
+            }, modifier = Modifier.testTag(if (raw) "command-mode-source" else "command-mode-form"), shape = SegmentedButtonDefaults.itemShape(index, 2)) {
+              Text(stringResource(title))
             }
           }
         }
-        AnimatedVisibility(visible = kind == BlockKind.Dialogue) {
-          OutlinedTextField(value = speaker, onValueChange = { speaker = it }, label = { Text(stringResource(R.string.workspace_speaker)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        if (!sourceMode) Box {
+          OutlinedButton(onClick = { templates = true }, modifier = Modifier.fillMaxWidth().testTag("command-type-picker")) {
+            Text(stringResource(typeTitle), Modifier.weight(1f))
+            Icon(Icons.Outlined.ExpandMore, null)
+          }
+          DropdownMenu(expanded = templates, onDismissRequest = { templates = false }, modifier = Modifier.heightIn(max = 320.dp)) {
+            structuredCommands.forEach { (title, kind) ->
+              DropdownMenuItem(modifier = Modifier.testTag("command-kind-${kind.name}"), text = { Text(stringResource(title)) }, onClick = {
+                if (kind != edit.kind) {
+                  val baseline = edit
+                  edit = newCommand(kind).let { fresh ->
+                    fresh.copy(
+                      content = if (kind in listOf(CommandKind.DIALOGUE, CommandKind.NARRATOR, CommandKind.COMMENT) && baseline.kind in listOf(CommandKind.DIALOGUE, CommandKind.NARRATOR, CommandKind.COMMENT)) baseline.content else fresh.content,
+                      speaker = baseline.speaker,
+                      scene = if (kind in listOf(CommandKind.CHANGE_SCENE, CommandKind.CALL_SCENE)) sceneNames.firstOrNull().orEmpty() else "",
+                      next = baseline.next, `when` = baseline.`when`,
+                    )
+                  }
+                }
+                sourceMode = false; templates = false; error = null
+              })
+            }
+          }
         }
-        OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text(stringResource(R.string.workspace_content)) }, minLines = 5, modifier = Modifier.fillMaxWidth())
+        if (sourceMode) {
+          OutlinedTextField(value = source, onValueChange = { source = it; error = null },
+            label = { Text(stringResource(R.string.workspace_source)) }, minLines = 8, modifier = Modifier.fillMaxWidth().testTag("command-source"),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
+        } else CommandFields(edit, sceneNames, labels, assets, characters, root, onImport, onManageCharacters, onChange = { edit = it; error = null })
+        error?.let { Text(it, Modifier.testTag("command-error"), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Spacer(Modifier.height(12.dp))
       }
       Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
+    }
+  }
+  if (sourceConflict) AlertDialog(
+    onDismissRequest = {},
+    title = { Text(stringResource(R.string.command_updated)) },
+    text = { Text(stringResource(R.string.command_source_conflict)) },
+    confirmButton = { TextButton(modifier = Modifier.testTag("command-use-update"), onClick = ::useProjectSource) {
+      Text(stringResource(R.string.command_use_update))
+    } },
+    dismissButton = { TextButton(modifier = Modifier.testTag("command-overwrite-update"), onClick = {
+      observedSource = initial
+      sourceConflict = false
+      error = null
+    }) { Text(stringResource(R.string.command_overwrite_update)) } },
+  )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SceneSourceSheet(scene: DraftScene, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+  var source by rememberSaveable(scene.id) { mutableStateOf(WorkspaceCodec.sources(WorkspaceDraft(listOf(scene))).single().source) }
+  EditorBottomSheet(onDismissRequest = onDismiss) {
+    Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 16.dp).imePadding()) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(scene.fileName, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        TextButton(onClick = { onSave(source) }) { Icon(Icons.Outlined.Check, null); Text(stringResource(R.string.home_save)) }
+      }
+      OutlinedTextField(value = source, onValueChange = { source = it }, modifier = Modifier.weight(1f).fillMaxWidth(),
+        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        label = { Text(stringResource(R.string.workspace_source)) })
+      Spacer(Modifier.height(16.dp).navigationBarsPadding())
     }
   }
 }
 
 @Composable
 fun SceneNameDialog(scene: DraftScene?, scenes: List<DraftScene>, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+  val keyboard = remember { KeyboardDismissGuard() }
   var name by rememberSaveable(scene?.id) { mutableStateOf(scene?.name.orEmpty()) }
-  val duplicate = scenes.any { it.id != scene?.id && it.name.equals(name.trim(), ignoreCase = true) }
+  val proposedFile = runCatching { com.ollaic.core.sceneFileName(name) }.getOrNull()
+  val duplicate = scenes.any { it.id != scene?.id && (it.name.equals(name.trim(), ignoreCase = true) || it.fileName.equals(proposedFile, ignoreCase = true)) }
+  val invalid = name.isNotBlank() && runCatching { com.ollaic.core.sceneFileName(name) }.isFailure
   AlertDialog(
-    onDismissRequest = onDismiss,
+    onDismissRequest = { if (!keyboard.consumeDismiss()) onDismiss() },
     title = { Text(stringResource(if (scene == null) R.string.workspace_new_scene else R.string.workspace_rename_scene)) },
     text = {
+      BindKeyboardDismiss(keyboard)
       OutlinedTextField(
         value = name, onValueChange = { name = it }, singleLine = true,
         label = { Text(stringResource(R.string.workspace_scene_name)) },
-        isError = duplicate,
-        supportingText = { if (duplicate) Text(stringResource(R.string.workspace_duplicate_scene)) },
-        modifier = Modifier.fillMaxWidth(),
+        isError = duplicate || invalid,
+        supportingText = { if (duplicate || invalid) Text(stringResource(if (duplicate) R.string.workspace_duplicate_scene else R.string.workspace_invalid_scene)) },
+        modifier = Modifier.fillMaxWidth().testTag("field-workspace_scene_name"),
       )
     },
-    confirmButton = { TextButton(enabled = name.isNotBlank() && !duplicate, onClick = { onSave(name.trim()) }) { Text(stringResource(R.string.home_save)) } },
+    confirmButton = { TextButton(modifier = Modifier.testTag("scene-name-save"), enabled = name.isNotBlank() && !duplicate && !invalid, onClick = { onSave(name.trim()) }) { Text(stringResource(R.string.home_save)) } },
     dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.home_cancel)) } },
   )
 }

@@ -1,8 +1,6 @@
 use super::chat_runs::ChatRunRegistry;
 use super::config::{self, AiConfig, AiProviderConfig};
-use super::gateway::transport::{
-    is_placeholder_base_url, resolved_base_url, resolved_chat_base_url,
-};
+use super::gateway::transport::{is_placeholder_base_url, resolved_chat_base_url};
 use super::gateway::types::ImageReference;
 // Re-exported: this module is the IPC facade, so callers keep importing the
 // media result type from here rather than reaching into the gateway.
@@ -74,6 +72,15 @@ pub struct AiToolCall {
 pub struct AiTurnResult {
     pub text: Option<String>,
     pub tool_calls: Vec<AiToolCall>,
+    pub usage: Option<AiUsage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiUsage {
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+    pub cached_prompt_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -158,6 +165,13 @@ pub fn get_ai_provider_capability(config: Option<AiConfig>) -> Result<ProviderCa
     capability_for_config(&config)
 }
 
+/// Every remembered per-provider profile, so the settings dialog can restore
+/// a provider's own Key and model pool when the user switches to it.
+#[tauri::command]
+pub fn list_ai_provider_profiles() -> config::ProviderProfiles {
+    config::load_profiles()
+}
+
 #[tauri::command]
 pub fn get_ai_image_config() -> AiProviderConfig {
     config::load_image_config()
@@ -176,120 +190,6 @@ pub fn get_ai_tts_config() -> AiProviderConfig {
 #[tauri::command]
 pub fn set_ai_tts_config(config: AiProviderConfig) -> Result<(), String> {
     config::save_tts_config(&config)
-}
-
-#[tauri::command]
-pub fn get_ai_video_config() -> AiProviderConfig {
-    config::load_video_config()
-}
-
-#[tauri::command]
-pub fn set_ai_video_config(config: AiProviderConfig) -> Result<(), String> {
-    config::save_video_config(&config)
-}
-
-/// MiniMax Hailuo video generation: create an asynchronous task, poll it,
-/// then download the returned MP4 through the same SSRF-safe media fetcher.
-#[tauri::command]
-pub async fn generate_video(prompt: String, model: String) -> Result<GeneratedMedia, String> {
-    let cfg = config::load_video_config();
-    validate_provider_config_basics(&cfg, "视频")?;
-    if !cfg.provider.eq_ignore_ascii_case("minimax") {
-        return Err("当前仅支持 MiniMax 视频生成".into());
-    }
-    let base = resolved_base_url(&cfg.provider, Modality::Video, &cfg.base_url);
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("创建视频客户端失败: {e}"))?;
-    let auth = cfg.api_key.trim();
-    let create = client
-        .post(format!("{}/video_generation", base.trim_end_matches('/')))
-        .bearer_auth(auth)
-        .json(&serde_json::json!({"model": model.trim(), "prompt": prompt.trim()}))
-        .send()
-        .await
-        .map_err(|e| format!("MiniMax 视频任务提交失败: {e}"))?;
-    let status = create.status();
-    let payload: serde_json::Value = create
-        .json()
-        .await
-        .map_err(|e| format!("读取 MiniMax 任务响应失败: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("MiniMax 视频任务提交失败 ({status}): {payload}"));
-    }
-    let task_id = payload
-        .get("task_id")
-        .and_then(|v| v.as_str())
-        .ok_or("MiniMax 响应缺少 task_id")?;
-    let query = format!(
-        "{}/query/video_generation?task_id={}",
-        base.trim_end_matches('/'),
-        urlencoding::encode(task_id)
-    );
-    for _ in 0..60 {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        let response: serde_json::Value = client
-            .get(&query)
-            .bearer_auth(auth)
-            .send()
-            .await
-            .map_err(|e| format!("查询 MiniMax 视频任务失败: {e}"))?
-            .json()
-            .await
-            .map_err(|e| format!("读取 MiniMax 任务状态失败: {e}"))?;
-        match response
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-        {
-            "Success" | "success" => {
-                let file_id = response
-                    .get("file_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or("MiniMax 成功响应缺少 file_id")?;
-                let file: serde_json::Value = client
-                    .get(format!(
-                        "{}/files/retrieve?file_id={}",
-                        base.trim_end_matches('/'),
-                        urlencoding::encode(file_id)
-                    ))
-                    .bearer_auth(auth)
-                    .send()
-                    .await
-                    .map_err(|e| format!("获取 MiniMax 视频文件失败: {e}"))?
-                    .json()
-                    .await
-                    .map_err(|e| format!("读取 MiniMax 视频文件失败: {e}"))?;
-                let url = file
-                    .get("file")
-                    .and_then(|v| v.get("download_url"))
-                    .and_then(|v| v.as_str())
-                    .ok_or("MiniMax 文件响应缺少 download_url")?;
-                let bytes = super::safe_media_fetch::fetch_media(
-                    url,
-                    &super::safe_media_fetch::SystemMediaDnsResolver,
-                    &super::safe_media_fetch::FetchPolicy {
-                        total_deadline: Duration::from_secs(HTTP_REQUEST_TIMEOUT_SECS),
-                        kind: super::safe_media_fetch::MediaKind::Video,
-                        allow_address: Box::new(|_, ip| {
-                            super::safe_media_fetch::is_public_download_ip(ip)
-                        }),
-                    },
-                )
-                .await?;
-                return Ok(GeneratedMedia {
-                    base64_data: base64::engine::general_purpose::STANDARD.encode(bytes),
-                    extension: "mp4".into(),
-                });
-            }
-            "Fail" | "Failed" | "failed" => {
-                return Err(format!("MiniMax 视频生成失败: {response}"))
-            }
-            _ => continue,
-        }
-    }
-    Err("MiniMax 视频生成超时".into())
 }
 
 #[tauri::command]
@@ -414,6 +314,24 @@ pub async fn validate_ai_config(config: AiConfig) -> Result<AiValidationResult, 
         Err(err) => {
             let message = err.to_string();
             log_ai_event("validate", &config, &endpoint, false, &message);
+            Err(message)
+        }
+    }
+}
+
+/// List the chat models the unsaved settings form can reach, for the
+/// "获取模型" button. Non-chat models are filtered out by `model_list`.
+#[tauri::command]
+pub async fn list_ai_chat_models(config: AiConfig) -> Result<Vec<String>, String> {
+    match super::model_list::fetch_chat_models(&config).await {
+        Ok((endpoint, models)) => {
+            let message = format!("获取到 {} 个对话模型", models.len());
+            log_ai_event("list_models", &config, &endpoint, true, &message);
+            Ok(models)
+        }
+        Err(message) => {
+            let endpoint = effective_endpoint(&config);
+            log_ai_event("list_models", &config, &endpoint, false, &message);
             Err(message)
         }
     }
@@ -582,6 +500,22 @@ pub(crate) async fn ai_chat_turn(
     match client.exec_chat(&cfg.model, request, Some(&options)).await {
         Ok(response) => {
             let text = response.first_text().map(|t| t.to_string());
+            let usage = Some(AiUsage {
+                prompt_tokens: response
+                    .usage
+                    .prompt_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+                completion_tokens: response
+                    .usage
+                    .completion_tokens
+                    .and_then(|value| u32::try_from(value).ok()),
+                cached_prompt_tokens: response
+                    .usage
+                    .prompt_tokens_details
+                    .as_ref()
+                    .and_then(|details| details.cached_tokens)
+                    .and_then(|value| u32::try_from(value).ok()),
+            });
             let tool_calls = response
                 .into_tool_calls()
                 .into_iter()
@@ -592,7 +526,11 @@ pub(crate) async fn ai_chat_turn(
                 })
                 .collect();
             log_ai_event("chat_turn", &cfg, &endpoint, true, "turn completed");
-            Ok(AiTurnResult { text, tool_calls })
+            Ok(AiTurnResult {
+                text,
+                tool_calls,
+                usage,
+            })
         }
         Err(err) => {
             let message = err.to_string();
@@ -826,6 +764,7 @@ pub(crate) async fn download_generated_media_legacy(
         let as_chat_config = AiConfig {
             provider: cfg.provider.clone(),
             model: cfg.model.clone(),
+            models: cfg.models.clone(),
             api_key: cfg.api_key.clone(),
             base_url: cfg.base_url.clone(),
             capabilities: None,
@@ -895,6 +834,7 @@ pub(crate) fn log_provider_event_legacy(
     let chat_cfg = AiConfig {
         provider: cfg.provider.clone(),
         model: model.to_string(),
+        models: cfg.models.clone(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
         capabilities: None,
@@ -946,6 +886,26 @@ fn parse_ai_log_line(line: &str) -> Option<AiLogOutput> {
     })
 }
 
+fn is_secret_trace_key(key: &str) -> bool {
+    let key_lower = key.trim().to_ascii_lowercase();
+    if key_lower.contains("apikey")
+        || key_lower.contains("api_key")
+        || key_lower == "key"
+        || key_lower.contains("authorization")
+        || key_lower.contains("secret")
+        || key_lower.contains("password")
+    {
+        return true;
+    }
+    if key_lower.contains("token") {
+        let is_token_count_metric = key_lower.ends_with("tokens")
+            || key_lower.ends_with("_tokens")
+            || key_lower == "tokens";
+        return !is_token_count_metric;
+    }
+    false
+}
+
 fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::String(s) => serde_json::Value::String(sanitize_trace_field(&s)),
@@ -956,13 +916,7 @@ fn sanitize_trace_value(value: serde_json::Value) -> serde_json::Value {
             let sanitized = map
                 .into_iter()
                 .map(|(key, value)| {
-                    let key_lower = key.to_ascii_lowercase();
-                    let value = if key_lower.contains("apikey")
-                        || key_lower.contains("api_key")
-                        || key_lower == "key"
-                        || key_lower.contains("token")
-                        || key_lower.contains("authorization")
-                    {
+                    let value = if is_secret_trace_key(&key) {
                         serde_json::Value::String("[REDACTED]".to_string())
                     } else {
                         sanitize_trace_value(value)

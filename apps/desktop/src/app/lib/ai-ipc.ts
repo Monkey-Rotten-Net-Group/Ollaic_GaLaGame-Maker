@@ -6,17 +6,28 @@ export type AiProvider =
   | 'anthropic'
   | 'gemini'
   | 'deepseek'
-  | 'groq'
   | 'xai'
-  | 'ollama'
-  | 'cohere'
   | 'custom';
+
+export interface ProviderCapabilityDeclaration {
+  chat_tools?: boolean;
+  json_mode?: boolean;
+  streaming_cancellation?: boolean;
+  media_url_output?: boolean;
+  chat_deadline_ms?: number;
+  flow_step_deadline_ms?: number;
+  media_fetch_deadline_ms?: number;
+  context_window_tokens?: number;
+  max_output_tokens?: number;
+}
 
 export interface AiConfig {
   provider: AiProvider | string;
   model: string;
+  models?: string[];
   api_key: string;
   base_url: string;
+  capabilities?: ProviderCapabilityDeclaration;
 }
 
 export type AiProviderConfig = AiConfig;
@@ -44,7 +55,6 @@ export interface ProviderCatalog {
   chat: ProviderOption[];
   image: ProviderOption[];
   tts: ProviderOption[];
-  video: ProviderOption[];
 }
 
 export async function listAiProviders(): Promise<ProviderCatalog> {
@@ -110,6 +120,13 @@ export interface AiToolCall {
 export interface AiTurnResult {
   text: string | null;
   toolCalls: AiToolCall[];
+  usage?: AiTurnUsage;
+}
+
+export interface AiTurnUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  cachedPromptTokens?: number;
 }
 
 export type AiStreamEvent =
@@ -142,6 +159,8 @@ export interface ProviderCapability {
   chatDeadlineMs: number;
   flowStepDeadlineMs: number;
   mediaFetchDeadlineMs: number;
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
 }
 
 export async function getAiProviderCapability(
@@ -168,20 +187,32 @@ export async function setAiTtsConfig(config: AiProviderConfig): Promise<void> {
   return invoke<void>('set_ai_tts_config', { config });
 }
 
-export async function getAiVideoConfig(): Promise<AiProviderConfig> {
-  return invoke<AiProviderConfig>('get_ai_video_config');
-}
-
-export async function setAiVideoConfig(config: AiProviderConfig): Promise<void> {
-  return invoke<void>('set_ai_video_config', { config });
-}
-
-export async function generateVideo(prompt: string, model: string): Promise<GeneratedMedia> {
-  return invoke<GeneratedMedia>('generate_video', { prompt, model });
-}
-
 export async function validateAiConfig(config: AiConfig): Promise<AiValidationResult> {
   return invoke<AiValidationResult>('validate_ai_config', { config });
+}
+
+/** One provider's remembered Key, Base URL and model pool within one modality. */
+export interface ProviderProfile {
+  model: string;
+  models: string[];
+  api_key: string;
+  base_url: string;
+}
+
+/** Remembered profiles keyed by lower-cased provider id, one map per modality. */
+export interface ProviderProfiles {
+  chat: Record<string, ProviderProfile>;
+  image: Record<string, ProviderProfile>;
+  tts: Record<string, ProviderProfile>;
+}
+
+export async function listAiProviderProfiles(): Promise<ProviderProfiles> {
+  return invoke<ProviderProfiles>('list_ai_provider_profiles');
+}
+
+/** Chat models the (unsaved) config can reach; non-chat models are filtered out by the backend. */
+export async function listAiChatModels(config: AiConfig): Promise<string[]> {
+  return invoke<string[]>('list_ai_chat_models', { config });
 }
 
 export async function aiGenerateImage(

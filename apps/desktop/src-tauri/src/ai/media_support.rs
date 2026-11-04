@@ -118,6 +118,7 @@ pub(crate) fn as_chat_config(cfg: &AiProviderConfig, model: &str) -> AiConfig {
     AiConfig {
         provider: cfg.provider.clone(),
         model: model.to_string(),
+        models: cfg.models.clone(),
         api_key: cfg.api_key.clone(),
         base_url: cfg.base_url.clone(),
         capabilities: None,

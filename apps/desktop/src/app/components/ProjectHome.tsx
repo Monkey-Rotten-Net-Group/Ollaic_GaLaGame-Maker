@@ -34,7 +34,6 @@ import {
 } from '../lib/webgal-ipc';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
 import { saveAppTheme, type AppSettings } from '../lib/app-settings';
-import { AiSettingsDialog } from './AiSettingsDialog';
 import { saveProjectMemory } from '../lib/project-memory';
 import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import './ProjectHome.css';
@@ -333,7 +332,6 @@ export function ProjectHome() {
 
   // Settings modals
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   // Quick Hidden File Input for Direct Card Cover Upload
   const coverTargetProjectIdRef = useRef<string | null>(null);
@@ -1386,14 +1384,6 @@ export function ProjectHome() {
           setSeedColor(settings.seedColor);
           setTheme(settings.theme);
         }}
-        onOpenAiSettings={() => {
-          setAppSettingsOpen(false);
-          setAiSettingsOpen(true);
-        }}
-      />
-      <AiSettingsDialog
-        open={aiSettingsOpen}
-        onClose={() => setAiSettingsOpen(false)}
       />
       {confirmDialog}
     </div>

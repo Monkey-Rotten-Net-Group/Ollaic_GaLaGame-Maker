@@ -204,6 +204,52 @@ pub(crate) fn save_characters_locked(
 mod tests {
     use super::*;
 
+    #[test]
+    fn native_catalogs_are_readable_by_desktop_character_and_asset_commands() {
+        let root = std::env::temp_dir().join(format!(
+            "ollaic-native-catalog-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        ollaic_core::project::create_project(&root, "Native catalogs").unwrap();
+        let before = ollaic_core::catalog::load_characters(&root).unwrap();
+        ollaic_core::catalog::save_character(
+            &root,
+            ollaic_core::catalog::Character {
+                name: "Alice".into(),
+                age: "18".into(),
+                default_voice: Some("line.wav".into()),
+                sprites: vec![ollaic_core::catalog::CharacterSprite {
+                    emotion: "happy".into(),
+                    file: "hero/happy.png".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            &before.revision,
+        )
+        .unwrap();
+        let characters = list_characters(root.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(characters[0].name, "Alice");
+        assert_eq!(characters[0].age, "18");
+        assert_eq!(characters[0].sprites[0].file, "hero/happy.png");
+        assert_eq!(characters[0].default_voice.as_deref(), Some("line.wav"));
+        let mut details =
+            ollaic_core::catalog::asset_details(&root, "figure", "hero/happy.png").unwrap();
+        details.alias = "Alice happy".into();
+        details.tags = vec!["portrait".into()];
+        ollaic_core::catalog::save_asset_details(&root, "figure", "hero/happy.png", details)
+            .unwrap();
+        let metadata =
+            crate::assets::commands::load_asset_metadata(root.to_string_lossy().into_owned())
+                .unwrap();
+        assert_eq!(metadata.aliases["figure/hero/happy.png"], "Alice happy");
+        assert_eq!(metadata.tags["figure/hero/happy.png"], vec!["portrait"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn character(id: &str, name: &str) -> Character {
         Character {
             id: id.to_string(),

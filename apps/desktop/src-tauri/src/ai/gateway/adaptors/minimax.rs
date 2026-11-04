@@ -315,6 +315,7 @@ mod tests {
             let cfg = AiProviderConfig {
                 provider: "minimax".into(),
                 model: "image-01".into(),
+                models: vec![],
                 api_key: "sk-cp-test".into(),
                 base_url: base.into(),
             };
@@ -380,6 +381,7 @@ mod tests {
         let cfg = AiProviderConfig {
             provider: "minimax".into(),
             model: "image-01".into(),
+            models: vec![],
             api_key: "sk-cp-offline-test".into(),
             base_url: format!("http://{address}/v1"),
         };

@@ -19,10 +19,17 @@ import { listAiUploads, readAiUpload } from './ai-uploads-ipc';
 import { listAllAssets, listAssets, type AssetInfo } from './assets-ipc';
 import { getCharacter, listCharacterNames, listCharacters } from './character-ipc';
 import { addMemoryEntry, deleteMemoryEntry, MEMORY_CATEGORIES, memoryEntries, readProjectMemory, updateMemoryEntry, type MemoryCategory } from './project-memory';
-import { getScenePath, listScenes, readFileText, parseSceneHeader } from './webgal-ipc';
+import { getScenePath, listScenes, parseScene, parseSceneHeader, readFileText } from './webgal-ipc';
 import { isEditorPatch, type EditorPatch } from './editor-patch';
 import { figureFileTail, findCharacter, resolveSpriteFile } from './figure-resolve';
 import type { Character } from './character-types';
+import {
+  extractSceneLinks,
+  type ChoiceBranch,
+  type WebGalCommandType,
+  type WebGalFlag,
+  type WebGalNode,
+} from './webgal-types';
 
 export type ToolKind = 'read' | 'write' | 'memory';
 
@@ -46,6 +53,12 @@ export interface ToolContext {
    * an answer. Undefined means "no attachment context" and is treated as empty.
    */
   attachedUploadIds?: string[];
+  /**
+   * In-flight scene contents staged earlier in the current multi-turn agent run.
+   * Ensures read_scene and list_scenes observe read-your-writes for newly created
+   * or edited scenes before user confirmation writes them to disk.
+   */
+  stagedSceneContents?: ReadonlyMap<string, string>;
 }
 
 const SCENE_READ_MAX_LINES = 200;
@@ -200,6 +213,305 @@ function summarizeCharacterForAi(character: Character, figureAssets: AssetInfo[]
 // Read tools
 // ---------------------------------------------------------------------------
 
+const KNOWN_WEBGAL_COMMANDS = new Set<string>([
+  'say',
+  'changeBg',
+  'changeFigure',
+  'miniAvatar',
+  'changeScene',
+  'callScene',
+  'end',
+  'bgm',
+  'playEffect',
+  'playVideo',
+  'label',
+  'jumpLabel',
+  'setVar',
+  'setTextbox',
+  'getUserInput',
+  'intro',
+  'setAnimation',
+  'setTransform',
+  'unlockCg',
+  'unlockBgm',
+  'choose',
+]);
+
+function delimiterPositions(source: string, delimiter: string): number[] {
+  const positions: number[] = [];
+  let escaped = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === delimiter) positions.push(i);
+  }
+  return positions;
+}
+
+function splitUnescaped(source: string, delimiter: string): string[] {
+  const positions = delimiterPositions(source, delimiter);
+  const values: string[] = [];
+  let start = 0;
+  for (const index of positions) {
+    values.push(source.slice(start, index));
+    start = index + delimiter.length;
+  }
+  values.push(source.slice(start));
+  return values;
+}
+
+function unescapeLiteral(value: string): string {
+  let out = '';
+  let escaped = false;
+  for (const ch of value) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+    } else if (ch === '\\') {
+      escaped = true;
+    } else {
+      out += ch;
+    }
+  }
+  if (escaped) out += '\\';
+  return out;
+}
+
+function decodeResourcePath(value: string): string {
+  const unescaped = unescapeLiteral(value);
+  if (unescaped.startsWith('http://') || unescaped.startsWith('https://')) {
+    return unescaped;
+  }
+  try {
+    return decodeURIComponent(unescaped);
+  } catch {
+    return unescaped;
+  }
+}
+
+function parseWebGalFlags(raw: string): { content: string; flags: WebGalFlag[] } {
+  const starts = delimiterPositions(raw, '-').filter((index) => {
+    const precededByBoundary = index === 0 || /\s/.test(raw[index - 1] ?? '');
+    const followedByAlpha = /^[A-Za-z]$/.test(raw[index + 1] ?? '');
+    return precededByBoundary && followedByAlpha;
+  });
+  const flags: WebGalFlag[] = starts.map((start, i) => {
+    const end = starts[i + 1] ?? raw.length;
+    const body = raw.slice(start, end).trim().replace(/^-+/, '');
+    const eqPos = body.indexOf('=');
+    if (eqPos !== -1) {
+      return {
+        key: body.slice(0, eqPos).trim(),
+        value: body.slice(eqPos + 1).trim(),
+      };
+    }
+    return { key: body, value: true };
+  });
+  const content = raw.slice(0, starts[0] ?? raw.length).trim();
+  return { content, flags };
+}
+
+function parseWebGalChoices(raw: string): ChoiceBranch[] {
+  return splitUnescaped(raw, '|').map((part) => {
+    const trimmed = part.trim();
+    const colons = delimiterPositions(trimmed, ':');
+    const pos = colons[colons.length - 1];
+    if (pos !== undefined && pos > 0) {
+      const rawTarget = trimmed.slice(pos + 1).trim();
+      return {
+        text: trimmed.slice(0, pos).trim(),
+        target: rawTarget.includes('.') ? decodeResourcePath(rawTarget) : rawTarget,
+      };
+    }
+    return { text: trimmed, target: '' };
+  });
+}
+
+function parseWebGalLineFallback(line: string, index: number): WebGalNode | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith(';')) {
+    return {
+      id: String(index + 1),
+      type: 'comment',
+      content: trimmed.slice(1).trim(),
+      flags: [],
+      position: { x: 0, y: 0 },
+      connections: [],
+    };
+  }
+  const semiPos = delimiterPositions(trimmed, ';')[0];
+  const body = (semiPos !== undefined ? trimmed.slice(0, semiPos) : trimmed).trim();
+  if (!body) return null;
+
+  const colonPos = delimiterPositions(body, ':')[0];
+  if (colonPos === undefined) {
+    if (body === 'end' || /^end\s+-/.test(body)) {
+      const parsed = parseWebGalFlags(body.slice('end'.length));
+      return {
+        id: String(index + 1),
+        type: 'end',
+        content: '',
+        flags: parsed.flags,
+        position: { x: 0, y: 0 },
+        connections: [],
+      };
+    }
+    const parsed = parseWebGalFlags(body);
+    return {
+      id: String(index + 1),
+      type: 'dialogue',
+      content: parsed.content,
+      flags: parsed.flags,
+      position: { x: 0, y: 0 },
+      connections: [],
+    };
+  }
+
+  const prefix = body.slice(0, colonPos).trim();
+  const rest = body.slice(colonPos + 1).trim();
+  const parsed = parseWebGalFlags(rest);
+  if (!prefix) {
+    return {
+      id: String(index + 1),
+      type: 'narrator',
+      content: parsed.content,
+      flags: parsed.flags,
+      position: { x: 0, y: 0 },
+      connections: [],
+    };
+  }
+
+  if (KNOWN_WEBGAL_COMMANDS.has(prefix)) {
+    const type: WebGalCommandType =
+      prefix === 'say' ? 'dialogue' : (prefix as WebGalCommandType);
+    const node: WebGalNode = {
+      id: String(index + 1),
+      type,
+      content: parsed.content,
+      flags: parsed.flags,
+      position: { x: 0, y: 0 },
+      connections: [],
+    };
+    if (type === 'changeScene' || type === 'callScene') {
+      node.targetScene = decodeResourcePath(parsed.content);
+    } else if (type === 'choose') {
+      node.choices = parseWebGalChoices(parsed.content);
+    } else if (type === 'intro') {
+      node.introLines = splitUnescaped(parsed.content, '|').map((s) => s.trim());
+    }
+    return node;
+  }
+
+  return {
+    id: String(index + 1),
+    type: 'dialogue',
+    character: prefix,
+    content: parsed.content,
+    flags: parsed.flags,
+    position: { x: 0, y: 0 },
+    connections: [],
+  };
+}
+
+function parseScriptNodesFallback(source: string): WebGalNode[] {
+  const nodes: WebGalNode[] = [];
+  for (const line of source.replace(/\r\n/g, '\n').split('\n')) {
+    const node = parseWebGalLineFallback(line, nodes.length);
+    if (node) nodes.push(node);
+  }
+  return nodes;
+}
+
+async function inferSceneMetadata(content: string): Promise<{
+  inferredChapter: string;
+  totalLines: number;
+  nextScenes: string[];
+}> {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const ipcNodes = await parseScene(content).catch(() => undefined);
+  const hasParsedCommandNodes =
+    Array.isArray(ipcNodes) &&
+    (ipcNodes.some((node) => node.type !== 'comment') ||
+      lines.every((raw) => !raw.trim() || raw.trim().startsWith(';')));
+  const nodes = hasParsedCommandNodes ? ipcNodes : parseScriptNodesFallback(content);
+
+  let inferredChapter = '';
+  for (const node of nodes) {
+    if (!inferredChapter && node.type === 'comment') {
+      const match = /^ollaic\s+agent\s+scene\s*:\s*(.+)$/i.exec(node.content.trim());
+      if (match?.[1]?.trim()) inferredChapter = match[1].trim();
+    } else if (!inferredChapter && node.type === 'intro') {
+      const introText = (node.introLines?.[0] ?? node.content.split('|')[0])?.trim();
+      if (introText) inferredChapter = introText;
+    }
+  }
+
+  const nextScenes: string[] = [];
+  for (const link of extractSceneLinks(nodes)) {
+    const cleaned = link.target.trim();
+    if (!cleaned) continue;
+    const normalized = cleaned.endsWith('.txt') ? cleaned : `${cleaned}.txt`;
+    if (!nextScenes.includes(normalized)) nextScenes.push(normalized);
+  }
+
+  return {
+    inferredChapter,
+    totalLines: lines.length,
+    nextScenes,
+  };
+}
+
+function orderSceneSummaries<
+  T extends { file: string; nextScenes: string[] },
+>(scenes: T[]): T[] {
+  if (scenes.length <= 1) return scenes;
+  const byFile = new Map(scenes.map((scene) => [scene.file, scene]));
+  const incomingCount = new Map<string, number>();
+  for (const scene of scenes) incomingCount.set(scene.file, 0);
+  for (const scene of scenes) {
+    for (const next of scene.nextScenes) {
+      if (byFile.has(next) && next !== scene.file) {
+        incomingCount.set(next, (incomingCount.get(next) ?? 0) + 1);
+      }
+    }
+  }
+
+  const ordered: T[] = [];
+  const visited = new Set<string>();
+  const visitBfs = (startFile: string) => {
+    const queue = [startFile];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      const item = byFile.get(current);
+      if (!item) continue;
+      visited.add(current);
+      ordered.push(item);
+      for (const next of item.nextScenes) {
+        if (!visited.has(next) && byFile.has(next)) queue.push(next);
+      }
+    }
+  };
+
+  if (byFile.has('start.txt')) visitBfs('start.txt');
+  const roots = scenes
+    .filter((scene) => !visited.has(scene.file) && (incomingCount.get(scene.file) ?? 0) === 0)
+    .sort((a, b) => a.file.localeCompare(b.file));
+  for (const root of roots) visitBfs(root.file);
+  for (const scene of scenes) {
+    if (!visited.has(scene.file)) visitBfs(scene.file);
+  }
+  return ordered;
+}
+
 const readTools: AgentTool[] = [
   {
     name: 'list_scenes',
@@ -208,17 +520,39 @@ const readTools: AgentTool[] = [
     schema: { type: 'object', properties: {}, required: [] },
     run: async (_args, ctx) => {
       const projectPath = requireProject(ctx);
-      const files = await listScenes(sceneDir(projectPath));
-      // Pair each filename with its chapter/outline header for comprehension.
-      const scenes = await Promise.all(files.map(async (file) => {
+      const diskFiles = await listScenes(sceneDir(projectPath));
+      const files = Array.from(new Set([...diskFiles, ...(ctx.stagedSceneContents?.keys() ?? [])]));
+      // Pair each filename with its chapter/outline header, inferred title, line count, and outgoing transitions.
+      const rawScenes = await Promise.all(files.map(async (file) => {
         try {
-          const header = parseSceneHeader(await readFileText(await getScenePath(projectPath, file)));
-          return { file, chapter: header.chapter ?? '', outline: header.outline ?? '' };
+          const content =
+            ctx.stagedSceneContents?.get(file)
+            ?? (await readFileText(await getScenePath(projectPath, file)));
+          const header = parseSceneHeader(content);
+          const meta = await inferSceneMetadata(content);
+          return {
+            file,
+            chapter: header.chapter || meta.inferredChapter || '',
+            outline: header.outline ?? '',
+            totalLines: meta.totalLines,
+            nextScenes: meta.nextScenes,
+            ...(file === ctx.currentSceneName ? { current: true } : {}),
+          };
         } catch {
-          return { file, chapter: '', outline: '' };
+          return {
+            file,
+            chapter: '',
+            outline: '',
+            totalLines: 0,
+            nextScenes: [],
+            ...(file === ctx.currentSceneName ? { current: true } : {}),
+          };
         }
       }));
-      return { scenes };
+      return {
+        currentScene: ctx.currentSceneName || undefined,
+        scenes: orderSceneSummaries(rawScenes),
+      };
     },
   },
   {
@@ -239,9 +573,29 @@ const readTools: AgentTool[] = [
       const projectPath = requireProject(ctx);
       const name = asString(args.name);
       if (!name) throw new Error('read_scene 需要场景文件名 name。');
-      const path = await getScenePath(projectPath, name);
-      const content = await readFileText(path);
-      const numbered = numberScript(content, asInt(args.fromLine) ?? 1, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
+      const stagedContent = ctx.stagedSceneContents?.get(name);
+      const content =
+        stagedContent !== undefined
+          ? stagedContent
+          : await readFileText(await getScenePath(projectPath, name));
+      const fromLine = asInt(args.fromLine) ?? 1;
+      const lines = content.replace(/\r\n/g, '\n').split('\n');
+      if (
+        stagedContent === undefined
+        && ctx.currentSceneName
+        && name === ctx.currentSceneName
+        && fromLine <= 1
+        && lines.length <= 9999
+      ) {
+        return {
+          name,
+          alreadyInSystemContext: true,
+          totalLines: lines.length,
+          truncated: false,
+          note: `场景 ${name}（共 ${lines.length} 行）的完整带行号脚本已在系统提示词「当前场景脚本」中提供，请直接引用其中的行号与内容，无需重复读取。`,
+        };
+      }
+      const numbered = numberScript(content, fromLine, asInt(args.maxLines) ?? SCENE_READ_MAX_LINES);
       return { name, ...numbered };
     },
   },

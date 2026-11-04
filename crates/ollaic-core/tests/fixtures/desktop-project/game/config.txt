@@ -1,0 +1,5 @@
+; Desktop project fixture
+Game_name:Desktop Round Trip;
+Game_key:round-trip-fixture;
+Enable_Appreciation:true;
+Custom_setting:preserve-me;

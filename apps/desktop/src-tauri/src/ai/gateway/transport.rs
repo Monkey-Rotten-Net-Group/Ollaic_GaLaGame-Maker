@@ -206,6 +206,7 @@ mod tests {
         AiProviderConfig {
             provider: provider.to_string(),
             model: "model".to_string(),
+            models: vec!["model".to_string()],
             api_key: "key".to_string(),
             base_url: base_url.to_string(),
         }

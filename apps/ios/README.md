@@ -149,6 +149,12 @@ and shared Rust bindings remain future integration work. The app icon catalog
 is a placeholder for the final product artwork. This target does not build React,
 Tauri, Rust, or the matting model.
 
+The repository now contains a shared Rust project core and UniFFI bindings. The Android
+app uses them; this SwiftUI app has not yet adopted that storage or native-library build.
+`pnpm bindings:test:swift` generates the Swift bindings and runs a real host-side
+create/edit/save/export/import workflow. This validates the Swift interface on macOS;
+it is separate from iOS Simulator/device linking and app migration.
+
 ## UI Verification
 
 The `OllaicTests` target verifies shared project undo/redo, persistence, project

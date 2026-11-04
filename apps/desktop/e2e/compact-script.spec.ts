@@ -20,8 +20,10 @@ async function openCompactScene(page: Page) {
       return originalInvoke(command, args);
     };
   });
-  await page.getByLabel('编辑器视图模式').selectOption('compact');
-  await page.getByLabel('当前场景').selectOption('chapter2.txt');
+  await page.getByLabel('编辑器视图模式').click();
+  await page.getByRole('menuitem', { name: '剧本视图', exact: true }).click();
+  await page.getByLabel('当前场景').click();
+  await page.getByRole('menuitem', { name: /chapter2\.txt/ }).click();
   await expect(page.locator('[data-cmd-card]')).toHaveCount(3);
 }
 
@@ -29,10 +31,12 @@ test('switching scenes clears collapsed sections and keeps a single section visi
   await openCompactScene(page);
   await page.locator('.section-block').first().locator('.group').first().click();
   await expect(page.locator('[data-node-id="opening"]')).toHaveCount(0);
-  await page.getByLabel('当前场景').selectOption('start.txt');
+  await page.getByLabel('当前场景').click();
+  await page.getByRole('menuitem', { name: /start\.txt/ }).click();
   await expect(page.locator('[data-cmd-card]')).toHaveCount(1);
   await expect(page.getByRole('button', { name: /从这里开始我们的故事/ })).toBeVisible();
-  await page.getByLabel('当前场景').selectOption('chapter2.txt');
+  await page.getByLabel('当前场景').click();
+  await page.getByRole('menuitem', { name: /chapter2\.txt/ }).click();
   await expect(page.locator('[data-cmd-card]')).toHaveCount(3);
 });
 

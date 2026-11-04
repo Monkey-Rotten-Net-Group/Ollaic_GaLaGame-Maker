@@ -54,6 +54,7 @@ import {
   type AiMediaGenerationProgress,
   type AiProviderConfig,
 } from '../lib/ai-ipc';
+import { getConfiguredModels, normalizeModelConfig } from '../lib/ai-models';
 
 interface Props {
   projectPath: string;
@@ -80,20 +81,18 @@ const spriteSuggestions = [
 ];
 const commonEmotions = ['默认', '微笑', '悲伤', '惊讶', '愤怒', '害羞', '思考', '严肃'];
 
-// CosyVoice 常用音色（音色 ID 必须与所选模型版本匹配：v2 模型用带 _v2 后缀的音色）。
+// CosyVoice v3 常用音色（音色 ID 必须与所选模型版本匹配：v3 模型用带 _v3 后缀或无后缀的音色）。
 // 仅作下拉建议，用户也可手填其他音色 ID。
 const voiceTimbrePresets: { value: string; label: string }[] = [
   { value: '', label: '未设置（用默认音色）' },
-  { value: 'longxiaochun_v2', label: '龙小淳 v2 · 知性女声' },
-  { value: 'longxiaoxia_v2', label: '龙小夏 v2 · 温柔女声' },
-  { value: 'longwanjun', label: '龙婉君 · 标准女声（仅 cosyvoice-v1）' },
-  { value: 'longanrou', label: '龙安柔 · 柔和女声（仅 cosyvoice-v1）' },
-  { value: 'longyumi_v2', label: '龙裕米 v2 · 甜美女声' },
-  { value: 'longxiaobai_v2', label: '龙小白 v2 · 清亮男声' },
-  { value: 'longlaotie_v2', label: '龙老铁 v2 · 东北男声' },
-  { value: 'longshu_v2', label: '龙书 v2 · 沉稳男声' },
-  { value: 'longjielidou_v2', label: '龙杰力豆 v2 · 活泼童声' },
-  { value: 'libai_v2', label: '李白 v2 · 古风男声' },
+  { value: 'longanyang', label: '龙安洋 · 通用音色' },
+  { value: 'longanhuan', label: '龙安欢 · 通用音色' },
+  { value: 'longxiaochun_v3', label: '龙小淳 v3 · 知性女声' },
+  { value: 'longxiaoxia_v3', label: '龙小夏 v3 · 温柔女声' },
+  { value: 'longyumi_v3', label: '龙裕米 v3 · 甜美女声' },
+  { value: 'longlaotie_v3', label: '龙老铁 v3 · 东北男声' },
+  { value: 'longshu_v3', label: '龙书 v3 · 沉稳男声' },
+  { value: 'longjielidou_v3', label: '龙杰力豆 v3 · 活泼童声' },
 ];
 
 interface SpriteUsage extends AssetUsage {
@@ -109,15 +108,6 @@ type PendingSpriteGeneration = {
   target: SpriteGenerationTarget;
   batch?: boolean;
 };
-
-function parseConfiguredModels(value: string): string[] {
-  return Array.from(new Set(
-    value
-      .split(/[\n,，]/)
-      .map((item) => item.trim())
-      .filter(Boolean),
-  ));
-}
 
 function sanitizeFilenamePart(value: string, fallback: string): string {
   const normalized = value
@@ -1054,7 +1044,7 @@ export function CharacterPanel({
                             value={selected.voiceTimbre || ''}
                             onChange={(e) => patchCharacter(selected.id, { voiceTimbre: e.target.value })}
                             className={`${inputClass} mt-2`}
-                            placeholder="手填音色 ID，如 longxiaochun_v2"
+                            placeholder="手填音色 ID，如 longxiaochun_v3"
                           />
                         )}
                       </div>
@@ -1743,7 +1733,7 @@ function SpriteAiGenerateDialog({
   const [generating, setGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<AiMediaGenerationProgress | null>(null);
 
-  const configuredModels = config ? parseConfiguredModels(config.model) : [];
+  const configuredModels = config ? getConfiguredModels(config) : [];
   const effectiveModel = selectedModel || configuredModels[0] || config?.model.trim() || '';
   const isBatch = generation?.batch === true;
 
@@ -1754,9 +1744,10 @@ function SpriteAiGenerateDialog({
     setLoadingConfig(true);
     getAiImageConfig()
       .then((nextConfig) => {
-        setConfig(nextConfig);
-        const models = parseConfiguredModels(nextConfig.model);
-        setSelectedModel(models[0] ?? nextConfig.model.trim());
+        const normalizedConfig = normalizeModelConfig(nextConfig);
+        setConfig(normalizedConfig);
+        const models = getConfiguredModels(normalizedConfig);
+        setSelectedModel(normalizedConfig.model || models[0] || '');
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoadingConfig(false));

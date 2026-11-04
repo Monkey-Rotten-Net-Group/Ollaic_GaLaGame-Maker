@@ -1,0 +1,8 @@
+[bindings.kotlin]
+package_name = "com.ollaic.core"
+cdylib_name = "ollaic_ffi"
+
+[bindings.swift]
+module_name = "OllaicCore"
+ffi_module_name = "OllaicCoreFFI"
+generate_module_map = true

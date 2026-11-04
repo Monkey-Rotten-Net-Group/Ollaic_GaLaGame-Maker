@@ -1,5 +1,8 @@
 # 运行预览
 
+This page describes desktop preview. Native Android playtesting starts from the game
+entry point; see [native runtime preview](../mobile/runtime-preview.md).
+
 在本地运行 WebGAL 运行时预览作品,并可从编辑器**跳转到指定对白**。
 
 ## 预览服务

@@ -31,6 +31,51 @@ describe('resolveLineWithAnchor', () => {
     expect(() => resolveLineWithAnchor(['x;', 'x;', 'y;'], 1, 'x;')).not.toThrow(); // exact match at 1
     expect(() => resolveLineWithAnchor(['p;', 'x;', 'q;', 'x;'], 9, 'x;')).toThrow();
   });
+
+  it('tolerates line number prefixes and missing trailing semicolons in anchorText', () => {
+    const scriptLines = [
+      'intro:誓约松开的夜晚;',
+      '沙耶:我会留下来陪着大家。今晚先让每个人找到能安稳待着的地方。;',
+      ':夜色落下;',
+    ];
+    expect(
+      resolveLineWithAnchor(
+        scriptLines,
+        2,
+        '22: 沙耶:我会留下来陪着大家。今晚先让每个人找到能安稳待着的地方。',
+      ),
+    ).toEqual({ line: 2, corrected: false });
+    expect(
+      resolveLineWithAnchor(
+        scriptLines,
+        1,
+        '22: 沙耶:我会留下来陪着大家。今晚先让每个人找到能安稳待着的地方。',
+      ),
+    ).toEqual({ line: 2, corrected: true });
+  });
+
+  it('preserves numeric speaker names and rejects mismatched or ambiguous normalized anchors', () => {
+    const applied = applyEditorPatch('1:Hello;\n2:Hello;', {
+      type: 'replace',
+      file: 'start.txt',
+      startLine: 2,
+      endLine: 2,
+      anchorText: '1:Hello',
+      text: '1:Changed;',
+    });
+    expect(applied).toEqual({
+      content: '1:Changed;\n2:Hello;',
+      lineDelta: 0,
+      corrected: true,
+    });
+
+    expect(() =>
+      resolveLineWithAnchor(['1:Hello;', '2:Hello;'], 2, '3:Hello'),
+    ).toThrow('无法定位 anchorText');
+    expect(() =>
+      resolveLineWithAnchor(['1:Hello;', '2:Other;', '1:Hello;'], 2, '1:Hello'),
+    ).toThrow('anchorText 匹配到多行');
+  });
 });
 
 describe('applyEditorPatch', () => {

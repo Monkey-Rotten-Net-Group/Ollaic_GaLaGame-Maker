@@ -1,0 +1,7 @@
+; Opening scene
+changeBg:park.svg -next;
+Alice:Hello from desktop -v1.ogg -when=ready; inline annotation
+
+choose:Continue:chapter2.txt|Stay:start.txt;
+futureExtension:payload -custom=value;
+callScene:chapter2.txt;

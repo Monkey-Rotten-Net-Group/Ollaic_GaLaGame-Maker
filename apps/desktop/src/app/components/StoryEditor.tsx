@@ -1543,7 +1543,6 @@ export function StoryEditor() {
         <AppSettingsDialog
           open={appSettingsOpen}
           onClose={() => { setAppSettingsOpen(false); if (previewStarted) runtimePreview.reconnect(); }}
-          onOpenAiSettings={() => setAiSettingsOpen(true)}
           onApplyRuntimeTemplateDir={(dir) => setRuntimeTemplateDir(dir)}
         />
 

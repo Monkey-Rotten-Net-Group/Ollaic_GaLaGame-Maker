@@ -40,12 +40,10 @@ pub enum MediaAdaptor {
 pub fn adaptor_for(provider: &str, modality: Modality) -> Option<MediaAdaptor> {
     let provider = provider.trim().to_ascii_lowercase();
     match (provider.as_str(), modality) {
-        // Volcengine image generation is OpenAI-shaped (Seedream variant), and
-        // Midjourney-Proxy exposes an OpenAI-compatible surface.
-        (
-            "openai" | "custom" | "zhipu" | "siliconflow" | "midjourney" | "volcengine",
-            Modality::Image,
-        ) => Some(MediaAdaptor::OpenAiCompatible),
+        // Volcengine image generation is OpenAI-shaped (Seedream variant).
+        ("openai" | "custom" | "volcengine", Modality::Image) => {
+            Some(MediaAdaptor::OpenAiCompatible)
+        }
         ("aliyun", Modality::Image) => Some(MediaAdaptor::DashScope),
         ("gemini", Modality::Image) => Some(MediaAdaptor::Gemini),
         ("minimax", Modality::Image) => Some(MediaAdaptor::MiniMax),
@@ -115,6 +113,7 @@ mod tests {
         let cfg = crate::ai::config::AiProviderConfig {
             provider: "custom".into(),
             model: "unknown-model".into(),
+            models: vec![],
             api_key: String::new(),
             base_url: "http://127.0.0.1:1".into(),
         };

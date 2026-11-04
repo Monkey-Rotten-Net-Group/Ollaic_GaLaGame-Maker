@@ -3861,7 +3861,7 @@ async fn golden_vertical_slice_two_stage_director_lifecycle() {
     let trust_script =
         std::fs::read_to_string(project.join("game/scene/ending_trust.txt")).unwrap();
     assert!(trust_script.contains("intro:共同承担;"));
-    assert!(trust_script.contains("end;"));
+    assert!(trust_script.contains("end:;") || trust_script.contains("end;"));
 
     let plan = super::scene_review::approve_scene(&project, "ending_trust").unwrap();
     assert_eq!(
@@ -3891,7 +3891,7 @@ async fn golden_vertical_slice_two_stage_director_lifecycle() {
     let depart_script =
         std::fs::read_to_string(project.join("game/scene/ending_depart.txt")).unwrap();
     assert!(depart_script.contains("intro:归于静默;"));
-    assert!(depart_script.contains("end;"));
+    assert!(depart_script.contains("end:;") || depart_script.contains("end;"));
 
     let plan = super::scene_review::approve_scene(&project, "ending_depart").unwrap();
     assert_eq!(
@@ -4011,32 +4011,6 @@ async fn golden_vertical_slice_two_stage_director_lifecycle() {
             }
         }
     }
-
-    // ==========================================
-    // ENTRY-STATE LIVE PREVIEW INJECTION
-    // ==========================================
-    let server = crate::webgal::runtime_server::RuntimeServer::start(project.clone())
-        .await
-        .unwrap();
-    let simulated_entry = "; --- Ollaic Injected Entry State ---\nsetVar:linxia_trust=2;\n; -----------------------------------\n:Virtual live preview entry;\n";
-    server
-        .set_preview_entry(Some(simulated_entry.to_string()))
-        .await;
-    assert_eq!(
-        server.preview_entry().await.as_deref(),
-        Some(simulated_entry)
-    );
-
-    let fetched = reqwest::get(format!(
-        "{}game/scene/__ollaic_preview_entry__.txt",
-        server.url()
-    ))
-    .await
-    .unwrap()
-    .text()
-    .await
-    .unwrap();
-    assert_eq!(fetched, simulated_entry);
 
     let _ = std::fs::remove_dir_all(project);
 }

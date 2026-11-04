@@ -267,11 +267,11 @@ where
     Fut: std::future::Future<Output = Result<T, String>>,
 {
     let previous = config::load_config();
-    config::save_config(config)?;
+    config::save_active_config(config)?;
     let result = call().await;
     // Restore before propagating, so a failed probe does not leave the
     // override behind in the profile.
-    let restored = config::save_config(&previous);
+    let restored = config::save_active_config(&previous);
     result.and_then(|value| restored.map(|()| value))
 }
 
