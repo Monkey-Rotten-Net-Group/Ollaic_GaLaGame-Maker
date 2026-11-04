@@ -1,37 +1,73 @@
 {
-  "completionTokens": 7111,
+  "completionTokens": 11551,
   "data": {
     "branches": {
       "edges": [
         {
-          "choice": null,
+          "choice": "推开旧校舍的门，跟着那个声音",
+          "condition": null,
+          "effects": [
+            "echo_heard = true"
+          ],
           "from": "opening",
-          "to": "corridor"
+          "to": "old_school"
         },
         {
-          "choice": "叫住那个站在天台边的少女",
-          "from": "corridor",
-          "to": "girl_meet"
+          "choice": "装作没听见，先去天台透口气",
+          "condition": null,
+          "effects": [],
+          "from": "opening",
+          "to": "rooftop"
         },
         {
           "choice": null,
-          "from": "girl_meet",
+          "condition": "echo_heard == false",
+          "effects": [
+            "echo_heard = true"
+          ],
+          "from": "rooftop",
+          "to": "old_school"
+        },
+        {
+          "choice": null,
+          "condition": null,
+          "effects": [],
+          "from": "old_school",
+          "to": "rooftop"
+        },
+        {
+          "choice": "答应沈舟，夜里去档案室",
+          "condition": null,
+          "effects": [
+            "linxia_trust = linxia_trust + 2"
+          ],
+          "from": "rooftop",
           "to": "archive"
         },
         {
+          "choice": "拒绝她，把回声当成幻听",
+          "condition": null,
+          "effects": [
+            "linxia_trust = linxia_trust - 1"
+          ],
+          "from": "rooftop",
+          "to": "last_night"
+        },
+        {
           "choice": null,
+          "condition": "linxia_trust >= 2",
+          "effects": [
+            "secret_pressure = secret_pressure + 1"
+          ],
           "from": "archive",
-          "to": "rooftop_choice"
+          "to": "last_night"
         },
         {
-          "choice": "揭开回声的来历",
-          "from": "rooftop_choice",
-          "to": "ending_reveal"
-        },
-        {
-          "choice": "遵守静默协议，让一切沉入夏天",
-          "from": "rooftop_choice",
-          "to": "ending_silence"
+          "choice": null,
+          "condition": "echo_heard == true",
+          "effects": [],
+          "from": "last_night",
+          "to": "summer_end"
         }
       ],
       "entryScene": "opening"
@@ -39,99 +75,246 @@
     "chapters": [
       {
         "id": "ch1",
-        "summary": "转学生林澈在即将拆除的旧校舍里听见了不存在的回声，并遇见了一个似乎早已知道真相的少女。",
-        "title": "第一章 回声初响"
+        "summary": "转学第一天的傍晚，林夏在封了十年的旧校舍外听见有人念她的名字，被陌生少女沈舟拽离窗边；她没能忍住，还是推开了那扇没锁的侧门。",
+        "title": "回声"
       },
       {
         "id": "ch2",
-        "summary": "两人潜入封锁的档案室，发现十年前的事故记录被校方以“静默协议”名义封存，回声的来历逐渐浮出水面。",
-        "title": "第二章 静默协议"
+        "summary": "沈舟承认自己也听得见，并提出用档案室的名册交换线索。两人深夜翻进档案室，找到被裁掉一行的名册和一份签名栏涂黑的静默协议，也第一次被校工老周看见。",
+        "title": "静默协议"
       },
       {
         "id": "ch3",
-        "summary": "拆除前夜，林澈与少女在天台做出最后的选择：揭开回声的来历，或让一切随夏天一起沉默。",
-        "title": "第三章 夏天结束前"
+        "summary": "拆除前夜，旧校舍断电，沈舟准备把回声录下来公开署名。林夏必须决定要不要一起写下名字，让这个夏天以被记住还是被抹掉的方式结束。",
+        "title": "夏末"
       }
     ],
     "scene_plans": [
       {
+        "approvalStatus": "pending",
         "chapterId": "ch1",
         "characterIds": [
-          "protagonist"
+          "linxia",
+          "shenzhou"
+        ],
+        "emotionalArc": "初来乍到的好奇，到脊背发凉的不安，再到被沈舟按住手腕时的警觉与一点说不清的感激。",
+        "entryState": [
+          "刚转学第一天，没有熟人",
+          "linxia_trust == 0",
+          "echo_heard == false",
+          "secret_pressure == 0"
         ],
         "file": "start.txt",
+        "forbiddenReveals": [
+          "回声是十年前一名女学生留下的",
+          "沈舟与那名女学生是姐妹",
+          "校方曾签下静默协议"
+        ],
         "id": "opening",
-        "summary": "转学生林澈在放学后误入即将拆除的旧校舍，在空无一人的走廊里第一次听见了不属于任何人的回声。",
-        "title": "旧校舍的第一声"
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "校门口的同学提起旧校舍十年前被封、夏末就要拆掉",
+          "林夏独自经过旧校舍，听见一个女声念出她的名字",
+          "沈舟从走廊尽头出现，把她拽离窗边，说那里面没有人在说话",
+          "林夏回头，看见二楼窗帘同时被拉开又合上"
+        ],
+        "rollingSummary": null,
+        "summary": "林夏转学第一天就听说旧校舍要在夏末拆除。放学路上她独自经过封锁线，听见二楼有个女声清楚地念出她的名字，随后被从走廊尽头走来的沈舟一把拽离窗边。",
+        "timeOfDay": null,
+        "title": "转学第一天的放学后"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch1",
         "characterIds": [
-          "protagonist"
+          "linxia",
+          "shenzhou"
         ],
-        "file": "corridor.txt",
-        "id": "corridor",
-        "summary": "林澈循着回声走进封条破损的走廊，墙上的旧照片和停摆的挂钟暗示这里被刻意遗忘了十年。",
-        "title": "封锁线后的走廊"
+        "emotionalArc": "赌一口气的好奇，到走廊里越走越快的的心悸，到看见黑板上自己名字那一刻的失重。",
+        "entryState": [
+          "echo_heard 无论真假都由本场坐实",
+          "与沈舟尚未建立信任"
+        ],
+        "file": "old_school.txt",
+        "forbiddenReveals": [
+          "十年前事故的具体经过",
+          "黑板上的字其实是沈舟提前写下的",
+          "沈舟能听见回声与她的血脉有关"
+        ],
+        "id": "old_school",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "侧门锁着但一推就开，门轴没有一点声音",
+          "走廊里的回声复制林夏的步频，永远慢半拍",
+          "二楼教室黑板上写着今天的日期和林夏的名字",
+          "沈舟追进来，第一次露出慌张，问她听见了几句"
+        ],
+        "rollingSummary": null,
+        "summary": "沈舟被老师叫走后，林夏折回旧校舍，从侧门溜了进去。回声一路模仿她的脚步却总慢半拍，把她带到二楼尽头的教室，黑板上写着今天的日期和她的名字。",
+        "timeOfDay": null,
+        "title": "推开那扇没锁的门"
       },
       {
-        "chapterId": "ch1",
-        "characterIds": [
-          "protagonist",
-          "suwan"
-        ],
-        "file": "rooftop_girl.txt",
-        "id": "girl_meet",
-        "summary": "在天台，林澈遇见少女苏晚，她似乎能同样听见回声，并警告他不要继续追问。",
-        "title": "天台上的少女"
-      },
-      {
+        "approvalStatus": "pending",
         "chapterId": "ch2",
         "characterIds": [
-          "protagonist",
-          "suwan"
+          "linxia",
+          "shenzhou"
         ],
-        "file": "archive_room.txt",
+        "emotionalArc": "竖起刺的戒备，到发现对方也害怕时的被理解，再到犹豫着往她那边挪半步。",
+        "entryState": [
+          "echo_heard == true",
+          "linxia_trust 可能仍为 0，本场是建立信任的机会"
+        ],
+        "file": "rooftop.txt",
+        "forbiddenReveals": [
+          "沈舟的姓氏在档案里的对应关系",
+          "静默协议的签署人是谁",
+          "十年前那名学生的真实姓名"
+        ],
+        "id": "rooftop",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "沈舟承认自己也听得见，并说出回声的三个规律",
+          "沈舟提出去档案室查名册，但要林夏先答应不告诉老师",
+          "林夏问为什么不自己去，沈舟沉默很久",
+          "远处传来施工测量的哨声，把剩下的时间压到眼前"
+        ],
+        "rollingSummary": null,
+        "summary": "沈舟把林夏带上天台，用一只拆了一半的耳返解释回声的三条规律，并主动提出夜里去档案室查十年前的名册，条件是林夏不能告诉任何老师。",
+        "timeOfDay": null,
+        "title": "天台上的半个约定"
+      },
+      {
+        "approvalStatus": "pending",
+        "chapterId": "ch2",
+        "characterIds": [
+          "linxia",
+          "shenzhou",
+          "laozhou"
+        ],
+        "emotionalArc": "第一次做违规事的兴奋，翻页时的紧张，到发现名字早被人削掉、又被人从窗外看着的寒意。",
+        "entryState": [
+          "linxia_trust >= 2，林夏已答应同去",
+          "secret_pressure 尚未累积"
+        ],
+        "file": "archive.txt",
+        "forbiddenReveals": [
+          "被裁掉的那行名字是谁",
+          "静默协议真正保护的人是谁",
+          "老周是十年前唯一在场的大人"
+        ],
         "id": "archive",
-        "summary": "两人趁夜潜入档案室，找到被“静默协议”封存的旧校舍事故记录，发现回声与十年前的失踪者有关。",
-        "title": "档案室里的静默协议"
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "林夏第一次夜闯房间，手抖得几乎拿不稳手电",
+          "名册上有一行被整齐裁掉，切口还是新的",
+          "在文件柜底层找到静默协议复印件，签名栏全被涂黑",
+          "手电扫到窗外的校工老周，两人躲进档案柜之间"
+        ],
+        "rollingSummary": null,
+        "summary": "两人夜里翻进档案室，在十年前的名册上发现被整齐裁掉的一行，又在文件柜底层摸到一份静默协议复印件。手电扫过窗口时，校工老周正站在外面看着她们。",
+        "timeOfDay": null,
+        "title": "名册上少了一行"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch3",
         "characterIds": [
-          "protagonist",
-          "suwan"
+          "linxia",
+          "shenzhou",
+          "laozhou"
         ],
-        "file": "pre_demolition_night.txt",
-        "id": "rooftop_choice",
-        "summary": "拆除前夜，回声越来越清晰，林澈和苏晚在天台必须决定是否在校舍倒下前公开真相。",
-        "title": "拆除前夜的选择"
+        "emotionalArc": "决定豁出去的决心，被老周一句话戳出的恐惧，到明白代价后反而沉下来的清醒。",
+        "entryState": [
+          "secret_pressure >= 1，或信任不足而只剩最后一次机会",
+          "echo_heard == true"
+        ],
+        "file": "last_night.txt",
+        "forbiddenReveals": [
+          "老周当年做过的那个选择",
+          "沈舟的姐姐就是那个回声",
+          "公开之后会具体发生什么"
+        ],
+        "id": "last_night",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "校方提前拉好围挡，广播通知明早六点动工",
+          "沈舟拿出录音笔，说两份证词就能让回声留下记录",
+          "老周出现，第一次开口，说她们会毁掉自己",
+          "林夏的笔停在署名栏上方，没有落下去"
+        ],
+        "rollingSummary": null,
+        "summary": "校方提前围起挡板，广播通知明早动工。沈舟带来录音笔，说只要两份证词就能留下一份记录，校工老周却在这时出现，第一次开口劝她们别毁掉自己。",
+        "timeOfDay": null,
+        "title": "推土机前的最后一晚"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch3",
         "characterIds": [
-          "protagonist",
-          "suwan"
+          "linxia",
+          "shenzhou"
         ],
-        "file": "echo_answer.txt",
-        "id": "ending_reveal",
-        "summary": "林澈选择揭开回声的来历，让静默协议失效，十年前的真相随着夏天的风被所有人听见。",
-        "title": "回声的答案"
+        "emotionalArc": "放下重物般的释然，混着酸楚，最后停在像长大了一岁的、很安静的夏天里。",
+        "entryState": [
+          "echo_heard == true",
+          "secret_pressure 与 linxia_trust 已决定林夏此刻的底气"
+        ],
+        "file": "summer_end.txt",
+        "forbiddenReveals": [
+          "回声是否就此彻底消失",
+          "沈舟之后去了哪里",
+          "十年后两人是否还会再见"
+        ],
+        "id": "summer_end",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "推土机启动前，回声完整说出最后一句没说完的话",
+          "林夏做出最终选择，并当场承担它带来的后果",
+          "沈舟把录音笔或耳返塞进林夏手里，转身离开",
+          "夏末的风把旧校舍里的纸片一路吹到操场上"
+        ],
+        "rollingSummary": null,
+        "summary": "推土机启动前，回声最后一次完整响起，把没说完的那句话说完。林夏落下或收回自己的名字，沈舟把一样东西塞进她手里，然后走进夏末刺眼的光里。",
+        "timeOfDay": null,
+        "title": "夏天结束的方式"
+      }
+    ],
+    "variables": [
+      {
+        "description": "林夏对沈舟的信任度；达到 2 点才愿意与她一起夜闯档案室。",
+        "id": "linxia_trust",
+        "initialValue": "0",
+        "kind": "integer"
       },
       {
-        "chapterId": "ch3",
-        "characterIds": [
-          "protagonist",
-          "suwan"
-        ],
-        "file": "silent_summer.txt",
-        "id": "ending_silence",
-        "summary": "林澈选择遵守静默协议，让回声随旧校舍一起被拆除，而那个夏天成为只有他和苏晚知道的秘密。",
-        "title": "静默的夏天"
+        "description": "林夏是否已经亲耳听见旧校舍的回声，决定她还能不能骗自己那只是幻听。",
+        "id": "echo_heard",
+        "initialValue": "false",
+        "kind": "boolean"
+      },
+      {
+        "description": "林夏掌握的十年前事故实证程度，越高越难在拆除前夜装作什么都不知道。",
+        "id": "secret_pressure",
+        "initialValue": "0",
+        "kind": "integer"
       }
     ]
   },
-  "model": "deepseek-flash",
-  "promptTokens": 1752,
+  "model": "deepseek-v4-flash",
+  "promptTokens": 3682,
   "type": "outline"
 }
