@@ -70,11 +70,11 @@ fn reusable_import(project: &Path, task: &AssetTask, filename: &str) -> bool {
         return false;
     };
     let key = format!("{}/{}", task.kind.game_dir(), filename);
-    // Regeneration must not reinterpret an earlier AI output as a user override.
-    !metadata
-        .tags
-        .get(&key)
-        .is_some_and(|tags| tags.iter().any(|tag| tag == "source:ai"))
+    // Neither generated media nor local placeholders are user overrides.
+    !metadata.tags.get(&key).is_some_and(|tags| {
+        tags.iter()
+            .any(|tag| tag == "source:ai" || tag == "source:fallback")
+    })
 }
 
 /// Promote the most recent generated artifact and bind it into playable project data.
@@ -150,8 +150,7 @@ impl BindingTransaction {
                 .iter()
                 .rev()
                 .find(|attempt| attempt.artifact.is_some())
-                .is_some_and(|attempt| attempt.used_local_fallback)
-                || task.used_local_fallback;
+                .is_some_and(|attempt| attempt.used_local_fallback);
             let tag = if used_fallback && matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx) {
                 BUNDLED_MOOD_SOURCE_TAG
             } else if used_fallback {
@@ -263,19 +262,20 @@ fn rebind_asset_locked(
         )?;
     }
     let snapshots = snapshot_binding_files(project_path, &target)?;
-    let source_tag = if task
-        .attempts
-        .iter()
-        .any(|item| item.imported_file.is_some())
-    {
-        IMPORTED_SOURCE_TAG
-    } else if task.attempts.iter().any(|item| item.used_local_fallback) || task.used_local_fallback
-    {
+    let source_tag = if task.used_local_fallback {
         if matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx) {
             BUNDLED_MOOD_SOURCE_TAG
         } else {
             "source:fallback"
         }
+    } else if task
+        .attempts
+        .iter()
+        .rev()
+        .find(|item| item.artifact.is_some() || item.imported_file.is_some())
+        .is_some_and(|item| item.imported_file.is_some())
+    {
+        IMPORTED_SOURCE_TAG
     } else {
         "source:ai"
     };
@@ -809,6 +809,17 @@ fn bind_scene_command_at(
         .iter()
         .position(|node| node.cmd_type == CommandType::Comment && node.content == marker)
     {
+        if kind == CommandType::ChangeBg {
+            if let Some(staged) = nodes.get(marker_index + 1).and_then(|node| {
+                (node.cmd_type == CommandType::Comment)
+                    .then(|| node.content.strip_prefix("ollaic-background-staging:"))
+                    .flatten()
+                    .and_then(|command| parser::parse_script(command).into_iter().next())
+                    .filter(|node| node.cmd_type == CommandType::ChangeBg)
+            }) {
+                nodes[marker_index + 1] = staged;
+            }
+        }
         if let Some(existing) = nodes
             .get_mut(marker_index + 1)
             .filter(|node| node.cmd_type == kind)
@@ -1252,6 +1263,10 @@ mod tests {
             )
             .unwrap();
         }
+        fs::write(
+            project.join("game/scene/one.txt"),
+            "; ollaic-asset-task:bg_school\n; ollaic-background-staging:changeBg:bg_school.png -next;\n:Hello;\n",
+        ).unwrap();
         fs::write(project.join("game/scene/other.txt"), ":Unchanged;\n").unwrap();
         let task = AssetTask {
             id: "bg_school".into(),

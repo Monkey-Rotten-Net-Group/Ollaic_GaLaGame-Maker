@@ -8,8 +8,7 @@ pub mod types;
 
 pub use bundled_audio::detect_audio_mood;
 pub use scheduler::{
-    run_queue_cancellable, run_queue_scoped_cancellable, AssetGenerator, GeneratedArtifact,
-    QueueScope,
+    run_queue_cancellable, AssetGenerator, GeneratedArtifact, QueueRunOptions, QueueScope,
 };
 #[cfg(test)]
 pub use store::load_queue;

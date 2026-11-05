@@ -28,6 +28,12 @@ pub struct QueueScope {
     pub scene_file: Option<String>,
 }
 
+#[derive(Default)]
+pub struct QueueRunOptions<'a> {
+    pub scope: Option<&'a QueueScope>,
+    pub retry_placeholders: bool,
+}
+
 pub struct GeneratedArtifact {
     pub extension: String,
     pub bytes: Vec<u8>,
@@ -69,6 +75,7 @@ pub async fn run_queue(
         generator,
         Arc::new(AtomicBool::new(false)),
         Arc::new(Mutex::new(())),
+        QueueRunOptions::default(),
     )
     .await
 }
@@ -80,49 +87,9 @@ pub async fn run_queue_cancellable(
     generator: Arc<dyn AssetGenerator>,
     cancelled: Arc<AtomicBool>,
     binding_gate: Arc<Mutex<()>>,
+    options: QueueRunOptions<'_>,
 ) -> Result<AssetQueue, String> {
-    run_queue_internal(
-        project_path,
-        run_id,
-        plan,
-        generator,
-        cancelled,
-        binding_gate,
-        None,
-    )
-    .await
-}
-
-pub async fn run_queue_scoped_cancellable(
-    project_path: &Path,
-    run_id: &str,
-    plan: &StoryPlan,
-    generator: Arc<dyn AssetGenerator>,
-    cancelled: Arc<AtomicBool>,
-    binding_gate: Arc<Mutex<()>>,
-    scope: &QueueScope,
-) -> Result<AssetQueue, String> {
-    run_queue_internal(
-        project_path,
-        run_id,
-        plan,
-        generator,
-        cancelled,
-        binding_gate,
-        Some(scope),
-    )
-    .await
-}
-
-async fn run_queue_internal(
-    project_path: &Path,
-    run_id: &str,
-    plan: &StoryPlan,
-    generator: Arc<dyn AssetGenerator>,
-    cancelled: Arc<AtomicBool>,
-    binding_gate: Arc<Mutex<()>>,
-    scope: Option<&QueueScope>,
-) -> Result<AssetQueue, String> {
+    let scope = options.scope;
     let binding_scope = match scope {
         Some(QueueScope {
             scene_file: Some(file),
@@ -148,12 +115,38 @@ async fn run_queue_internal(
         super::store::derive_queue(project_path, run_id, plan)?
     };
     validate_limits(&queue)?;
+    // A completed fallback records missing media, but has not satisfied the requested
+    // generation. An explicit rerun retries it, including tasks that reused the
+    // same placeholder as an import. Recovery keeps completed bindings intact.
+    let fallback_files: HashSet<_> = queue
+        .tasks
+        .iter()
+        .filter(|task| task.used_local_fallback && !task.kind.requires_manual_import())
+        .filter_map(|task| {
+            task.asset_file
+                .as_ref()
+                .map(|filename| (task.kind.game_dir(), filename.clone()))
+        })
+        .collect();
+    for task in queue
+        .tasks
+        .iter_mut()
+        .filter(|task| options.retry_placeholders && is_active(task))
+    {
+        let reused_fallback = task.asset_file.as_ref().is_some_and(|filename| {
+            fallback_files.contains(&(task.kind.game_dir(), filename.clone()))
+        });
+        if !task.kind.requires_manual_import() && (task.used_local_fallback || reused_fallback) {
+            task.status = AssetTaskStatus::Pending;
+            task.used_local_fallback = true;
+        }
+    }
     if same_run || scope.is_some() {
-        for task in queue
-            .tasks
-            .iter_mut()
-            .filter(|task| is_active(task) && task.status == AssetTaskStatus::Succeeded)
-        {
+        for task in queue.tasks.iter_mut().filter(|task| {
+            is_active(task)
+                && task.status == AssetTaskStatus::Succeeded
+                && task.asset_file.is_some()
+        }) {
             let _binding_guard = binding_gate.lock().await;
             if cancelled.load(Ordering::SeqCst) {
                 return Err(ASSET_QUEUE_CANCELLED.to_string());
@@ -172,7 +165,13 @@ async fn run_queue_internal(
         if !is_active(task) || task.status == AssetTaskStatus::Succeeded {
             continue;
         }
-        match find_imported_asset_file(project_path, task) {
+        // The existing binding is a known placeholder, never a manual override.
+        let imported_file = if task.used_local_fallback && task.asset_file.is_some() {
+            Ok(None)
+        } else {
+            find_imported_asset_file(project_path, task)
+        };
+        match imported_file {
             Ok(Some(filename)) => {
                 imported.push((index, filename));
                 continue;
@@ -197,8 +196,9 @@ async fn run_queue_internal(
             error.starts_with(PENDING_CONFIGURATION_PREFIX)
                 || error.starts_with(PENDING_MANUAL_IMPORT_PREFIX)
         });
-        let fresh_budget = ((same_run || scope.is_some())
-            && (task.status == AssetTaskStatus::Failed || was_blocked))
+        let fresh_budget = task.used_local_fallback
+            || ((same_run || scope.is_some())
+                && (task.status == AssetTaskStatus::Failed || was_blocked))
             || (scope.is_some() && !task.attempts.is_empty());
         let limit = if fresh_budget {
             task.attempts.len() as u32 + attempt_budget
@@ -421,10 +421,32 @@ async fn generate_task(
             (snapshot, attempt)
         };
         let started_at = now_ms();
-        let generated = generator
-            .generate(&task)
-            .await
-            .and_then(|generated| write_artifact(project_path, &task, attempt, generated));
+        let generated = match generator.generate(&task).await {
+            Ok(generated)
+                if generated.used_local_fallback && !task.kind.requires_manual_import() =>
+            {
+                // Keep the unmet requirement without publishing blank media or binding it.
+                let mut state = queue.lock().await;
+                let task = &mut state.tasks[index];
+                task.status = AssetTaskStatus::Succeeded;
+                task.used_local_fallback = true;
+                task.attempts.push(AssetAttempt {
+                    attempt,
+                    started_at,
+                    finished_at: now_ms(),
+                    artifact: None,
+                    imported_file: None,
+                    error: None,
+                    used_local_fallback: true,
+                });
+                state.updated_at = now_ms();
+                save_queue(project_path, &state)?;
+                return Ok(None);
+            }
+            result => {
+                result.and_then(|generated| write_artifact(project_path, &task, attempt, generated))
+            }
+        };
         match generated {
             Ok((artifact, used_local_fallback)) => {
                 let mut state = queue.lock().await;

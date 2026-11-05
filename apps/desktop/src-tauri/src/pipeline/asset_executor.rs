@@ -425,31 +425,6 @@ fn local_placeholder_with_context(
     prompt: &str,
     target_stem: &str,
 ) -> GeneratedArtifact {
-    if kind == AssetKind::Figure {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-            1,
-            1,
-            image::Rgba([0, 0, 0, 0]),
-        ))
-        .write_to(&mut bytes, image::ImageFormat::Png)
-        .expect("embedded transparent placeholder is encodable");
-        return GeneratedArtifact {
-            extension: "png".to_string(),
-            bytes: bytes.into_inner(),
-            used_local_fallback: true,
-        };
-    }
-    if kind == AssetKind::Background {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XfP7WQAAAABJRU5ErkJggg==")
-            .expect("embedded placeholder png is valid");
-        return GeneratedArtifact {
-            extension: "png".to_string(),
-            bytes,
-            used_local_fallback: true,
-        };
-    }
     if kind == AssetKind::Bgm || kind == AssetKind::Sfx {
         let query = format!("{prompt} {target_stem}");
         let mood = crate::asset_queue::detect_audio_mood(&query);
@@ -459,11 +434,10 @@ fn local_placeholder_with_context(
             used_local_fallback: true,
         };
     }
-    let mut bytes = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\0\0\0\0".to_vec();
-    bytes.truncate(44);
+    // A missing image or voice is a requirement, not a media file.
     GeneratedArtifact {
-        extension: "wav".to_string(),
-        bytes,
+        extension: String::new(),
+        bytes: Vec::new(),
         used_local_fallback: true,
     }
 }

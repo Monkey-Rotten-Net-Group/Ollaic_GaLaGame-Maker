@@ -473,7 +473,9 @@ export function FlowStepInspector({
                               <span
                                 className={cn(
                                   "size-1.5 shrink-0 rounded-full",
-                                  status.className,
+                                  task.status === 'succeeded' && task.usedLocalFallback && !audioDir
+                                    ? 'bg-amber-500'
+                                    : status.className,
                                 )}
                                 aria-hidden="true"
                               />
@@ -484,7 +486,12 @@ export function FlowStepInspector({
                                 {task.targetStem}
                               </strong>
                               <span className="shrink-0 text-[10px] text-muted-foreground">
-                                {task.kind} · {status.label}
+                                {task.kind} ·{' '}
+                                {task.status === 'succeeded' && task.usedLocalFallback
+                                  ? audioDir
+                                    ? '本地音频'
+                                    : '待补充素材'
+                                  : status.label}
                               </span>
                             </div>
                             <p className="break-words leading-5 text-foreground/85">
@@ -499,13 +506,16 @@ export function FlowStepInspector({
                                 重试 {Math.max(0, task.attempts.length - 1)}
                               </span>
                             </div>
-                            {task.assetFile && (
+                            {task.assetFile && (!task.usedLocalFallback || audioDir) && (
                               <p className="break-all font-mono-family text-[10px] text-emerald-700 dark:text-emerald-400">
-                                正式素材 {task.assetFile}
+                                {task.usedLocalFallback ? '本地音频' : '正式素材'} {task.assetFile}
                               </p>
                             )}
                             {task.attempts
-                              .filter((attempt) => attempt.artifact)
+                              .filter(
+                                (attempt) =>
+                                  attempt.artifact && (!attempt.usedLocalFallback || audioDir),
+                              )
                               .map((attempt) => {
                                 const key = `${task.id}:${attempt.attempt}`;
                                 const preview = artifactPreviews[key];
@@ -559,7 +569,7 @@ export function FlowStepInspector({
                                           size="sm"
                                           variant="outline"
                                           disabled={artifactBusy !== null}
-                                          aria-label={`提升 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                          aria-label={`应用 ${task.targetStem} 候选 ${attempt.attempt} 到素材库`}
                                           onClick={() =>
                                             void runArtifactAction(
                                               `promote:${key}`,
@@ -576,7 +586,7 @@ export function FlowStepInspector({
                                           ) : (
                                             <Upload />
                                           )}
-                                          提升
+                                          应用到素材库
                                         </Button>
                                       )}
                                       {onDeleteAssetArtifact && (

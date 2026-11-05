@@ -19,6 +19,7 @@ pub(crate) struct ExecutorContext<'a> {
     pub(crate) asset_generators: &'a dyn AssetGeneratorFactory,
     pub(crate) project_path: &'a Path,
     pub(crate) run_id: &'a str,
+    pub(crate) retry_placeholders: bool,
     pub(crate) scope: &'a crate::pipeline::dsl::FlowScope,
     pub(crate) plan: &'a StoryPlan,
     pub(crate) cancelled: &'a Arc<AtomicBool>,
@@ -75,28 +76,19 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
             _ => None,
         },
     };
-    let queue = if *context.scope == crate::pipeline::dsl::FlowScope::Project {
-        crate::asset_queue::run_queue_cancellable(
-            context.project_path,
-            context.run_id,
-            context.plan,
-            generator,
-            context.cancelled.clone(),
-            context.asset_binding_gate.clone(),
-        )
-        .await
-    } else {
-        crate::asset_queue::run_queue_scoped_cancellable(
-            context.project_path,
-            context.run_id,
-            context.plan,
-            generator,
-            context.cancelled.clone(),
-            context.asset_binding_gate.clone(),
-            &scope,
-        )
-        .await
-    }
+    let queue = crate::asset_queue::run_queue_cancellable(
+        context.project_path,
+        context.run_id,
+        context.plan,
+        generator,
+        context.cancelled.clone(),
+        context.asset_binding_gate.clone(),
+        crate::asset_queue::QueueRunOptions {
+            scope: (*context.scope != crate::pipeline::dsl::FlowScope::Project).then_some(&scope),
+            retry_placeholders: context.retry_placeholders,
+        },
+    )
+    .await
     .map_err(AgentError)?;
     let active_tasks: Vec<_> = queue
         .tasks
@@ -145,7 +137,7 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
         })
         .count();
     let mut warnings = downgraded
-        .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
+        .then(|| "部分素材尚待补充，已保留素材需求；音乐和音效可使用本地音频".to_string())
         .into_iter()
         .collect::<Vec<_>>();
     if pending_configuration > 0 {

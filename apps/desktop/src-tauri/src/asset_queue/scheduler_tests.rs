@@ -7,6 +7,7 @@ struct AlwaysGenerate;
 struct TransparentFigure;
 struct AlwaysFail(AtomicUsize);
 struct CountingGenerate(AtomicUsize);
+struct PlaceholderThenImage(AtomicUsize);
 struct MissingConfiguration(AtomicUsize);
 /// Mirrors production preflight: BGM/SFX have no AI route, and every other
 /// task would fail if it were ever run.
@@ -105,6 +106,21 @@ impl AssetGenerator for CountingGenerate {
                 extension: "wav".to_string(),
                 bytes: b"asset".to_vec(),
                 used_local_fallback: false,
+            })
+        })
+    }
+}
+
+impl AssetGenerator for PlaceholderThenImage {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+        Box::pin(async move {
+            Ok(GeneratedArtifact {
+                extension: "png".into(),
+                bytes: transparent_png(),
+                used_local_fallback: self.0.fetch_add(1, Ordering::SeqCst) == 0,
             })
         })
     }
@@ -384,6 +400,210 @@ async fn resumes_unfinished_queue_tasks_without_rerunning_succeeded_tasks() {
         .all(|task| task.status == AssetTaskStatus::Succeeded));
     assert_eq!(resumed.tasks[0].attempts.len(), 1);
     let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
+async fn fallback_keeps_material_requirements_without_creating_media() {
+    for kind in [AssetKind::Background, AssetKind::Figure, AssetKind::Tts] {
+        let project = std::env::temp_dir().join(format!("ollaic_missing_{kind:?}_{}", now_ms()));
+        std::fs::create_dir_all(project.join("game/scene")).unwrap();
+        let script = "; Ollaic Scene Staging\n; ollaic-asset-task:missing\n:line 0;\n";
+        std::fs::write(project.join("game/scene/start.txt"), script).unwrap();
+        let mut missing = task(
+            "missing".into(),
+            kind,
+            (kind == AssetKind::Tts).then_some(0),
+        );
+        if kind == AssetKind::Figure {
+            missing.character_ref = Some("alice".into());
+        }
+        let queue = AssetQueue::new("run-missing", vec![missing], now_ms());
+        save_queue(&project, &queue).unwrap();
+        let queue = Mutex::new(queue);
+        let generator = PlaceholderThenImage(AtomicUsize::new(0));
+        let binding = generate_task(&project, &queue, 0, 1, &generator)
+            .await
+            .unwrap();
+        assert!(
+            binding.is_none(),
+            "missing media must not enter the binding pass"
+        );
+        let result = load_queue(&project).unwrap();
+        let missing = &result.tasks[0];
+        assert_eq!(missing.status, AssetTaskStatus::Succeeded);
+        assert!(missing.used_local_fallback);
+        assert!(missing.asset_file.is_none());
+        assert!(missing.attempts[0].artifact.is_none());
+        assert!(!project.join(".ollaic/artifacts/assets").exists());
+        assert!(!project.join("game").join(kind.game_dir()).exists());
+        assert_eq!(
+            std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+            script
+        );
+        std::fs::remove_dir_all(project).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn rerun_replaces_a_successful_placeholder_with_a_generated_image() {
+    let project = std::env::temp_dir().join(format!("ollaic_upgrade_placeholder_{}", now_ms()));
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let queue = AssetQueue::new(
+        "run-upgrade",
+        vec![task("bg_placeholder".into(), AssetKind::Background, None)],
+        now_ms(),
+    );
+    let plan = plan_for(&queue, vec!["start.txt".into()]);
+    save_queue(&project, &queue).unwrap();
+    let generator = Arc::new(PlaceholderThenImage(AtomicUsize::new(0)));
+    let placeholder = run_queue(&project, "run-upgrade", &plan, generator.clone())
+        .await
+        .unwrap();
+    assert!(placeholder.tasks[0].used_local_fallback);
+    assert!(placeholder.tasks[0].asset_file.is_none());
+    assert!(placeholder.tasks[0].attempts[0].artifact.is_none());
+    assert!(!project.join(".ollaic/artifacts/assets").exists());
+    assert!(!project.join("game/background").exists());
+    assert_eq!(
+        std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+        "; empty\n"
+    );
+
+    let upgraded = run_queue_cancellable(
+        &project,
+        "run-upgrade",
+        &plan,
+        generator.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(())),
+        QueueRunOptions {
+            scope: None,
+            retry_placeholders: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        generator.0.load(Ordering::SeqCst),
+        2,
+        "rerun must call the image provider again"
+    );
+    assert_eq!(upgraded.tasks[0].status, AssetTaskStatus::Succeeded);
+    assert!(!upgraded.tasks[0].used_local_fallback);
+    assert_eq!(upgraded.tasks[0].attempts.len(), 2);
+    assert!(upgraded.tasks[0].attempts[0].used_local_fallback);
+    let metadata =
+        crate::assets::commands::read_asset_metadata(&project.to_string_lossy()).unwrap();
+    let filename = upgraded.tasks[0].asset_file.as_deref().unwrap();
+    let tags = &metadata.tags[&format!("background/{filename}")];
+    assert!(tags.iter().any(|tag| tag == "source:ai"));
+    assert!(!tags.iter().any(|tag| tag == "source:fallback"));
+    let resumed = run_queue(&project, "run-upgrade", &plan, generator.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        generator.0.load(Ordering::SeqCst),
+        2,
+        "a real image must remain reusable"
+    );
+    assert!(!resumed.tasks[0].used_local_fallback);
+    let metadata =
+        crate::assets::commands::read_asset_metadata(&project.to_string_lossy()).unwrap();
+    assert!(metadata.tags[&format!("background/{filename}")]
+        .iter()
+        .any(|tag| tag == "source:ai"));
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
+async fn scoped_rerun_upgrades_a_reused_placeholder_without_changing_inactive_tasks() {
+    let project = std::env::temp_dir().join(format!("ollaic_upgrade_scoped_{}", now_ms()));
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let queue = AssetQueue::new(
+        "setup-run",
+        vec![task("bg_anchor".into(), AssetKind::Background, None)],
+        now_ms(),
+    );
+    let plan = plan_for(&queue, vec!["start.txt".into()]);
+    save_queue(&project, &queue).unwrap();
+    let generator = Arc::new(PlaceholderThenImage(AtomicUsize::new(0)));
+    let mut existing = run_queue(&project, "setup-run", &plan, generator.clone())
+        .await
+        .unwrap();
+    // Model a persisted queue from before missing media stopped producing files.
+    let artifact = project.join(".ollaic/artifacts/assets/bg_anchor/1.png");
+    std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    std::fs::write(&artifact, transparent_png()).unwrap();
+    existing.tasks[0].attempts[0].artifact = Some(artifact.to_string_lossy().into_owned());
+    existing.tasks[0].asset_file =
+        Some(super::super::binder::bind_asset(&project, &existing.tasks[0]).unwrap());
+    let inactive = serde_json::to_value(&existing.tasks[0]).unwrap();
+    let mut reused = task("bg_reused".into(), AssetKind::Background, None);
+    reused.status = AssetTaskStatus::Succeeded;
+    reused.asset_file = existing.tasks[0].asset_file.clone();
+    reused.attempts.push(AssetAttempt {
+        attempt: 1,
+        started_at: 1,
+        finished_at: 2,
+        artifact: None,
+        imported_file: reused.asset_file.clone(),
+        error: None,
+        used_local_fallback: false,
+    });
+    existing.tasks.push(reused);
+    save_queue(&project, &existing).unwrap();
+    let plan = plan_for(&existing, vec!["start.txt".into()]);
+    let upgraded = run_queue_cancellable(
+        &project,
+        "scene-run",
+        &plan,
+        generator.clone(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(Mutex::new(())),
+        QueueRunOptions {
+            scope: Some(&QueueScope {
+                task_ids: HashSet::from(["bg_reused".into()]),
+                scene_file: Some("start.txt".into()),
+            }),
+            retry_placeholders: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(generator.0.load(Ordering::SeqCst), 2);
+    assert_eq!(serde_json::to_value(&upgraded.tasks[0]).unwrap(), inactive);
+    assert!(!upgraded.tasks[1].used_local_fallback);
+    assert_eq!(upgraded.tasks[1].attempts.len(), 2);
+    assert_ne!(upgraded.tasks[0].asset_file, upgraded.tasks[1].asset_file);
+    std::fs::remove_dir_all(project).unwrap();
+}
+
+#[tokio::test]
+async fn a_new_run_does_not_treat_a_placeholder_as_a_manual_image_import() {
+    let project = std::env::temp_dir().join(format!("ollaic_upgrade_new_run_{}", now_ms()));
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let queue = AssetQueue::new(
+        "old-run",
+        vec![task("bg_placeholder".into(), AssetKind::Background, None)],
+        now_ms(),
+    );
+    let plan = plan_for(&queue, vec!["start.txt".into()]);
+    save_queue(&project, &queue).unwrap();
+    let generator = Arc::new(PlaceholderThenImage(AtomicUsize::new(0)));
+    run_queue(&project, "old-run", &plan, generator.clone())
+        .await
+        .unwrap();
+    let upgraded = run_queue(&project, "new-run", &plan, generator.clone())
+        .await
+        .unwrap();
+    assert_eq!(generator.0.load(Ordering::SeqCst), 2);
+    assert!(!upgraded.tasks[0].used_local_fallback);
+    assert!(upgraded.tasks[0].attempts[0].artifact.is_some());
+    assert!(upgraded.tasks[0].attempts[0].imported_file.is_none());
+    std::fs::remove_dir_all(project).unwrap();
 }
 
 #[tokio::test]
@@ -715,6 +935,7 @@ async fn cancellation_after_generation_stops_serial_binding() {
             Arc::new(AlwaysGenerate),
             run_cancelled,
             run_binding_gate,
+            QueueRunOptions::default(),
         )
         .await
     });
@@ -1185,14 +1406,17 @@ async fn scoped_queue_preserves_inactive_history_and_approved_scenes_across_reru
         scene_file: Some("second.txt".into()),
     };
     let generator = Arc::new(ScopedImageGenerator(AtomicUsize::new(0)));
-    let result = run_queue_scoped_cancellable(
+    let result = run_queue_cancellable(
         &project,
         "new-run",
         &plan,
         generator.clone(),
         Arc::new(AtomicBool::new(false)),
         Arc::new(Mutex::new(())),
-        &scope,
+        QueueRunOptions {
+            scope: Some(&scope),
+            retry_placeholders: false,
+        },
     )
     .await
     .unwrap();
@@ -1210,14 +1434,17 @@ async fn scoped_queue_preserves_inactive_history_and_approved_scenes_across_reru
         .find(|task| task.id == "bg_shared")
         .unwrap()
         .prompt = "revised background".into();
-    let changed = run_queue_scoped_cancellable(
+    let changed = run_queue_cancellable(
         &project,
         "third-run",
         &plan,
         generator.clone(),
         Arc::new(AtomicBool::new(false)),
         Arc::new(Mutex::new(())),
-        &scope,
+        QueueRunOptions {
+            scope: Some(&scope),
+            retry_placeholders: false,
+        },
     )
     .await
     .unwrap();
@@ -1233,14 +1460,17 @@ async fn scoped_queue_preserves_inactive_history_and_approved_scenes_across_reru
         std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
         approved
     );
-    let recovered = run_queue_scoped_cancellable(
+    let recovered = run_queue_cancellable(
         &project,
         "retry-run",
         &plan,
         generator.clone(),
         Arc::new(AtomicBool::new(false)),
         Arc::new(Mutex::new(())),
-        &scope,
+        QueueRunOptions {
+            scope: Some(&scope),
+            retry_placeholders: false,
+        },
     )
     .await
     .unwrap();
@@ -1266,14 +1496,17 @@ async fn setup_queue_binds_anchors_without_touching_existing_scene_scripts() {
         task_ids: queue.tasks.iter().map(|task| task.id.clone()).collect(),
         scene_file: None,
     };
-    let result = run_queue_scoped_cancellable(
+    let result = run_queue_cancellable(
         &project,
         "setup-run",
         &plan,
         Arc::new(ScopedImageGenerator(AtomicUsize::new(0))),
         Arc::new(AtomicBool::new(false)),
         Arc::new(Mutex::new(())),
-        &scope,
+        QueueRunOptions {
+            scope: Some(&scope),
+            retry_placeholders: false,
+        },
     )
     .await
     .unwrap();

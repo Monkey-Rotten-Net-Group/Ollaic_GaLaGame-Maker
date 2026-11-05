@@ -127,6 +127,39 @@ impl EventSink for StepSucceededStoreSabotagingSink {
 struct MissingMediaCapabilityFactory;
 struct UnusedAssetGenerator;
 
+struct RecoveringImageFactory(Arc<RecoveringImageGenerator>);
+struct RecoveringImageGenerator(AtomicU32);
+
+impl AssetGeneratorFactory for RecoveringImageFactory {
+    fn create(
+        &self,
+        _project: Option<&std::path::Path>,
+        _allow_local_fallback: bool,
+        _cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        self.0.clone()
+    }
+}
+
+impl AssetGenerator for RecoveringImageGenerator {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(1, 1)
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .unwrap();
+            Ok(GeneratedArtifact {
+                extension: "png".into(),
+                bytes: bytes.into_inner(),
+                used_local_fallback: self.0.fetch_add(1, Ordering::SeqCst) == 0,
+            })
+        })
+    }
+}
+
 struct LockProbeAgent {
     entered: Arc<Semaphore>,
     release: Arc<Notify>,
@@ -653,18 +686,9 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
     assert!(decision.contains("setVar:protocol_obeyed=true;"));
     assert!(decision.contains("changeScene:ending_depart.txt;"));
     assert!(project.join("game/config/characters.json").is_file());
-    assert!(project
-        .join("game/background")
-        .read_dir()
-        .unwrap()
-        .next()
-        .is_some());
-    assert!(project
-        .join("game/figure")
-        .read_dir()
-        .unwrap()
-        .next()
-        .is_some());
+    assert!(!project.join("game/background").exists());
+    assert!(!project.join("game/figure").exists());
+    assert!(!opening.lines().any(|line| line.starts_with("changeBg:")));
     assert!(project
         .join("game/bgm")
         .read_dir()
@@ -1971,6 +1995,60 @@ async fn retrying_a_completed_step_resets_it_and_its_downstream() {
         state.find_step("outline").unwrap().status,
         StepStatus::Pending
     );
+}
+
+#[tokio::test]
+async fn retrying_completed_asset_step_regenerates_placeholder_images() {
+    let project = fresh_project("retry_placeholder_images");
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let generator = Arc::new(RecoveringImageGenerator(AtomicU32::new(0)));
+    let pipeline = Pipeline::with_default_agents()
+        .with_asset_generators_for_test(Arc::new(RecoveringImageFactory(generator.clone())));
+    let recipe = FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).asset_queue());
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run-retry-placeholder",
+            "brief",
+            &recipe,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    let mut plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    plan.scenes = vec!["start.txt".into()];
+    plan.asset_plan.push(crate::story_plan::AssetTaskPlan {
+        id: "bg_opening".into(),
+        kind: "background".into(),
+        target_stem: "bg_opening".into(),
+        prompt: "empty corridor".into(),
+        status: "pending".into(),
+        ..Default::default()
+    });
+    crate::story_plan::save_plan(&project, &plan).unwrap();
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(handle.state.lock().await.status, RunStatus::Completed);
+    assert!(crate::asset_queue::load_queue(&project).unwrap().tasks[0].used_local_fallback);
+
+    handle
+        .retry_step(&project, "assetQueue", &sink, &clock)
+        .await
+        .unwrap();
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(handle.state.lock().await.status, RunStatus::Completed);
+    assert_eq!(generator.0.load(Ordering::SeqCst), 2);
+    let queue = crate::asset_queue::load_queue(&project).unwrap();
+    assert!(!queue.tasks[0].used_local_fallback);
+    assert_eq!(queue.tasks[0].attempts.len(), 2);
+    assert_eq!(handle.state.lock().await.steps[0].history.len(), 2);
+    std::fs::remove_dir_all(project).unwrap();
 }
 
 #[tokio::test]
@@ -3993,6 +4071,9 @@ async fn golden_vertical_slice_two_stage_director_lifecycle() {
         let nodes = crate::webgal::parser::parse_script(&content);
         for node in &nodes {
             if let Some(asset) = &node.asset {
+                if asset == "none" {
+                    continue;
+                }
                 let path = match node.cmd_type {
                     crate::webgal::types::CommandType::ChangeBg => {
                         project.join("game/background").join(asset)

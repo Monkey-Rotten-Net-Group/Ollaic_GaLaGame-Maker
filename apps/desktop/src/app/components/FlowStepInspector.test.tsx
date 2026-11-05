@@ -147,7 +147,12 @@ describe('FlowStepInspector', () => {
               prompt: '黄昏时的空教室',
               sceneRef: 'opening',
               status: 'succeeded',
-              attempts: [{ attempt: 1, artifact: '.ollaic/artifacts/bg_opening.png' }],
+              usedLocalFallback: false,
+              attempts: [{
+                attempt: 1,
+                artifact: '.ollaic/artifacts/bg_opening.png',
+                usedLocalFallback: false,
+              }],
               assetFile: 'bg_opening.png',
             },
             {
@@ -173,12 +178,13 @@ describe('FlowStepInspector', () => {
     expect(screen.getByRole('list', { name: '资产任务列表' })).toBeInTheDocument();
     expect(screen.getByText('黄昏时的空教室')).toBeInTheDocument();
     expect(screen.getByText('重试 1')).toBeInTheDocument();
+    expect(screen.getByText('background · 已完成')).toBeInTheDocument();
     expect(screen.getByText('正式素材 bg_opening.png')).toBeInTheDocument();
     expect(screen.getByText('provider timeout')).toBeInTheDocument();
     expect(screen.getByText(/"queued": 2/)).toBeInTheDocument();
 
     const preview = screen.getByRole('button', { name: '预览 bg_opening 候选 1' });
-    const promote = screen.getByRole('button', { name: '提升 bg_opening 候选 1' });
+    const promote = screen.getByRole('button', { name: '应用 bg_opening 候选 1 到素材库' });
     const remove = screen.getByRole('button', { name: '删除 bg_opening 候选 1' });
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     await user.click(preview);
@@ -193,6 +199,90 @@ describe('FlowStepInspector', () => {
     await user.click(remove);
     expect(onDeleteAssetArtifact).toHaveBeenCalledWith('bg-opening', 1);
     expect(await screen.findByRole('alert')).toHaveTextContent('artifact locked');
+  });
+
+  it.each([true, false])(
+    'shows missing material without placeholder candidates (legacy=%s)',
+    async (legacy) => {
+      const user = userEvent.setup();
+      render(
+        <FlowStepInspector
+          selected={{ ...step, kind: 'asset', agent: 'assetQueue', status: 'succeeded' }}
+          busy={false}
+          detached={false}
+          onClose={vi.fn()}
+          onRetry={vi.fn()}
+          onSkip={vi.fn()}
+          onPromptRerun={vi.fn()}
+          onPreviewAssetArtifact={vi.fn()}
+          onPromoteAssetArtifact={vi.fn()}
+          onDeleteAssetArtifact={vi.fn()}
+          assetQueue={{
+            runId: 'run_1',
+            updatedAt: 30,
+            tasks: [
+              {
+                id: 'figure-producer',
+                kind: 'figure',
+                targetStem: 'producer_default',
+                prompt: 'producer',
+                status: 'succeeded',
+                usedLocalFallback: true,
+                assetFile: legacy ? 'producer_default.png' : undefined,
+                attempts: [
+                  {
+                    attempt: 1,
+                    artifact: legacy
+                      ? '.ollaic/artifacts/assets/figure-producer/1.png'
+                      : undefined,
+                    usedLocalFallback: true,
+                  },
+                ],
+              },
+            ],
+          }}
+        />,
+      );
+      await user.click(screen.getByRole('tab', { name: '输出' }));
+      expect(screen.getByText('figure · 待补充素材')).toBeInTheDocument();
+      expect(screen.queryByText(/候选 1/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/占位素材/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /预览.*候选/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /应用.*候选/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /删除.*候选/ })).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows generation progress while replacing an existing placeholder', async () => {
+    const user = userEvent.setup();
+    render(
+      <FlowStepInspector
+        selected={{ ...step, kind: 'asset', agent: 'assetQueue', status: 'running' }}
+        busy={false}
+        detached={false}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onSkip={vi.fn()}
+        onPromptRerun={vi.fn()}
+        assetQueue={{
+          runId: 'run_1',
+          updatedAt: 30,
+          tasks: [{
+            id: 'bg-opening',
+            kind: 'background',
+            targetStem: 'bg_opening',
+            prompt: 'empty corridor',
+            status: 'running',
+            usedLocalFallback: true,
+            assetFile: 'bg_opening.png',
+            attempts: [{ attempt: 1, usedLocalFallback: true }],
+          }],
+        }}
+      />,
+    );
+    await user.click(screen.getByRole('tab', { name: '输出' }));
+    expect(screen.getByText('background · 生成中')).toBeInTheDocument();
+    expect(screen.queryByText('占位素材 bg_opening.png')).not.toBeInTheDocument();
   });
 
   it('binds imported audio to a manual audio task and separates pending reasons', async () => {

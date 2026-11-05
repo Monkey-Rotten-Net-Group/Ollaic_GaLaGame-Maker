@@ -87,7 +87,11 @@ impl Agent for SceneAgent {
                         "; {}",
                         crate::asset_queue::binder::task_marker(&background.id)
                     ));
-                    lines.push(format!("changeBg:{}.png -next;", background.target_stem));
+                    // Bind the staged command only after a real background is available.
+                    lines.push(format!(
+                        "; ollaic-background-staging:changeBg:{}.png -next;",
+                        background.target_stem
+                    ));
                 }
                 for beat in &draft.beats {
                     for cue in &beat.figure_cues {

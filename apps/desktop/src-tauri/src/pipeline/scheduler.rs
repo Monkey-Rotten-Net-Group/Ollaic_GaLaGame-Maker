@@ -704,11 +704,21 @@ impl Pipeline {
             visual_style: &plan.visual_style,
             allow_local_fallback,
         };
-        let executor = {
+        let (executor, retry_placeholders) = {
             let state = handle.state.lock().await;
             state
                 .find_step(&id)
-                .map(|step| step.def.executor.clone())
+                .map(|step| {
+                    // A completed step being run again is an explicit rerun.
+                    // Crash/timeout recovery must keep already bound outputs.
+                    let previous = step.history.iter().rev().nth(1);
+                    (
+                        step.def.executor.clone(),
+                        previous.is_some_and(|attempt| {
+                            attempt.output.is_some() && attempt.error.is_none()
+                        }),
+                    )
+                })
                 .unwrap_or_default()
         };
         #[cfg(test)]
@@ -739,6 +749,7 @@ impl Pipeline {
                 asset_generators: self.asset_generators.as_ref(),
                 project_path,
                 run_id: &run_id,
+                retry_placeholders,
                 plan: &production_plan,
                 scope: &scope,
                 cancelled: &handle.cancelled,
