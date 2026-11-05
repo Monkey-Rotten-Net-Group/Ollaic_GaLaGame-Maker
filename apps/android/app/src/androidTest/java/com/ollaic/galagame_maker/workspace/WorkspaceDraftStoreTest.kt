@@ -18,6 +18,117 @@ class WorkspaceDraftStoreTest {
     return File(context.cacheDir, "workspace-test-${UUID.randomUUID()}").also { check(it.mkdirs()) }
   }
 
+  private fun portableDocument(): WorkspaceDraft {
+    val grouped = "Alice:First paragraph;\r\nAlice:Second paragraph;\r\n"
+    return WorkspaceDraft(listOf(
+      DraftScene(id = UUID.randomUUID().toString().uppercase(), name = "Opening alias", fileName = "start.txt", blocks = listOf(
+        ScriptBlock(id = UUID.randomUUID().toString().uppercase(), kind = BlockKind.Dialogue, speaker = "Alice", text = "Hello",
+          source = "Alice:Hello -future=keep; inline\r\n"),
+      )),
+      DraftScene(id = UUID.randomUUID().toString().uppercase(), name = "Zeta", fileName = "Zeta.txt", blocks = listOf(
+        ScriptBlock(id = UUID.randomUUID().toString().uppercase(), kind = BlockKind.Command, text = grouped, source = grouped),
+      )),
+      DraftScene(id = UUID.randomUUID().toString().uppercase(), name = "Alpha", fileName = "Alpha.txt"),
+    ), notes = "Cached notes")
+  }
+
+  @Test fun archiveImportRebindsCacheWithoutLosingPresentationOrSource() = runBlocking {
+    val directory = temporaryDirectory()
+    try {
+      val originalId = UUID.randomUUID().toString().uppercase()
+      val original = File(directory, "original")
+      com.ollaic.core.createProject(original.absolutePath, "Portable project")
+      val document = portableDocument()
+      val cache = org.json.JSONObject(WorkspaceCodec.encode(originalId, document))
+        .put("futureRoot", org.json.JSONObject().put("keep", true))
+      cache.getJSONArray("scenes").getJSONObject(0).put("futureScene", "preserve")
+        .getJSONArray("blocks").getJSONObject(0).put("futureBlock", 7)
+      val initial = com.ollaic.core.loadWorkspace(original.absolutePath)
+      val originalState = cache.toString()
+      com.ollaic.core.saveWorkspace(original.absolutePath, WorkspaceCodec.sources(document), "Native notes", originalState, initial.revision)
+      File(original, "story-plan.json").writeText("{\"keep\":true}")
+      val archive = File(directory, "portable.zip")
+      com.ollaic.core.exportProject(original.absolutePath, archive.absolutePath)
+      val archiveBytes = archive.readBytes()
+
+      val store = WorkspaceDraftStore(directory)
+      val imported = store.importArchive(archive)
+      assertNotEquals(originalId, imported.id)
+      val root = store.projectDirectory(imported.id)
+      val snapshot = com.ollaic.core.loadWorkspace(root.absolutePath)
+      val rebound = org.json.JSONObject(snapshot.editorState)
+      assertEquals(imported.id, rebound.getString("projectId"))
+      assertTrue(rebound.getJSONObject("futureRoot").getBoolean("keep"))
+      assertEquals("preserve", rebound.getJSONArray("scenes").getJSONObject(0).getString("futureScene"))
+      assertEquals(7, rebound.getJSONArray("scenes").getJSONObject(0).getJSONArray("blocks").getJSONObject(0).getInt("futureBlock"))
+      assertEquals(WorkspaceCodec.sources(document).associate { it.fileName to it.source }, snapshot.scenes.associate { it.fileName to it.source })
+      val expected = document.copy(notes = "Native notes")
+      assertEquals(expected, WorkspaceDraftStore(directory).open(imported, "Unused fallback"))
+
+      val edited = expected.copy(notes = "Next save after import")
+      store.save(imported.id, edited)
+      assertEquals(edited, WorkspaceDraftStore(directory).load(imported.id))
+      assertEquals("{\"keep\":true}", File(root, "story-plan.json").readText())
+      val second = store.importArchive(archive)
+      assertNotEquals(imported.id, second.id)
+      assertEquals(expected, WorkspaceDraftStore(directory).open(second, "Unused fallback"))
+      assertEquals(imported.id, org.json.JSONObject(com.ollaic.core.loadWorkspace(root.absolutePath).editorState).getString("projectId"))
+      assertEquals(originalState, com.ollaic.core.loadWorkspace(original.absolutePath).editorState)
+      assertArrayEquals(archiveBytes, archive.readBytes())
+    } finally { directory.deleteRecursively() }
+  }
+
+  @Test fun normalWorkspaceReadsKeepStrictProjectOwnership() {
+    val originalId = UUID.randomUUID().toString().uppercase()
+    val importedId = UUID.randomUUID().toString()
+    val document = portableDocument()
+    val state = WorkspaceCodec.encode(originalId, document)
+    val snapshot = com.ollaic.core.WorkspaceSnapshot(WorkspaceCodec.sources(document), "Native notes", state, "revision")
+    assertTrue(runCatching { WorkspaceCodec.decode(importedId, org.json.JSONObject(state)) }.isFailure)
+    val ordinaryRead = WorkspaceCodec.fromNative(importedId, snapshot)
+    assertEquals(listOf("start", "Alpha", "Zeta"), ordinaryRead.scenes.map { it.name })
+    val rebound = checkNotNull(WorkspaceCodec.rebindImportedCache(importedId, snapshot))
+    val importedRead = WorkspaceCodec.fromNative(importedId, snapshot.copy(editorState = rebound))
+    assertEquals(document.copy(notes = "Native notes"), importedRead)
+    assertEquals(originalId, org.json.JSONObject(state).getString("projectId"))
+  }
+
+  @Test fun invalidImportedCachesRemainOpaqueAndCannotReplaceActualScripts() = runBlocking {
+    val directory = temporaryDirectory()
+    try {
+      val originalId = UUID.randomUUID().toString()
+      val original = File(directory, "original")
+      com.ollaic.core.createProject(original.absolutePath, "Cache validation")
+      val document = portableDocument()
+      val sourceFiles = WorkspaceCodec.sources(document)
+      val changed = document.copy(scenes = document.scenes.mapIndexed { index, scene ->
+        if (index == 0) scene.copy(blocks = scene.blocks.map { it.copy(text = "Cached content must not win") }) else scene
+      })
+      val duplicate = document.copy(scenes = document.scenes + document.scenes[0].copy(id = UUID.randomUUID().toString(), name = "Duplicate file"))
+      val cases = listOf(
+        org.json.JSONObject(WorkspaceCodec.encode(originalId, document)).put("version", 99).toString(),
+        WorkspaceCodec.encode(originalId, changed),
+        WorkspaceCodec.encode(originalId, duplicate),
+        org.json.JSONObject(WorkspaceCodec.encode(originalId, document)).also { it.remove("projectId") }.toString(),
+      )
+      val store = WorkspaceDraftStore(directory)
+      cases.forEachIndexed { index, state ->
+        val before = com.ollaic.core.loadWorkspace(original.absolutePath)
+        com.ollaic.core.saveWorkspace(original.absolutePath, sourceFiles, "Native notes", state, before.revision)
+        val archive = File(directory, "invalid-cache-$index.zip")
+        com.ollaic.core.exportProject(original.absolutePath, archive.absolutePath)
+        val project = store.importArchive(archive)
+        val snapshot = com.ollaic.core.loadWorkspace(store.projectDirectory(project.id).absolutePath)
+        assertEquals(state, snapshot.editorState)
+        assertNull(WorkspaceCodec.rebindImportedCache(project.id, snapshot))
+        assertEquals(sourceFiles.associate { it.fileName to it.source }, snapshot.scenes.associate { it.fileName to it.source })
+        val loaded = store.open(project, "Unused fallback")
+        assertEquals(listOf("start", "Alpha", "Zeta"), loaded.scenes.map { it.name })
+        assertEquals("Native notes", loaded.notes)
+      }
+    } finally { directory.deleteRecursively() }
+  }
+
   @Test fun roundTripPreservesScenesBlocksAndProjectIsolation() = runBlocking {
     val directory = temporaryDirectory()
     try {

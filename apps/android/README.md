@@ -63,6 +63,10 @@ original JSON. A fresh install has no example projects. The application ID is un
 from the former Tauri APK, so in-place upgrades retain private files, but this app does
 not read its legacy Web project library. Uninstalling removes private data.
 
+ZIP imports receive a new managed project ID. A validated mobile editor cache is
+rebound to that ID while retaining scene labels, ordering and scene/block IDs.
+Unknown or inconsistent caches remain untouched and do not replace actual scripts.
+
 ## Focused Tests
 
 ```sh

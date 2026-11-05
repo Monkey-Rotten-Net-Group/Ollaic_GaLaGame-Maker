@@ -120,9 +120,21 @@ class WorkspaceDraftStore(private val directory: File) {
   suspend fun importArchive(archive: File): HomeProject = withContext(Dispatchers.IO) {
     lock.withLock {
       val id = UUID.randomUUID().toString()
-      val info = importProject(archive.absolutePath, projectDirectory(id).absolutePath)
-      HomeProject(id = id, name = info.name.ifBlank { "Imported project" }, description = info.description,
-        sceneCount = info.scenes.size, lastModified = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date()), favorite = false, deleted = false)
+      val root = projectDirectory(id)
+      val info = importProject(archive.absolutePath, root.absolutePath)
+      try {
+        val snapshot = loadWorkspace(root.absolutePath)
+        val rebound = WorkspaceCodec.rebindImportedCache(id, snapshot)
+        revisions[id] = if (rebound == null) snapshot.revision else
+          saveWorkspace(root.absolutePath, snapshot.scenes, snapshot.notes, rebound, snapshot.revision)
+        HomeProject(id = id, name = info.name.ifBlank { "Imported project" }, description = info.description,
+          sceneCount = info.scenes.size, lastModified = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date()), favorite = false, deleted = false)
+      } catch (error: Exception) {
+        revisions.remove(id)
+        try { check(root.deleteRecursively()) { "Cannot remove failed project import" } }
+        catch (cleanup: Exception) { error.addSuppressed(cleanup) }
+        throw error
+      }
     }
   }
 
