@@ -379,6 +379,7 @@ export function useFlowRunController(projectPath: string) {
       setError(null);
       try {
         const updatedPlan = await pipelineApproveScene(projectPath, sceneId);
+        planRequestRef.current += 1;
         setPlan(updatedPlan);
         return updatedPlan;
       } catch (err) {
@@ -398,6 +399,7 @@ export function useFlowRunController(projectPath: string) {
       setError(null);
       try {
         const updatedPlan = await pipelineUnlockScene(projectPath, sceneId);
+        planRequestRef.current += 1;
         setPlan(updatedPlan);
         return updatedPlan;
       } catch (err) {

@@ -105,73 +105,7 @@ impl Agent for SceneAgent {
                     .iter()
                     .filter(|edge| edge.from == scene.id)
                     .collect();
-                if outgoing.len() > 1 || outgoing.iter().any(|edge| edge.choice.is_some()) {
-                    let fallback_target = outgoing
-                        .iter()
-                        .find(|edge| edge.condition.is_none())
-                        .or_else(|| outgoing.first())
-                        .and_then(|edge| by_file.get(edge.to.as_str()).copied())
-                        .unwrap_or(&scene.file);
-                    let mut trampolines: Vec<(String, &[String], &str, Option<&str>)> = Vec::new();
-                    let mut choices = Vec::new();
-
-                    for (i, edge) in outgoing.iter().enumerate() {
-                        let label = clean_choice(edge.choice.as_deref().unwrap_or("继续"));
-                        let target_file = by_file
-                            .get(edge.to.as_str())
-                            .copied()
-                            .expect("validated branch target");
-
-                        if !edge.effects.is_empty() || edge.condition.is_some() {
-                            let trampoline_lbl = format!("lbl_edge_{i}");
-                            choices.push(format!("{}:{}", label, trampoline_lbl));
-                            trampolines.push((
-                                trampoline_lbl,
-                                &edge.effects,
-                                target_file,
-                                edge.condition.as_deref(),
-                            ));
-                        } else {
-                            choices.push(format!("{}:{}", label, target_file));
-                        }
-                    }
-
-                    lines.push(format!("choose:{};", choices.join("|")));
-
-                    for (lbl, effects, target_file, condition) in trampolines {
-                        lines.push(format!("label:{};", lbl));
-                        for effect in effects {
-                            lines.push(format_set_var(effect));
-                        }
-                        if let Some(cond) = condition {
-                            lines.push(format!("changeScene:{} -when={};", target_file, cond));
-                            if fallback_target != target_file {
-                                lines.push(format!("changeScene:{};", fallback_target));
-                            } else {
-                                lines.push("end;".to_string());
-                            }
-                        } else {
-                            lines.push(format!("changeScene:{};", target_file));
-                        }
-                    }
-                } else if let Some(edge) = outgoing.first() {
-                    let target_file = by_file.get(edge.to.as_str()).copied().ok_or_else(|| {
-                        AgentError(format!(
-                            "SceneScript branch targets unknown scene {}",
-                            edge.to
-                        ))
-                    })?;
-                    for effect in &edge.effects {
-                        lines.push(format_set_var(effect));
-                    }
-                    if let Some(cond) = &edge.condition {
-                        lines.push(format!("changeScene:{} -when={};", target_file, cond));
-                    } else {
-                        lines.push(format!("changeScene:{};", target_file));
-                    }
-                } else {
-                    lines.push("end;".to_string());
-                }
+                lines.extend(compile_routes(&outgoing, &by_file)?);
                 let content = lines.join("\n") + "\n";
                 validate_script(&scene.file, &content)?;
                 scripts.push(SceneScript {
@@ -398,10 +332,94 @@ fn compile_beat(beat: &DialogueBeat) -> String {
     }
 }
 
+fn compile_routes(
+    outgoing: &[&crate::story_plan::BranchEdge],
+    files: &HashMap<&str, &str>,
+) -> Result<Vec<String>, AgentError> {
+    let mut lines = Vec::new();
+    let target = |edge: &crate::story_plan::BranchEdge| {
+        files.get(edge.to.as_str()).copied().ok_or_else(|| {
+            AgentError(format!(
+                "SceneScript branch targets unknown scene {}",
+                edge.to
+            ))
+        })
+    };
+    let body = |edge: &crate::story_plan::BranchEdge| -> Result<Vec<String>, AgentError> {
+        let mut result: Vec<_> = edge
+            .effects
+            .iter()
+            .map(|effect| format_set_var(effect))
+            .collect();
+        result.push(format!("changeScene:{};", target(edge)?));
+        Ok(result)
+    };
+    let fallback = outgoing
+        .iter()
+        .find(|edge| edge.condition.is_none())
+        .copied();
+    let fallback_body = || -> Result<Vec<String>, AgentError> {
+        fallback.map_or_else(|| Ok(vec!["end;".into()]), &body)
+    };
+    if outgoing.iter().any(|edge| edge.choice.is_some()) {
+        let choices: Vec<_> = outgoing
+            .iter()
+            .enumerate()
+            .map(|(i, edge)| {
+                format!(
+                    "{}:lbl_edge_{i}",
+                    clean_choice(edge.choice.as_deref().unwrap_or("继续"))
+                )
+            })
+            .collect();
+        lines.push(format!("choose:{};", choices.join("|")));
+        for (i, edge) in outgoing.iter().enumerate() {
+            lines.push(format!("label:lbl_edge_{i};"));
+            if let Some(condition) = &edge.condition {
+                lines.push(format!("jumpLabel:lbl_taken_{i} -when={condition};"));
+                lines.extend(fallback_body()?);
+                lines.push(format!("label:lbl_taken_{i};"));
+            }
+            lines.extend(body(edge)?);
+        }
+    } else {
+        for (i, edge) in outgoing
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.condition.is_some())
+        {
+            lines.push(format!(
+                "jumpLabel:lbl_taken_{i} -when={};",
+                edge.condition.as_deref().unwrap()
+            ));
+        }
+        lines.extend(fallback_body()?);
+        for (i, edge) in outgoing
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.condition.is_some())
+        {
+            lines.push(format!("label:lbl_taken_{i};"));
+            lines.extend(body(edge)?);
+        }
+    }
+    Ok(lines)
+}
+
 fn format_set_var(effect: &str) -> String {
     let trimmed = effect.trim();
     if let Some((k, v)) = trimmed.split_once('=') {
-        format!("setVar:{}={};", k.trim(), v.trim())
+        let lhs = k.trim();
+        if let Some(operator) = lhs
+            .chars()
+            .last()
+            .filter(|op| matches!(op, '+' | '-' | '*' | '/'))
+        {
+            let variable = lhs[..lhs.len() - 1].trim();
+            format!("setVar:{variable}={variable}{operator}({});", v.trim())
+        } else {
+            format!("setVar:{}={};", lhs, v.trim())
+        }
     } else {
         format!("setVar:{};", trimmed)
     }
@@ -934,7 +952,78 @@ mod tests {
             panic!("expected scene scripts")
         };
         let content = &scripts[0].content;
-        assert!(content.contains("choose:相信她:lbl_edge_0|转身离开:normal_end.txt;"));
-        assert!(content.contains("label:lbl_edge_0;\nchangeScene:true_end.txt -when=linxia_trust>=1;\nchangeScene:normal_end.txt;"));
+        assert!(content.contains("choose:相信她:lbl_edge_0|转身离开:lbl_edge_1;"));
+        assert!(content.contains("label:lbl_edge_0;\njumpLabel:lbl_taken_0 -when=linxia_trust>=1;\nchangeScene:normal_end.txt;\nlabel:lbl_taken_0;\nchangeScene:true_end.txt;"));
+    }
+}
+
+#[cfg(test)]
+mod routing_regressions {
+    use super::*;
+    use crate::story_plan::BranchEdge;
+
+    #[test]
+    fn condition_only_routes_check_before_effects_and_terminate_without_a_fallback() {
+        let edges = [
+            BranchEdge {
+                from: "playground_final".into(),
+                to: "ending_confront".into(),
+                condition: Some("confront_route==true".into()),
+                effects: vec!["trust += 1".into()],
+                ..Default::default()
+            },
+            BranchEdge {
+                from: "playground_final".into(),
+                to: "ending_archive".into(),
+                condition: Some("archive_evidence>=2".into()),
+                ..Default::default()
+            },
+        ];
+        let files = HashMap::from([
+            ("ending_confront", "confront.txt"),
+            ("ending_archive", "archive.txt"),
+        ]);
+        let script = compile_routes(&edges.iter().collect::<Vec<_>>(), &files).unwrap();
+        assert_eq!(
+            script,
+            vec![
+                "jumpLabel:lbl_taken_0 -when=confront_route==true;",
+                "jumpLabel:lbl_taken_1 -when=archive_evidence>=2;",
+                "end;",
+                "label:lbl_taken_0;",
+                "setVar:trust=trust+(1);",
+                "changeScene:confront.txt;",
+                "label:lbl_taken_1;",
+                "changeScene:archive.txt;",
+            ]
+        );
+        let single = compile_routes(&[&edges[0]], &files).unwrap();
+        assert_eq!(single[1], "end;");
+    }
+
+    #[test]
+    fn choice_conditions_precede_both_selected_and_fallback_effects() {
+        let edges = [
+            BranchEdge {
+                to: "yes".into(),
+                choice: Some("Yes".into()),
+                condition: Some("trust>=2".into()),
+                effects: vec!["trust+=1".into()],
+                ..Default::default()
+            },
+            BranchEdge {
+                to: "no".into(),
+                choice: Some("No".into()),
+                effects: vec!["trust=0".into()],
+                ..Default::default()
+            },
+        ];
+        let script = compile_routes(
+            &edges.iter().collect::<Vec<_>>(),
+            &HashMap::from([("yes", "yes.txt"), ("no", "no.txt")]),
+        )
+        .unwrap()
+        .join("\n");
+        assert!(script.contains("label:lbl_edge_0;\njumpLabel:lbl_taken_0 -when=trust>=2;\nsetVar:trust=0;\nchangeScene:no.txt;\nlabel:lbl_taken_0;\nsetVar:trust=trust+(1);"));
     }
 }

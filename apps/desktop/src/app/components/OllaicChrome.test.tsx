@@ -50,3 +50,40 @@ describe('global topbar', () => {
     expect(handleSave).toHaveBeenCalledTimes(1);
   });
 });
+
+it('keeps file commands, snapshots, source view and autosave reachable in the overflow', async () => {
+  const user = userEvent.setup();
+  const onImport = vi.fn();
+  const onExport = vi.fn();
+  const onSnapshots = vi.fn();
+  const onScriptViewChange = vi.fn();
+  const onAutoSaveChange = vi.fn();
+  render(
+    <MemoryRouter>
+      <OllaicTopBar
+        projectId="project"
+        onImport={onImport}
+        onExport={onExport}
+        onSnapshots={onSnapshots}
+        onScriptViewChange={onScriptViewChange}
+        autoSave
+        onAutoSaveChange={onAutoSaveChange}
+      />
+    </MemoryRouter>,
+  );
+  for (const [name, callback] of [
+    ['导入场景', onImport],
+    ['导出场景', onExport],
+    ['快照管理', onSnapshots],
+  ] as const) {
+    await user.click(screen.getByRole('button', { name: '文件与编辑操作' }));
+    await user.click(screen.getByRole('menuitem', { name }));
+    expect(callback).toHaveBeenCalledTimes(1);
+  }
+  await user.click(screen.getByRole('button', { name: '文件与编辑操作' }));
+  await user.click(screen.getByRole('menuitem', { name: '脚本源码' }));
+  expect(onScriptViewChange).toHaveBeenCalledWith('script');
+  await user.click(screen.getByRole('button', { name: '文件与编辑操作' }));
+  await user.click(screen.getByRole('menuitemcheckbox', { name: '自动保存' }));
+  expect(onAutoSaveChange).toHaveBeenCalledWith(false);
+});

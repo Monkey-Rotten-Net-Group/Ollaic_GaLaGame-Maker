@@ -297,6 +297,7 @@
 
   /* Breathable Soft Pastel Ambient Shell (matches ProjectHome) */
   .story-shell {
+    --workspace-topbar-height: 84px;
     background:
       radial-gradient(circle at 16% 10%, var(--ph-glow-1) 0%, transparent 48%),
       radial-gradient(circle at 84% 88%, var(--ph-glow-2) 0%, transparent 52%),
@@ -311,19 +312,22 @@
   }
 
   /* ==========================================================================
-     Top Bar: Unified Solid 48px Header (Grid 1fr-auto-1fr for Zero Layout Shift)
+     Project toolbar and a separate, left-aligned workspace navigation row.
      ========================================================================== */
   .ollaic-topbar {
     position: fixed;
     inset: 0 0 auto 0;
     z-index: 50;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    height: 48px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 48px 36px;
+    column-gap: 12px;
+    height: var(--workspace-topbar-height, 84px);
     align-items: center;
     background: var(--surface-container-lowest);
     border-bottom: 1px solid var(--border);
     padding: 0 16px;
+    white-space: nowrap;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
   }
 
@@ -335,13 +339,6 @@
     min-width: 0;
   }
 
-  .ollaic-topbar-center {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    justify-self: center;
-  }
-
   .ollaic-topbar-end {
     display: flex;
     align-items: center;
@@ -350,17 +347,32 @@
     min-width: 0;
   }
 
+  .ollaic-topbar-end > *,
+  .ollaic-topbar-end svg {
+    flex-shrink: 0;
+  }
+
+  .ollaic-workspace-navigation {
+    grid-column: 1 / -1;
+    display: flex;
+    align-self: stretch;
+    gap: 4px;
+    min-width: 0;
+    margin-inline: -16px;
+    padding-inline: 16px;
+    overflow-x: auto;
+    border-top: 1px solid var(--border);
+  }
+
   .ollaic-view-tab {
     display: inline-flex;
-    height: 34px;
-    min-width: 86px;
-    flex: 1 1 0;
+    height: 100%;
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
     gap: 6px;
     padding: 0 12px;
-    border-radius: 999px;
+    border-bottom: 2px solid transparent;
     color: var(--muted-foreground);
     font-size: 12px;
     font-weight: 600;
@@ -374,8 +386,9 @@
   }
 
   .ollaic-view-tab[aria-current='page'] {
-    background: var(--nav-active);
-    color: var(--nav-active-foreground);
+    border-bottom-color: var(--primary);
+    color: var(--primary);
+    background: var(--surface-container-low);
   }
 
   .ollaic-topbar-island {
@@ -492,8 +505,8 @@
      ========================================================================== */
   .ollaic-workspace {
     margin: 0;
-    margin-top: 48px;
-    height: calc(100vh - 48px);
+    margin-top: var(--workspace-topbar-height);
+    height: calc(100dvh - var(--workspace-topbar-height));
     overflow: hidden;
     border-radius: 0;
     border: none;
@@ -652,7 +665,7 @@
 
   @media (max-width: 639px) {
     .ollaic-topbar {
-      gap: 8px;
+      column-gap: 8px;
       padding-inline: 10px;
     }
     .ollaic-topbar .font-display-family {
@@ -666,6 +679,10 @@
     .ollaic-topbar-start {
       gap: 6px;
     }
+    .ollaic-workspace-navigation {
+      margin-inline: -10px;
+      padding-inline: 10px;
+    }
     .ollaic-view-switch {
       padding: 3px;
       gap: 2px;
@@ -673,7 +690,6 @@
     .ollaic-view-tab {
       gap: 4px;
       padding-inline: 9px;
-      min-width: 72px;
     }
     .ollaic-topbar-brand {
       min-width: 0;
@@ -683,10 +699,24 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .ollaic-workspace {
-      margin: 0;
-      margin-top: 48px;
-      height: calc(100dvh - 48px);
+  }
+
+  @media (max-width: 1023px) {
+    .ollaic-project-context > span:first-child,
+    .ollaic-project-context > span:nth-child(2) {
+      display: none;
+    }
+  }
+
+  @media (max-width: 767px) {
+    .ollaic-topbar-start > button .font-display-family {
+      display: none;
+    }
+    .ollaic-project-context select {
+      max-width: 100px;
+    }
+    .ollaic-topbar-end {
+      gap: 4px;
     }
   }
 

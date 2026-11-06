@@ -207,7 +207,7 @@ export function StoryEditor() {
     markDirty,
     pushHistory,
     undo, redo,
-    commitEditedNodes,
+    commitEditedNodes, applySnippet,
     insertNode, createUnlockNode, updateSelectedNode,
     deleteSelectedNode, deleteNode, copyNode, cutNode, reorderNodes, pasteNode,
   } = useSceneDocument();
@@ -232,48 +232,46 @@ export function StoryEditor() {
     return nodes.findIndex((n) => n.id === selectedNode.id);
   }, [nodes, selectedNode]);
 
-  const handleInsertAiSnippet = useCallback(async (snippet: string) => {
-    if (!snippet.trim()) return;
-    try {
-      const parsed = await parseScene(snippet);
-      if (!parsed || parsed.length === 0) return;
-      const current = nodesRef.current.length > 0 ? nodesRef.current : nodes;
-      const targetIndex = selectedNode ? current.findIndex((n) => n.id === selectedNode.id) + 1 : current.length;
-      const nextNodes = [
-        ...current.slice(0, targetIndex),
-        ...parsed,
-        ...current.slice(targetIndex),
-      ];
-      commitEditedNodes(nextNodes);
-      toast.success('已将 AI 脚本块插入到当前位置');
-    } catch (err) {
-      console.warn('Failed to parse and insert snippet:', err);
-      toast.error('插入失败：脚本格式无法识别', { description: describeError(err) });
-    }
-  }, [commitEditedNodes, nodes, nodesRef, selectedNode]);
+  const sourceStateRef = useRef({ showScript, scriptSource });
+  sourceStateRef.current = { showScript, scriptSource };
 
-  const handleDiffAiSnippet = useCallback(async (snippet: string) => {
-    if (!snippet.trim() || !selectedNode) {
-      toast.info('请先选中要对比替换的剧本节点');
-      return;
-    }
-    try {
-      const parsed = await parseScene(snippet);
-      if (!parsed || parsed.length === 0) return;
-      const current = nodesRef.current.length > 0 ? nodesRef.current : nodes;
-      const targetIndex = current.findIndex((n) => n.id === selectedNode.id);
-      if (targetIndex < 0) return;
-      const nextNodes = [
-        ...current.slice(0, targetIndex),
-        ...parsed,
-        ...current.slice(targetIndex + 1),
-      ];
-      commitEditedNodes(nextNodes);
-      toast.success('已完成替换当前节点');
-    } catch (err) {
-      toast.error('替换失败：脚本格式无法识别', { description: describeError(err) });
-    }
-  }, [commitEditedNodes, nodes, nodesRef, selectedNode]);
+  const handleAiSnippet = useCallback(
+    async (snippet: string, replace: boolean) => {
+      if (!snippet.trim() || workflowOwnsProjectRef.current || editAgentBusyRef.current) return;
+      if (showScript) {
+        toast.info('请先应用源码更改并返回剧本视图，再插入 AI 片段');
+        return;
+      }
+      if (replace && !selectedNode) {
+        toast.info('请先选中要替换的剧本节点');
+        return;
+      }
+      const original = nodesRef.current;
+      const originalSource = sourceStateRef.current.scriptSource;
+      try {
+        const parsed = await parseScene(snippet);
+        if (
+          nodesRef.current !== original ||
+          sourceStateRef.current.showScript ||
+          sourceStateRef.current.scriptSource !== originalSource ||
+          workflowOwnsProjectRef.current ||
+          editAgentBusyRef.current
+        )
+          return;
+        applySnippet(parsed, selectedNode?.id, replace);
+        toast.success(replace ? '已替换当前节点' : '已插入 AI 脚本块');
+      } catch (err) {
+        toast.error('无法应用 AI 片段', { description: describeError(err) });
+      }
+    },
+    [applySnippet, nodesRef, selectedNode, showScript],
+  );
+  const handleInsertAiSnippet = (snippet: string) => {
+    void handleAiSnippet(snippet, false);
+  };
+  const handleDiffAiSnippet = (snippet: string) => {
+    void handleAiSnippet(snippet, true);
+  };
 
   // AI state
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
@@ -1121,88 +1119,13 @@ export function StoryEditor() {
 
   const editingAgentBlocked = aiAgent.busy || aiAgent.committing || aiAgent.pendingChangeSet?.status === 'pending';
   editAgentBusyRef.current = Boolean(editingAgentBlocked);
-  const handleAiSend = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    // 1. Handle /workflow command
-    if (trimmed.startsWith('/workflow')) {
-      const brief = trimmed.replace(/^\/workflow\s*/, '').trim();
-      if (!brief) {
-        if (flow.plan) {
-          openWorkflowBoard();
-          aiAgent.recordWorkflowTurn(
-            trimmed,
-            '已在主舞台展开当前故事企划的工作流看板。如需更新企划，可输入：`/workflow <新创意或修改意见>`。',
-          );
-        } else {
-          aiAgent.recordWorkflowTurn(
-            trimmed,
-            '请提供故事企划创意。例如：`/workflow 暴雨夜天台磁带悬疑恋爱短篇，4个场景，双人对峙`。',
-          );
-        }
-        return;
-      }
-
-      aiAgent.recordWorkflowTurn(
-        trimmed,
-        `已收到企划指令：“${brief}”。正在启动 Stage 1 全局设定与角色视觉定锚流水线...`,
-      );
-      void flow.runSetup(brief);
-      return;
-    }
-
-    // 2. Handle /scene command
-    if (trimmed.startsWith('/scene')) {
-      const sceneId = trimmed.replace(/^\/scene\s*/, '').trim();
-      if (!sceneId) {
-        const availableScenes = flow.plan?.scenePlans?.map((s) => s.id).join(', ') || '暂无';
-        aiAgent.recordWorkflowTurn(
-          trimmed,
-          `请指定场景 ID。当前企划分场：${availableScenes}。例如：\`/scene ${flow.plan?.scenePlans?.[0]?.id || 'opening'}\``,
-        );
-        return;
-      }
-
-      aiAgent.recordWorkflowTurn(
-        trimmed,
-        `正在安排场景【${sceneId}】的 Stage 2 生产流水线...`,
-      );
-      void flow.runScene(sceneId);
-      return;
-    }
-
-    // 3. Handle /plan and /help commands
-    if (trimmed === '/plan' || trimmed === '/help') {
-      if (trimmed === '/help') {
-        aiAgent.recordWorkflowTurn(
-          trimmed,
-          `**Ollaic AI 导演助手指令指南**：\n\n- \`/workflow <故事企划>\`：启动 Stage 1 立项企划与角色视觉定锚\n- \`/scene <场景ID>\`：生产指定场景（例如 \`/scene ${flow.plan?.scenePlans?.[0]?.id || 'opening'}\`）\n- \`/plan\`：查看当前故事企划与分场概览\n- \`/help\`：显示本指令说明\n\n日常直接输入文字即可编辑当前场景台词、增删角色或调整剧情。`,
-        );
-      } else {
-        const synopsis = flow.plan?.synopsis || '尚未立项';
-        const count = flow.plan?.scenePlans?.length ?? 0;
-        aiAgent.recordWorkflowTurn(
-          trimmed,
-          `**当前故事企划**：\n\n${synopsis}\n\n- 包含分场：${count} 场\n- 可点击下方卡片中的【看板】按钮在主舞台查看完整分场队列与素材。`,
-        );
-      }
-      return;
-    }
-
-    // 4. Default: editing agent chat turn
-    if (!workflowOwnsProjectRef.current) {
-      void aiAgent.sendPrompt(trimmed);
-    }
-  }, [aiAgent, flow, openWorkflowBoard]);
-
-  const prepareWorkflow = async (stepIds: string[]) => {
+  const prepareWorkflow = async (start: () => Promise<boolean | undefined>) => {
     if (workflowOwnsProjectRef.current || editAgentBusyRef.current) return false;
     workflowOwnsProjectRef.current = true;
     setWorkflowPreparing(true);
     setWorkspaceError(null);
     try {
-      if (dirtyRef.current && !await handleSave(true)) return false;
+      if (dirtyRef.current && !(await handleSave(true))) return false;
       for (const scene of projectInfo?.scenes ?? []) {
         const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(scene);
         if (!draft || !projectPath) continue;
@@ -1210,7 +1133,7 @@ export function StoryEditor() {
         editorCommitCoordinator.deleteDraft(scene);
       }
       await editorCommitCoordinator.beginCommit(projectInfo?.scenes ?? [currentSceneName]);
-      return await flow.start(stepIds);
+      return Boolean(await start());
     } catch (err) {
       setWorkspaceError(`准备生产失败：${String(err)}`);
       return false;
@@ -1257,10 +1180,97 @@ export function StoryEditor() {
     }).finally(() => { if (token === workflowRefreshToken.current) setWorkflowRefreshing(false); });
   }, [flow.loading, flow.state.runStatus, loading, projectPath, workflowOutputKey, dirtyRef]);
 
+  const runSetup = async (brief?: string) => {
+    if (
+      flow.plan &&
+      !(await confirmAction({
+        title: '重新生成全局企划？',
+        description: '此操作将重新生成企划与角色设定。',
+        confirmLabel: '重新生成',
+      }))
+    )
+      return false;
+    return prepareWorkflow(() => flow.runSetup(brief));
+  };
+  const runScene = (sceneId: string) => prepareWorkflow(() => flow.runScene(sceneId));
   const workflowController = {
     ...flow,
-    start: prepareWorkflow,
+    start: (stepIds: string[]) => prepareWorkflow(() => flow.start(stepIds)),
+    runSetup,
+    runScene,
     busy: flow.busy || workflowPreparing || workflowRefreshing,
+  };
+
+  const handleAiSend = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    // 1. Handle /workflow command
+    if (/^\/workflow(\s|$)/.test(trimmed)) {
+      const brief = trimmed.replace(/^\/workflow\s*/, '').trim();
+      if (!brief) {
+        if (flow.plan) {
+          openWorkflowBoard();
+          aiAgent.recordWorkflowTurn(
+            trimmed,
+            '已在主舞台展开当前故事企划的工作流看板。如需更新企划，可输入：`/workflow <新创意或修改意见>`。',
+          );
+        } else {
+          aiAgent.recordWorkflowTurn(
+            trimmed,
+            '请提供故事企划创意。例如：`/workflow 暴雨夜天台磁带悬疑恋爱短篇，4个场景，双人对峙`。',
+          );
+        }
+        return;
+      }
+
+      aiAgent.recordWorkflowTurn(
+        trimmed,
+        `已收到企划指令：“${brief}”。正在启动 Stage 1 全局设定与角色视觉定锚流水线...`,
+      );
+      void runSetup(brief);
+      return;
+    }
+
+    // 2. Handle /scene command
+    if (/^\/scene(\s|$)/.test(trimmed)) {
+      const sceneId = trimmed.replace(/^\/scene\s*/, '').trim();
+      if (!sceneId) {
+        const availableScenes = flow.plan?.scenePlans?.map((s) => s.id).join(', ') || '暂无';
+        aiAgent.recordWorkflowTurn(
+          trimmed,
+          `请指定场景 ID。当前企划分场：${availableScenes}。例如：\`/scene ${flow.plan?.scenePlans?.[0]?.id || 'opening'}\``,
+        );
+        return;
+      }
+
+      aiAgent.recordWorkflowTurn(trimmed, `正在安排场景【${sceneId}】的 Stage 2 生产流水线...`);
+      void runScene(sceneId);
+      return;
+    }
+
+    // 3. Handle /plan and /help commands
+    if (trimmed === '/plan' || trimmed === '/help') {
+      if (trimmed === '/help') {
+        aiAgent.recordWorkflowTurn(
+          trimmed,
+          `**Ollaic AI 导演助手指令指南**：\n\n- \`/workflow <故事企划>\`：启动 Stage 1 立项企划与角色视觉定锚\n- \`/scene <场景ID>\`：生产指定场景（例如 \`/scene ${flow.plan?.scenePlans?.[0]?.id || 'opening'}\`）\n- \`/plan\`：查看当前故事企划与分场概览\n- \`/help\`：显示本指令说明\n\n日常直接输入文字即可编辑当前场景台词、增删角色或调整剧情。`,
+        );
+      } else {
+        const synopsis = flow.plan?.synopsis || '尚未立项';
+        const count = flow.plan?.scenePlans?.length ?? 0;
+        aiAgent.recordWorkflowTurn(
+          trimmed,
+          `**当前故事企划**：\n\n${synopsis}\n\n- 包含分场：${count} 场\n- 可点击下方卡片中的【看板】按钮在主舞台查看完整分场队列与素材。`,
+        );
+      }
+      return;
+    }
+
+    // 4. Default: editing agent chat turn
+    if (!workflowOwnsProjectRef.current) {
+      void aiAgent.sendPrompt(trimmed);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -1314,6 +1324,24 @@ export function StoryEditor() {
           onSave={workflowOwnsProject ? undefined : () => { void handleSave(); }}
           onRun={() => changePreviewLayout(previewLayout === 'hidden' ? preferredDockLayout : 'hidden')}
           previewActive={previewLayout !== 'hidden'}
+          onOpenProject={() => { void handleOpenProject(); }}
+          onScriptViewChange={(mode) => {
+            if (viewMode) {
+              const next = new URLSearchParams(searchParams);
+              next.delete('view');
+              setSearchParams(next);
+            }
+            if (showScript && mode !== 'script') {
+              void handleApplyScript().then(() => setScriptMode(mode)).catch((error) => toast.error('源码无法应用', { description: describeError(error) }));
+            } else { setScriptMode(mode); }
+          }}
+          onImport={workflowOwnsProject ? undefined : handleImport}
+          onExport={() => { void handleExport(); }}
+          onSnapshots={() => setSnapshotManagerOpen(true)}
+          onToggleScript={() => setShowScript(!showScript)}
+          scriptMode={showScript}
+          autoSave={autoSaveEnabled}
+          onAutoSaveChange={setAutoSaveEnabled}
           onPublish={handleExportProject}
           onSettings={() => setAppSettingsOpen(true)}
           agentOpen={agentOpen}
@@ -1444,15 +1472,11 @@ export function StoryEditor() {
               </footer>
             </div>
             <aside aria-label="Agent 面板" className={`editor-agent-dock ${agentOpen ? '' : 'hidden'}`}>
+              {/* Clear any previous panel lock; only edit-specific content is inert. */}
               <div
                 className="flex min-h-0 flex-1 flex-col"
-                ref={(element) => { element?.toggleAttribute('inert', workflowOwnsProject); }}
+                ref={(element) => { element?.removeAttribute('inert'); }}
               >
-                {workflowOwnsProject && (
-                  <p className="border-b border-border bg-primary/5 px-4 py-2 text-xs text-muted-foreground">
-                    生产进行中。可随时在下方输入指令或对话。
-                  </p>
-                )}
                 <AiAssistantPanel
                   embedded
                   disabled={workflowOwnsProject}
@@ -1470,7 +1494,7 @@ export function StoryEditor() {
                   workflowController={workflowController}
                   onOpenWorkflowBoard={openWorkflowBoard}
                   onPreviewScene={(sceneId) => {
-                    const matchedScene = projectInfo?.scenes.find(
+                    const matchedScene = flow.plan?.scenePlans?.find((scene) => scene.id === sceneId)?.file || projectInfo?.scenes.find(
                       (s) => s === sceneId || s === `${sceneId}.txt` || sceneHeaders[s]?.outline === sceneId,
                     ) || sceneId;
                     if (projectInfo?.scenes.includes(matchedScene)) {

@@ -20,7 +20,7 @@ use crate::pipeline::asset_executor::{AssetGeneratorFactory, ConfiguredAssetGene
 use crate::pipeline::dsl::{FlowRecipe, FlowScope, StepExecutor, StepKind};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::output_commit::{
-    apply_canonical_characters, apply_output, commit_step_output, restore_interrupted_outputs,
+    apply_canonical_characters, commit_step_output, restore_interrupted_outputs,
     validate_output_contract,
 };
 use crate::pipeline::project_state::{project_has_story_content_locked, record_run_summary};
@@ -807,7 +807,7 @@ impl Pipeline {
                 }
                 // Keep stop() outside the two durable writes: cancellation
                 // takes effect either before output or after a full commit.
-                apply_output(&mut plan, &out);
+                super::output_commit::apply_scoped_output(&mut plan, &out, &scope);
                 if let Err(error) = story_plan::validate(&plan) {
                     drop(state);
                     self.fail_step(

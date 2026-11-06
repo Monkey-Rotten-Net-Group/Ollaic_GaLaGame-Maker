@@ -93,8 +93,7 @@ beforeEach(() => {
     if (cmd === "pipeline_get_plan") return Promise.resolve(null as unknown);
     return Promise.resolve(undefined);
   });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mockedListen.mockImplementation((_channel: string, handler: any) => {
+  mockedListen.mockImplementation((_channel, handler) => {
     lastListenHandler = handler as typeof lastListenHandler;
     listenHandlers.push(handler as (event: { payload: PipelineEvent }) => void);
     return Promise.resolve((() => {}) as unknown as ReturnType<typeof listen>);
@@ -327,7 +326,7 @@ describe("FlowBoard (Two-Stage Scene-Centric Workflow)", () => {
       screen.getByRole("button", { name: "查看media-production" }),
     );
     await user.click(screen.getByRole("tab", { name: "输出" }));
-    await user.click(screen.getByRole("button", { name: "提升 bg 候选 1" }));
+    await user.click(screen.getByRole("button", { name: "应用 bg 候选 1 到素材库" }));
     expect(mockedInvoke).toHaveBeenCalledWith("asset_queue_promote_artifact", {
       projectPath: "/tmp/proj",
       taskId: "bg",
@@ -589,6 +588,11 @@ describe("FlowBoard (Two-Stage Scene-Centric Workflow)", () => {
     expect(screen.getByText("旧校舍调查")).toBeInTheDocument();
     expect(screen.getByText("抉择时刻")).toBeInTheDocument();
 
+    await user.click(screen.getByText("抉择时刻"));
+    expect(screen.getByText("当前运行没有此场景的执行记录。")).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /步骤 Prompt/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '关闭检查器' }));
+
     // Trigger 单场景生成「生成本场」 on decision (pending)
     const decisionCard = screen.getByTestId("scene-card-decision");
     const runBtn = withinCard(decisionCard, "生成本场");
@@ -609,6 +613,11 @@ describe("FlowBoard (Two-Stage Scene-Centric Workflow)", () => {
     expect(
       screen.getByText("当前单场制作流水线 (decision)"),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByText("旧校舍调查"));
+    expect(screen.getByText("当前运行没有此场景的执行记录。")).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /步骤 Prompt/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '关闭检查器' }));
 
     // Trigger 「通过并锁定」 on investigation (drafted)
     const invCard = screen.getByTestId("scene-card-investigation");

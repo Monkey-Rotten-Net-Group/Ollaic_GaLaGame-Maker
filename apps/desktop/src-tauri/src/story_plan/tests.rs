@@ -393,7 +393,7 @@ fn legacy_plan_defaults_visual_fields_and_round_trips_new_fields() {
 }
 
 #[test]
-fn rejects_unreachable_scenes_from_entry_scene() {
+fn saves_unconnected_scene_cards_during_authoring() {
     let mut plan = StoryPlan::new("brief");
     plan.chapters.push(ChapterPlan {
         id: "ch1".into(),
@@ -428,16 +428,14 @@ fn rejects_unreachable_scenes_from_entry_scene() {
         }],
     };
 
-    let error = validate(&plan).unwrap_err();
-    assert!(
-        error.to_string().contains("unreachable"),
-        "Error should report unreachable scene: {}",
-        error
-    );
+    validate(&plan).unwrap();
+    let project = fresh_project_dir("unconnected_authoring");
+    save_plan(&project, &plan).unwrap();
+    assert_eq!(load_plan(&project).unwrap().unwrap(), plan);
 }
 
 #[test]
-fn rejects_non_ending_scene_with_no_outgoing_edges() {
+fn preserves_legacy_terminal_scenes_without_ending_names() {
     let mut plan = StoryPlan::new("brief");
     plan.chapters.push(ChapterPlan {
         id: "ch1".into(),
@@ -472,12 +470,10 @@ fn rejects_non_ending_scene_with_no_outgoing_edges() {
         }],
     };
 
-    let error = validate(&plan).unwrap_err();
-    assert!(
-        error.to_string().contains("dead end") || error.to_string().contains("trap"),
-        "Error should identify dead-end non-ending scene: {}",
-        error
-    );
+    validate(&plan).unwrap();
+    let project = fresh_project_dir("legacy_terminal");
+    save_plan(&project, &plan).unwrap();
+    assert_eq!(load_plan(&project).unwrap().unwrap(), plan);
 }
 
 #[test]
@@ -562,4 +558,26 @@ fn rejects_condition_reading_variable_with_no_writes() {
         "Error should report variable never written: {}",
         error
     );
+}
+
+#[test]
+fn branch_expressions_reject_invalid_assignments_and_script_injection() {
+    use super::store::{extract_effect_variable, is_safe_branch_expression};
+    for invalid in [
+        "trust",
+        "trust == 1",
+        "信任=1",
+        "trust=1;end",
+        "trust=1\nend",
+        "trust=1 -next",
+        "trust=",
+    ] {
+        assert!(extract_effect_variable(invalid).is_none(), "{invalid}");
+    }
+    for valid in ["trust=1", "trust += 1", "trust-=1", "trust*=2", "trust/=2"] {
+        assert_eq!(extract_effect_variable(valid).as_deref(), Some("trust"));
+    }
+    for invalid in ["信任>=1", "trust>1;end", "trust>1\nend", "trust>1 -next"] {
+        assert!(!is_safe_branch_expression(invalid), "{invalid}");
+    }
 }

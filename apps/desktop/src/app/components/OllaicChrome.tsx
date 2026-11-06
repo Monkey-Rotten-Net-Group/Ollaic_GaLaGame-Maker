@@ -24,9 +24,21 @@ import {
 } from 'lucide-react';
 import { sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuItem, DropdownMenuCheckboxItem,
+} from './ui/dropdown-menu';
+
 export type OllaicActiveView = 'editor' | 'worldline' | 'workflow' | 'assets';
 export type OllaicSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type OllaicSection = 'edit' | 'assets';
+
+const WORKSPACE_VIEWS = [
+  { id: 'editor', label: '剧本编辑', icon: BookOpen },
+  { id: 'worldline', label: '场景图', icon: GitBranch },
+  { id: 'workflow', label: '工作流', icon: Workflow },
+  { id: 'assets', label: '资源库', icon: Boxes },
+] as const;
 
 export interface OllaicTopBarProps {
   projectId?: string;
@@ -47,7 +59,7 @@ export interface OllaicTopBarProps {
   canUndo?: boolean;
   canRedo?: boolean;
 
-  // Center: Segmented View Navigation
+  // Workspace navigation
   activeView?: OllaicActiveView;
   onViewChange?: (view: OllaicActiveView) => void;
 
@@ -85,6 +97,8 @@ export interface OllaicTopBarProps {
   onSnapshots?: () => void;
   onToggleScript?: () => void;
   scriptMode?: boolean;
+  scriptView?: 'compact' | 'stream' | 'script';
+  onScriptViewChange?: (view: 'compact' | 'stream' | 'script') => void;
 }
 
 interface OllaicPanelProps {
@@ -124,6 +138,8 @@ export function OllaicTopBar({
   agentOpen,
   agentBusy,
   onToggleAgent,
+  onImport, onExport, onSnapshots, onToggleScript, scriptMode, onOpenProject, onScriptViewChange,
+  autoSave, onAutoSaveChange,
 }: OllaicTopBarProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -136,7 +152,7 @@ export function OllaicTopBar({
 
   return (
     <header className="ollaic-topbar" aria-label={title ? `${title}工具栏` : '应用工具栏'}>
-      {/* Zone 1: Left - Brand, File Context & History */}
+      {/* Project context and file actions */}
       <div className="ollaic-topbar-start flex items-center gap-2">
         <button
           type="button"
@@ -156,7 +172,7 @@ export function OllaicTopBar({
         <div className="hidden sm:block h-3.5 w-px bg-border/80" />
 
         {/* Project (Parent) + File/Section (Child) Breadcrumb Hierarchy */}
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="ollaic-project-context flex items-center gap-1.5 min-w-0">
           <span
             className="text-xs font-semibold text-foreground/80 truncate max-w-[110px] sm:max-w-[150px]"
             title={`当前工程: ${projectName || projectId || 'WebGAL 工程'}`}
@@ -209,7 +225,7 @@ export function OllaicTopBar({
 
         {/* Undo / Redo */}
         {(onUndo || onRedo) && (
-          <div className="hidden md:flex items-center gap-0.5">
+          <div className="hidden lg:flex items-center gap-0.5">
             <button
               type="button"
               onClick={onUndo}
@@ -234,77 +250,18 @@ export function OllaicTopBar({
         )}
       </div>
 
-      {/* Zone 2: Center - Unified Segmented View Control */}
-      <div className="ollaic-topbar-center flex items-center justify-center">
-        {projectId && (
-          <nav
-            className="flex items-center rounded-lg border border-border/70 bg-surface-container-low p-0.5 text-xs font-medium shadow-2xs"
-            aria-label="工作区视图切换"
-          >
-            <button
-              type="button"
-              onClick={() => onViewChange?.('editor')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-all ${
-                activeView === 'editor'
-                  ? 'bg-surface-container-lowest text-primary font-bold shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <BookOpen className="size-3.5" />
-              <span className="hidden sm:inline">剧本编辑</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onViewChange?.('worldline')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-all ${
-                activeView === 'worldline'
-                  ? 'bg-surface-container-lowest text-primary font-bold shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <GitBranch className="size-3.5" />
-              <span className="hidden sm:inline">场景图</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onViewChange?.('workflow')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-all ${
-                activeView === 'workflow'
-                  ? 'bg-surface-container-lowest text-primary font-bold shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Workflow className="size-3.5" />
-              <span className="hidden sm:inline">工作流</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onViewChange?.('assets')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1 transition-all ${
-                activeView === 'assets'
-                  ? 'bg-surface-container-lowest text-primary font-bold shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Boxes className="size-3.5" />
-              <span className="hidden sm:inline">资源库</span>
-            </button>
-          </nav>
-        )}
-      </div>
-
-      {/* Zone 3: Right - Global Actions & Panel Controls */}
+      {/* Search, save status, and project actions */}
       <div className="ollaic-topbar-end flex items-center gap-2">
-        {/* Compact Global Search Capsule (Always visible) */}
+        {/* Global search */}
         {onSearchChange && (
-          <div className="relative flex items-center">
+          <div className="relative hidden items-center md:flex">
             <Search className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground opacity-70" />
             <input
               type="text"
               value={searchValue ?? ''}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder ?? '搜索台词 / 指令...'}
-              className="h-7 w-28 sm:w-36 md:w-44 rounded-lg border border-border/80 bg-surface-container-low pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:w-48 focus:bg-surface-container-lowest focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all outline-none"
+              className="h-7 w-28 2xl:w-44 rounded-lg border border-border/80 bg-surface-container-low pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:bg-surface-container-lowest focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all outline-none"
               aria-label="全局搜索"
             />
             <kbd className="pointer-events-none absolute right-1.5 text-[9px] font-mono text-muted-foreground opacity-60">⌘K</kbd>
@@ -385,8 +342,32 @@ export function OllaicTopBar({
             title="打包发布 WebGAL 独立运行包"
           >
             <Upload className="size-3.5" />
-            <span>打包发布</span>
+            <span className="hidden lg:inline">打包发布</span>
           </button>
+        )}
+
+        {(onImport || onExport || onSnapshots || onToggleScript || onAutoSaveChange || onScriptViewChange) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="ollaic-icon-button px-2 text-xs" aria-label="文件与编辑操作">更多</button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {onUndo && <DropdownMenuItem className="lg:hidden" disabled={fileDisabled} onSelect={onUndo}>撤销</DropdownMenuItem>}
+              {onRedo && <DropdownMenuItem className="lg:hidden" disabled={fileDisabled} onSelect={onRedo}>重做</DropdownMenuItem>}
+              {onSave && <DropdownMenuItem onSelect={onSave}>保存</DropdownMenuItem>}
+              {onOpenProject && <DropdownMenuItem onSelect={onOpenProject}>打开项目</DropdownMenuItem>}
+              {onImport && <DropdownMenuItem disabled={fileDisabled} onSelect={onImport}>导入场景</DropdownMenuItem>}
+              {onExport && <DropdownMenuItem onSelect={onExport}>导出场景</DropdownMenuItem>}
+              {onSnapshots && <DropdownMenuItem disabled={fileDisabled} onSelect={onSnapshots}>快照管理</DropdownMenuItem>}
+              {onScriptViewChange && <>
+                <DropdownMenuItem disabled={fileDisabled} onSelect={() => onScriptViewChange('compact')}>剧本视图</DropdownMenuItem>
+                <DropdownMenuItem disabled={fileDisabled} onSelect={() => onScriptViewChange('stream')}>指令卡片</DropdownMenuItem>
+                <DropdownMenuItem disabled={fileDisabled} onSelect={() => onScriptViewChange('script')}>脚本源码</DropdownMenuItem>
+              </>}
+              {!onScriptViewChange && onToggleScript && <DropdownMenuItem disabled={fileDisabled} onSelect={onToggleScript}>{scriptMode ? '返回剧本视图' : '编辑源码'}</DropdownMenuItem>}
+              {onAutoSaveChange && <DropdownMenuCheckboxItem checked={autoSave} onCheckedChange={onAutoSaveChange}>自动保存</DropdownMenuCheckboxItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
 
         {/* Settings */}
@@ -424,6 +405,23 @@ export function OllaicTopBar({
           </button>
         )}
       </div>
+      {projectId && (
+        <nav className="ollaic-workspace-navigation" aria-label="工作区视图切换">
+          {WORKSPACE_VIEWS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onViewChange?.(id)}
+              aria-label={label}
+              aria-current={activeView === id ? 'page' : undefined}
+              className="ollaic-view-tab"
+            >
+              <Icon className="size-3.5" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
     </header>
   );
 }

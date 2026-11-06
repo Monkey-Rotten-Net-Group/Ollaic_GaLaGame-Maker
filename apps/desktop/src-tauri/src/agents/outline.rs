@@ -4,7 +4,8 @@ use std::pin::Pin;
 use serde::Deserialize;
 
 use crate::story_plan::store::{
-    extract_condition_variables, extract_effect_variable, is_safe_variable_id,
+    extract_condition_variables, extract_effect_variable, is_safe_branch_expression,
+    is_safe_variable_id,
 };
 use crate::story_plan::types::{
     default_min_beats, fallback_min_beats, BranchEdge, BranchGraph, ChapterPlan, ScenePlan,
@@ -171,7 +172,7 @@ fn validate_response(response: &mut OutlineResponse, synopsis: &str) -> Result<(
             ));
         }
         if let Some(condition) = &edge.condition {
-            if condition.trim().is_empty() {
+            if !is_safe_branch_expression(condition) {
                 return Err(contract_error(
                     format!("$.branches.edges[{index}].condition"),
                     "must not be empty",

@@ -465,3 +465,44 @@ fn synopsis_output_populates_default_visual_style_when_empty() {
     assert!(!plan.visual_style.palette_and_lighting.is_empty());
     assert!(!plan.visual_style.negative_prompt.is_empty());
 }
+
+#[test]
+fn scene_scoped_global_audio_preserves_unrelated_approved_scenes() {
+    let mut plan = StoryPlan::new("test");
+    plan.scene_plans = ["previous", "target", "child", "unrelated"]
+        .iter()
+        .map(|id| crate::story_plan::ScenePlan {
+            id: (*id).into(),
+            file: format!("{id}.txt"),
+            approval_status: SceneApprovalStatus::Approved,
+            rolling_summary: Some(format!("{id} summary")),
+            ..Default::default()
+        })
+        .collect();
+    plan.branches.edges.push(crate::story_plan::BranchEdge {
+        from: "target".into(),
+        to: "child".into(),
+        ..Default::default()
+    });
+    let output = AgentOutput::new(AgentOutputPayload::AssetPlan(vec![AssetTaskPlan {
+        id: "new_global_bgm".into(),
+        kind: "bgm".into(),
+        target_stem: "bgm".into(),
+        ..Default::default()
+    }]));
+    apply_scoped_output(
+        &mut plan,
+        &output,
+        &crate::pipeline::dsl::FlowScope::Scene {
+            scene_id: "target".into(),
+        },
+    );
+    for scene in &plan.scene_plans {
+        if scene.id == "target" || scene.id == "child" {
+            assert_eq!(scene.approval_status, SceneApprovalStatus::Stale);
+        } else {
+            assert_eq!(scene.approval_status, SceneApprovalStatus::Approved);
+            assert_eq!(scene.rolling_summary, Some(format!("{} summary", scene.id)));
+        }
+    }
+}

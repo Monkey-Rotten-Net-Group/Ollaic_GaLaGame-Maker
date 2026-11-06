@@ -4,13 +4,15 @@ import { openFlowBoard } from './fixtures/editor';
 test('one editing entry keeps both Agent drafts and workflow selection', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
   await expect(page).toHaveURL(/\/editor\/alpha\?view=workflow$/);
-  await expect(page.getByRole('navigation', { name: '核心视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('navigation', { name: '核心视图' }).getByText(/生产流|脚本流|场景/)).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: '工作区视图切换' }).getByRole('button', { name: '工作流', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: '工作区视图切换' }).getByText(/生产流|脚本流/)).toHaveCount(0);
   await page.getByLabel('production brief').fill('我们这次只制作故事。');
-  await page.getByLabel('执行世界观设定').uncheck();
+  await page.getByRole('switch', { name: '允许本地内容降级' }).check();
   await page.getByLabel('AI 创作输入').fill('让开场对白更简洁');
+  await page.getByRole('button', { name: '收起 Agent 面板' }).click();
+  await page.getByRole('button', { name: '展开 Agent 面板' }).click();
   await expect(page.getByLabel('production brief')).toHaveValue('我们这次只制作故事。');
-  await expect(page.getByLabel('执行世界观设定')).not.toBeChecked();
+  await expect(page.getByRole('switch', { name: '允许本地内容降级' })).toBeChecked();
   await expect(page.getByLabel('AI 创作输入')).toHaveValue('让开场对白更简洁');
   await page.getByRole('button', { name: '场景图', exact: true }).click();
   await expect(page.getByText('场景关系图', { exact: true })).toBeVisible();
@@ -32,14 +34,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole('button', { name: '重置缩放' })).toHaveText('200%');
     await expect.poll(async () => (await branch.boundingBox())!.width).toBeGreaterThan(initialWidth * 1.8);
     await branch.click();
-    await expect(page.getByLabel('当前场景')).toContainText('chapter2.txt');
+    await expect(page.getByLabel('当前场景文件')).toContainText('chapter2.txt');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
     await page.getByRole('button', { name: '重置缩放' }).click();
     await expect(page.getByRole('button', { name: '重置缩放' })).toHaveText('100%');
     await page.keyboard.press('Escape');
     await expect(graph).toHaveCount(0);
     await expect(page.getByRole('button', { name: /从这里开始我们的故事/ })).toBeVisible();
-    if (viewport.width < 640) await page.getByRole('button', { name: '打开 Agent 面板' }).click();
+    if (viewport.width < 640) await page.getByRole('button', { name: '展开 Agent 面板' }).click();
     await expect(page.getByLabel('AI 创作输入')).toHaveValue('保留这段编辑输入');
   });
 }
@@ -59,10 +61,11 @@ test('live draft preview expands without reloading its iframe or losing the Agen
   await expect(frame).toBeVisible();
   await expect.poll(() => messages.some((message) => message.data.command === 6)).toBe(true);
   await frame.evaluate((element) => element.setAttribute('data-persisted', 'yes'));
-  await page.getByLabel('编辑器视图模式').click();
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
   await page.getByRole('menuitem', { name: '脚本源码', exact: true }).click();
   // Preview works without autosave and without writing the draft to disk.
-  await page.getByRole('switch').click();
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
+  await page.getByRole('menuitemcheckbox', { name: '自动保存' }).click();
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:预览这一句新的草稿。;');
   await expect.poll(() => messages.at(-1)?.data.message).toBe('林夏:预览这一句新的草稿。;');
   const saveCalls = await page.evaluate(() => (window as unknown as { __flowCalls: { command: string }[] }).__flowCalls.filter((call) => call.command === 'save_scene'));
@@ -241,7 +244,7 @@ test('narrow workspace can switch from Agent to a large preview without overflow
   await page.getByRole('button', { name: '全屏大预览' }).click();
   await expect(page.getByTitle('WebGAL 实时预览')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.getByRole('button', { name: '打开 Agent 面板' }).click();
+  await page.getByRole('button', { name: '展开 Agent 面板' }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeVisible();
 });
 
@@ -249,9 +252,13 @@ test('production ownership survives Agent switches and reloads scenes before edi
   await openFlowBoard(page, { width: 1440, height: 900 });
   await expect(page.getByLabel('AI 创作输入')).toBeDisabled();
   await expect(page.getByTestId('flow-run-status')).toContainText('已暂停');
-  await page.getByRole('button', { name: '停止', exact: true }).click();
+  await page.getByRole('button', { name: '收起 Agent 面板' }).click();
+  await page.getByRole('button', { name: '展开 Agent 面板' }).click();
+  await expect(page.getByLabel('AI 创作输入')).toBeDisabled();
+  await page.getByLabel('工作流状态与规划卡').getByRole('button', { name: '停止', exact: true }).click();
   await expect(page.getByTestId('flow-run-status')).toContainText('已停止');
   await expect(page.getByLabel('AI 创作输入')).toBeEnabled();
+  await page.getByRole('navigation', { name: '工作区视图切换' }).getByRole('button', { name: '剧本编辑', exact: true }).click();
   await expect(page.getByRole('button', { name: /生产之后的场景/ })).toBeVisible();
 });
 
@@ -261,28 +268,35 @@ test('restored unsaved drafts cannot autosave over production output', async ({ 
     { id: 'unsaved', type: 'dialogue', character: '林夏', content: '保留我没有保存的草稿。', flags: [] },
   ])));
   await openFlowBoard(page, { width: 1440, height: 900 });
-  await page.getByRole('button', { name: '停止', exact: true }).click();
+  await page.getByLabel('工作流状态与规划卡').getByRole('button', { name: '停止', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('生产结果与未保存的编辑同时存在');
   await page.clock.fastForward(4000);
   expect(await page.evaluate(() => (window as unknown as { __flowCalls: { command: string }[] }).__flowCalls.filter((call) => call.command === 'save_scene'))).toHaveLength(0);
   await page.getByRole('button', { name: '读取生产结果（放弃当前草稿）', exact: true }).click();
   await expect(page.getByLabel('AI 创作输入')).toBeEnabled();
+  await page.getByRole('navigation', { name: '工作区视图切换' }).getByRole('button', { name: '剧本编辑', exact: true }).click();
   await expect(page.getByRole('button', { name: /生产之后的场景/ })).toBeVisible();
 });
 
-test('preparing production also saves drafts cached in other scenes', async ({ page }) => {
+test('scoped scene production saves current and cached drafts before starting', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
   await page.getByRole('button', { name: '返回剧本' }).click();
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
+  await page.getByRole('menuitem', { name: '脚本源码', exact: true }).click();
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:第一场景的未保存修改。;');
   await page.getByRole('button', { name: '应用更改', exact: true }).click();
   await page.getByLabel('当前场景文件').selectOption('chapter2.txt');
-  await page.getByRole('button', { name: '工作流', exact: true }).click();
-  await page.getByLabel('production brief').fill('保留之前的修改并准备后续生产');
-  await page.getByRole('button', { name: '准备流程' }).click();
-  await expect(page.getByTestId('flow-run-status')).toContainText('已暂停');
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
+  await page.getByRole('menuitem', { name: '脚本源码', exact: true }).click();
+  await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:第二场景的未保存修改。;');
+  await page.getByLabel('AI 创作输入').fill('/scene opening');
+  await page.getByLabel('AI 创作输入').press('Enter');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __flowCalls: { command: string }[] }).__flowCalls.some((call) => call.command === 'pipeline_run_scene'))).toBe(true);
   const commands = await page.evaluate(() => (window as unknown as { __flowCalls: { command: string; args: { path?: string; nodes?: { content: string }[] } }[] }).__flowCalls);
-  const start = commands.findIndex((call) => call.command === 'pipeline_start');
-  const save = commands.findIndex((call) => call.command === 'save_scene' && call.args.path?.endsWith('/start.txt') && call.args.nodes?.[0]?.content.includes('第一场景的未保存修改'));
-  expect(save).toBeGreaterThanOrEqual(0);
-  expect(start).toBeGreaterThan(save);
+  const start = commands.findIndex((call) => call.command === 'pipeline_run_scene');
+  for (const [file, content] of [['start.txt', '第一场景的未保存修改'], ['chapter2.txt', '第二场景的未保存修改']]) {
+    const save = commands.findIndex((call) => call.command === 'save_scene' && call.args.path?.endsWith('/' + file) && call.args.nodes?.[0]?.content.includes(content));
+    expect(save).toBeGreaterThanOrEqual(0);
+    expect(start).toBeGreaterThan(save);
+  }
 });

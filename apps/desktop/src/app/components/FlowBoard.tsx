@@ -154,6 +154,7 @@ export function FlowBoardView({
     stop,
     retryStep,
     updatePromptAndRetry,
+    updateDependencies,
     skipStep,
     previewAssetArtifact,
     updateAssetArtifact,
@@ -218,9 +219,27 @@ export function FlowBoardView({
     return () => media.removeEventListener("change", update);
   }, []);
 
+  const hasPlanScenes = Boolean(plan?.scenePlans && plan.scenePlans.length > 0);
+  const configuring = (!state.runId && !hasPlanScenes) || newConfiguration;
+  const running = state.runStatus === "running";
+  const paused = state.runStatus === "paused";
+  const recoverable = detached && (running || paused);
+  const isSceneScope = state.scope?.type === "scene";
+  const activeSceneId =
+    state.scope?.type === "scene" ? state.scope.sceneId : null;
+  const selectedScene =
+    plan?.scenePlans?.find((s) => s.id === selectedSceneId) ?? null;
+  const selectedStep = configuring ? null : selectedScene
+    ? state.scope?.type === 'scene' && state.scope.sceneId === selectedScene.id
+      ? state.steps.find((step) => step.id === 'scene') ?? null
+      : null
+    : state.steps.find((step) => step.id === selectedStepId) ?? null;
+
+  const inspectorOpen = Boolean(selectedStep || selectedScene);
+
   useEffect(() => {
     const modal = Boolean(
-      (selectedStepId || selectedSceneId) && (embedded || !wideInspector),
+      inspectorOpen && (embedded || !wideInspector),
     );
     const surfaces = [
       headerRef.current,
@@ -232,7 +251,7 @@ export function FlowBoardView({
     surfaces.forEach((element) => element?.toggleAttribute("inert", modal));
     return () =>
       surfaces.forEach((element) => element?.removeAttribute("inert"));
-  }, [selectedStepId, selectedSceneId, wideInspector, embedded]);
+  }, [inspectorOpen, wideInspector, embedded]);
 
   useEffect(() => {
     if (state.runStatus !== "running") return;
@@ -245,6 +264,7 @@ export function FlowBoardView({
       if (!selectedStepId && !selectedSceneId) {
         previousFocusRef.current = document.activeElement as HTMLElement | null;
       }
+      setSelectedSceneId(null);
       setSelectedStepId(stepId);
     },
     [selectedStepId, selectedSceneId],
@@ -255,24 +275,6 @@ export function FlowBoardView({
     window.setTimeout(() => previousFocusRef.current?.focus(), 0);
   }, []);
 
-  const hasPlanScenes = Boolean(plan?.scenePlans && plan.scenePlans.length > 0);
-  const configuring = (!state.runId && !hasPlanScenes) || newConfiguration;
-  const running = state.runStatus === "running";
-  const paused = state.runStatus === "paused";
-  const recoverable = detached && (running || paused);
-  const isSceneScope = state.scope?.type === "scene";
-  const activeSceneId =
-    state.scope?.type === "scene" ? state.scope.sceneId : null;
-  const selectedScene =
-    plan?.scenePlans?.find((s) => s.id === selectedSceneId) ?? null;
-  const selectedStep = configuring
-    ? null
-    : (state.steps.find((step) => step.id === selectedStepId) ??
-      (selectedScene
-        ? (state.steps.find((step) => step.id === "scene") ??
-          state.steps[0] ??
-          null)
-        : null));
 
   const capabilityIssues = capabilities
     ? [capabilities.chatError, capabilities.assetError].filter(
@@ -796,11 +798,8 @@ export function FlowBoardView({
                     selectedSceneId={selectedSceneId}
                     onSelectScene={(scene) => {
                       setSelectedSceneId(scene.id);
-                      openInspector(
-                        state.steps.find((step) => step.id === "scene")?.id ??
-                          state.steps[0]?.id ??
-                          "scene",
-                      );
+                      previousFocusRef.current = document.activeElement as HTMLElement | null;
+                      setSelectedStepId(null);
                     }}
                     onRunScene={runScene}
                     onApproveScene={approveScene}
@@ -845,7 +844,7 @@ export function FlowBoardView({
           )}
         </div>
 
-        {selectedStep && (
+        {inspectorOpen && (
           <div
             ref={inspectorRef}
             role={!embedded && wideInspector ? "region" : "dialog"}
@@ -874,7 +873,7 @@ export function FlowBoardView({
             }`}
           >
             <FlowStepInspector
-              key={selectedStep.id}
+              key={selectedScene?.id ?? selectedStep?.id}
               selected={selectedStep}
               selectedScene={selectedScene}
               onRunScene={runScene}
@@ -886,6 +885,8 @@ export function FlowBoardView({
               onRetry={retryStep}
               onSkip={skipStep}
               onPromptRerun={updatePromptAndRetry}
+              dependencySteps={state.steps}
+              onDependenciesChange={updateDependencies}
               onOpenArtifact={(step) => onOpenArtifact?.(step, plan)}
               events={events}
               assetQueue={assetQueue}

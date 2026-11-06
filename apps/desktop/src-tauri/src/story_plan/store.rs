@@ -221,7 +221,7 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
             }
         }
         if let Some(condition) = &edge.condition {
-            if condition.trim().is_empty() {
+            if !is_safe_branch_expression(condition) {
                 return invalid(
                     format!("$.branches.edges[{index}].condition"),
                     "must not be empty",
@@ -266,88 +266,8 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
             );
         }
     }
-    if !scene_ids.is_empty() {
-        let mut visited: HashSet<&str> = HashSet::new();
-        let mut queue: std::collections::VecDeque<&str> = std::collections::VecDeque::new();
-        visited.insert(plan.branches.entry_scene.as_str());
-        queue.push_back(plan.branches.entry_scene.as_str());
-        while let Some(current) = queue.pop_front() {
-            for edge in &plan.branches.edges {
-                if edge.from == current && visited.insert(edge.to.as_str()) {
-                    queue.push_back(edge.to.as_str());
-                }
-            }
-        }
-        for scene in &plan.scene_plans {
-            if !visited.contains(scene.id.as_str()) {
-                return invalid(
-                    "$.branches",
-                    format!(
-                        "scene '{}' is unreachable from entry scene '{}'",
-                        scene.id, plan.branches.entry_scene
-                    ),
-                );
-            }
-        }
-        if plan.scene_plans.len() > 1 {
-            let ending_scene_ids: HashSet<&str> = plan
-                .scene_plans
-                .iter()
-                .filter(|s| s.is_ending())
-                .map(|s| s.id.as_str())
-                .collect();
-
-            for scene in &plan.scene_plans {
-                let out_degree = plan
-                    .branches
-                    .edges
-                    .iter()
-                    .filter(|e| e.from == scene.id)
-                    .count();
-                if out_degree == 0 && !scene.is_ending() {
-                    return invalid(
-                        "$.branches.edges",
-                        format!(
-                            "non-ending scene '{}' has no outgoing edges (dead end)",
-                            scene.id
-                        ),
-                    );
-                }
-
-                if !ending_scene_ids.is_empty() {
-                    let mut scene_visited: HashSet<&str> = HashSet::new();
-                    let mut scene_queue: std::collections::VecDeque<&str> =
-                        std::collections::VecDeque::new();
-                    scene_visited.insert(scene.id.as_str());
-                    scene_queue.push_back(scene.id.as_str());
-                    let mut reaches_ending = ending_scene_ids.contains(scene.id.as_str());
-                    while let Some(curr) = scene_queue.pop_front() {
-                        if reaches_ending {
-                            break;
-                        }
-                        for edge in &plan.branches.edges {
-                            if edge.from == curr && scene_visited.insert(edge.to.as_str()) {
-                                if ending_scene_ids.contains(edge.to.as_str()) {
-                                    reaches_ending = true;
-                                    break;
-                                }
-                                scene_queue.push_back(edge.to.as_str());
-                            }
-                        }
-                    }
-                    if !reaches_ending {
-                        return invalid(
-                            "$.branches.edges",
-                            format!(
-                                "scene '{}' has no path to an ending scene (dead-end branch)",
-                                scene.id
-                            ),
-                        );
-                    }
-                }
-            }
-        }
-    }
+    // In-progress and legacy plans may contain disconnected or unnamed terminal scenes.
+    // Complete graph lint belongs to the Outline output contract.
     let mut character_ids: HashSet<&str> = HashSet::new();
     for (index, character) in plan.characters.iter().enumerate() {
         let path = format!("$.characters[{index}]");
@@ -594,14 +514,54 @@ pub(crate) fn extract_condition_variables(condition: &str) -> Vec<String> {
     vars
 }
 
-pub(crate) fn extract_effect_variable(effect: &str) -> Option<String> {
-    let lhs = effect.split('=').next()?.trim();
-    let var = lhs.trim_end_matches(['+', '-', '*', '/']).trim();
-    if is_safe_variable_id(var) {
-        Some(var.to_string())
-    } else {
-        None
+pub(crate) fn is_safe_branch_expression(expression: &str) -> bool {
+    if expression.trim().is_empty()
+        || expression.contains([';', '\r', '\n'])
+        || expression.split(" -").skip(1).any(|rest| {
+            rest.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        })
+    {
+        return false;
     }
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in expression.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == delimiter {
+                quote = None;
+            }
+        } else if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+        } else if !ch.is_ascii()
+            || !(ch.is_ascii_alphanumeric()
+                || ch.is_ascii_whitespace()
+                || "_+-*/%().<>=!&|".contains(ch))
+        {
+            return false;
+        }
+    }
+    quote.is_none() && !escaped
+}
+
+pub(crate) fn extract_effect_variable(effect: &str) -> Option<String> {
+    if !is_safe_branch_expression(effect) {
+        return None;
+    }
+    let (lhs, rhs) = effect.split_once('=')?;
+    if rhs.trim().is_empty() || rhs.trim_start().starts_with('=') {
+        return None;
+    }
+    let lhs = lhs.trim();
+    let var = lhs.strip_suffix(['+', '-', '*', '/']).unwrap_or(lhs).trim();
+    is_safe_variable_id(var).then(|| var.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]

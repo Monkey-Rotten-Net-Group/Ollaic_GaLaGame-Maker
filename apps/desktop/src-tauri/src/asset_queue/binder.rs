@@ -70,11 +70,10 @@ fn reusable_import(project: &Path, task: &AssetTask, filename: &str) -> bool {
         return false;
     };
     let key = format!("{}/{}", task.kind.game_dir(), filename);
-    // Neither generated media nor local placeholders are user overrides.
-    !metadata.tags.get(&key).is_some_and(|tags| {
-        tags.iter()
-            .any(|tag| tag == "source:ai" || tag == "source:fallback")
-    })
+    metadata
+        .tags
+        .get(&key)
+        .is_none_or(|tags| tags.iter().any(|tag| tag == IMPORTED_SOURCE_TAG))
 }
 
 /// Promote the most recent generated artifact and bind it into playable project data.
@@ -329,6 +328,9 @@ pub(crate) fn find_imported_audio_file(
             .file_name()
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if !reusable_import(project_path, task, &filename) {
+            continue;
+        }
         let suffixed_stem = stem
             .strip_suffix(&task_suffix)
             .map(|prefix| format!("{prefix}-{task_suffix}"))
@@ -1343,5 +1345,55 @@ mod tests {
         assert!(scoped_imported_asset(&project, &task, "default.png").is_err());
         fs::remove_dir_all(project).unwrap();
         fs::remove_dir_all(outside).unwrap();
+    }
+    #[test]
+    fn generated_and_bundled_media_never_become_manual_imports() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_import_provenance_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for (kind, filename) in [
+            (AssetKind::Background, "needed.png"),
+            (AssetKind::Bgm, "needed.wav"),
+        ] {
+            let folder = project.join("game").join(kind.game_dir());
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(filename), b"media").unwrap();
+            let task = AssetTask {
+                id: "needed".into(),
+                target_stem: "needed".into(),
+                kind,
+                ..Default::default()
+            };
+            assert!(find_imported_asset_file(&project, &task).unwrap().is_some());
+            for source in [
+                "source:ai",
+                "source:fallback",
+                "source:bundled_mood",
+                IMPORTED_SOURCE_TAG,
+            ] {
+                let mut metadata =
+                    crate::assets::commands::read_asset_metadata(&project.to_string_lossy())
+                        .unwrap();
+                metadata.tags.insert(
+                    format!("{}/{filename}", kind.game_dir()),
+                    vec![source.into()],
+                );
+                crate::assets::commands::write_asset_metadata(
+                    &project.to_string_lossy(),
+                    &metadata,
+                )
+                .unwrap();
+                assert_eq!(
+                    find_imported_asset_file(&project, &task).unwrap().is_some(),
+                    source == IMPORTED_SOURCE_TAG,
+                    "{source}"
+                );
+            }
+        }
+        fs::remove_dir_all(project).unwrap();
     }
 }

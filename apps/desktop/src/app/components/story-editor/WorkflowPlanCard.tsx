@@ -52,7 +52,7 @@ export const WorkflowPlanCard = memo(function WorkflowPlanCard({
 
   const nextPendingScene = useMemo(() => {
     return scenePlans.find(
-      (s) => s.approvalStatus === 'pending' || s.approvalStatus === 'drafted',
+      (s) => s.approvalStatus === 'pending' || s.approvalStatus === 'drafted' || s.approvalStatus === 'stale',
     );
   }, [scenePlans]);
 
@@ -130,11 +130,14 @@ export const WorkflowPlanCard = memo(function WorkflowPlanCard({
       ) : (
         <div className="mt-2.5 space-y-2.5">
           {/* Active running progress */}
-          {running && (
+          {(running || paused) && (
             <div className="space-y-1.5 rounded-lg border border-border/70 bg-surface-container-lowest p-2.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="truncate text-muted-foreground">
-                  当前步骤：<strong className="text-foreground">{activeStep ? stepTitle(activeStep.id) : '处理中'}</strong>
+                  当前步骤：
+                  <strong className="text-foreground">
+                    {activeStep ? stepTitle(activeStep.id) : paused ? '等待继续' : '处理中'}
+                  </strong>
                 </span>
                 <span className="font-mono text-muted-foreground">
                   {finishedSteps}/{totalSteps}
@@ -144,12 +147,13 @@ export const WorkflowPlanCard = memo(function WorkflowPlanCard({
               <div className="flex justify-end gap-1.5 pt-1">
                 <Button
                   size="sm"
-                  variant="outline"
-                  onClick={controller.pause}
+                  variant={paused ? 'default' : 'outline'}
+                  onClick={paused ? controller.resume : controller.pause}
                   disabled={busy}
                   className="h-6 px-2 text-[11px]"
                 >
-                  <Pause className="mr-1 h-3 w-3" /> 暂停
+                  {paused ? <Play className="mr-1 h-3 w-3" /> : <Pause className="mr-1 h-3 w-3" />}
+                  {paused ? '继续工作流' : '暂停'}
                 </Button>
                 <Button
                   size="sm"
@@ -165,9 +169,9 @@ export const WorkflowPlanCard = memo(function WorkflowPlanCard({
           )}
 
           {/* Error prompt */}
-          {failed && controller.error && (
-            <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive">
-              <span className="truncate">{controller.error}</span>
+          {controller.error && (
+            <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-[11px] text-destructive">
+              <span className="min-w-0 flex-1 break-words">{controller.error}</span>
               <Button
                 size="sm"
                 variant="outline"
@@ -175,7 +179,7 @@ export const WorkflowPlanCard = memo(function WorkflowPlanCard({
                 disabled={busy}
                 className="h-6 px-2 text-[11px]"
               >
-                <RotateCcw className="mr-1 h-3 w-3" /> 重试
+                <RotateCcw className="mr-1 h-3 w-3" /> 刷新状态
               </Button>
             </div>
           )}
@@ -214,9 +218,9 @@ export const WorkflowPlanCard = memo(function WorkflowPlanCard({
                   <Button
                     size="sm"
                     onClick={() => void controller.runScene(nextPendingScene.id)}
-                    disabled={running || busy}
+                    disabled={running || paused || busy}
                     className="h-6 gap-1 px-2 text-[11px]"
-                    title={`生产场景: ${nextPendingScene.title || nextPendingScene.id}`}
+                    title={paused ? '请先继续或停止当前工作流' : `生产场景: ${nextPendingScene.title || nextPendingScene.id}`}
                   >
                     <Play className="h-3 w-3" />
                     <span>生成: {nextPendingScene.title || nextPendingScene.id}</span>

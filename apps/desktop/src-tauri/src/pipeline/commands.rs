@@ -242,12 +242,10 @@ async fn start_scoped_run(
     scope: FlowScope,
     allow_local_fallback: bool,
 ) -> Result<String, String> {
-    if !allow_local_fallback {
-        if !crate::ai::commands::has_agent_chat_config() {
-            return Err("未配置可用的对话模型，请配置 AI 或允许本地内容降级。".into());
-        }
-        orchestrator.validate_flow_step_capability()?;
+    if !allow_local_fallback && !crate::ai::commands::has_agent_chat_config() {
+        return Err("未配置可用的对话模型，请配置 AI 或允许本地内容降级。".into());
     }
+    orchestrator.validate_flow_step_capability()?;
     let project = PathBuf::from(project_path);
     let prompt = match prompt {
         Some(prompt) if !prompt.trim().is_empty() => prompt,

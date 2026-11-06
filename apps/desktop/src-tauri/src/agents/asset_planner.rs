@@ -181,19 +181,17 @@ fn normalize_visual_tasks(
                     return false;
                 }
                 backgrounds.push(scene.id.clone());
-                if let Some(location) = &scene.location_id {
-                    task.id = match scene.time_of_day.as_deref() {
-                        Some(time) => format!(
-                            "bg_{}_{}_some_{}_{}",
-                            location.len(),
-                            location,
-                            time.len(),
-                            time
-                        ),
-                        None => format!("bg_{}_{}_none", location.len(), location),
-                    };
-                    // Preserve the selected filename stem so imported backgrounds remain discoverable.
-                }
+                // Hash the semantic location/time pair so Unicode display text never
+                // enters a WebGAL id, while shared backgrounds keep one stable id.
+                task.id = if let Some(location) = &scene.location_id {
+                    let key = format!("{location:?}:{:?}", scene.time_of_day);
+                    let hash = key.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
+                        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+                    });
+                    format!("bg_{hash:016x}")
+                } else {
+                    format!("bg_{}", scene.id)
+                };
             }
         }
         true
@@ -706,5 +704,27 @@ mod tests {
         );
         assert_eq!(tasks.len(), 2);
         assert_ne!(tasks[0].id, tasks[1].id);
+    }
+    #[test]
+    fn localized_location_and_time_produce_safe_stable_background_ids() {
+        let scenes = vec![crate::story_plan::ScenePlan {
+            id: "opening".into(),
+            file: "start.txt".into(),
+            location_id: Some("school roof 教室".into()),
+            time_of_day: Some("夜晚".into()),
+            ..Default::default()
+        }];
+        let mut tasks = vec![AssetTaskPlan {
+            id: "original".into(),
+            kind: "background".into(),
+            target_stem: "bg_original".into(),
+            scene_ref: Some("opening".into()),
+            ..Default::default()
+        }];
+        normalize_visual_tasks(&mut tasks, &scenes, &[], &[], &VisualStyleSpec::default());
+        assert!(crate::story_plan::types::is_webgal_flag_value(&tasks[0].id));
+        let id = tasks[0].id.clone();
+        normalize_visual_tasks(&mut tasks, &scenes, &[], &[], &VisualStyleSpec::default());
+        assert_eq!(tasks[0].id, id);
     }
 }

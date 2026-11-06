@@ -102,11 +102,12 @@ describe('M3 project home', () => {
     document.documentElement.classList.remove('dark');
   });
 
-  it('ignores and clears the legacy home-only theme', () => {
+  it('migrates and persists the legacy home-only theme', () => {
     localStorage.setItem('webgal-app-settings', JSON.stringify({ theme: 'light' }));
     localStorage.setItem('ollaic-home-theme', 'dark');
     const { container } = render(<ProjectHome />);
-    expect(container.querySelector('.ph-root')).not.toHaveClass('dark');
+    expect(container.querySelector('.ph-root')).toHaveClass('dark');
+    expect(JSON.parse(localStorage.getItem('webgal-app-settings') ?? '{}').theme).toBe('dark');
     expect(localStorage.getItem('ollaic-home-theme')).toBeNull();
   });
 

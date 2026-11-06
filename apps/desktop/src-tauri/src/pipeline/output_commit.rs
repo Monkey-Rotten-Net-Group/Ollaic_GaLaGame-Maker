@@ -54,6 +54,45 @@ fn output_kind(payload: &AgentOutputPayload) -> &'static str {
     }
 }
 
+pub(crate) fn apply_scoped_output(
+    plan: &mut StoryPlan,
+    out: &AgentOutput,
+    scope: &crate::pipeline::dsl::FlowScope,
+) {
+    let crate::pipeline::dsl::FlowScope::Scene { scene_id } = scope else {
+        apply_output(plan, out);
+        return;
+    };
+    let mut affected = HashSet::from([scene_id.clone()]);
+    let mut pending = vec![scene_id.clone()];
+    while let Some(id) = pending.pop() {
+        for edge in plan.branches.edges.iter().filter(|edge| edge.from == id) {
+            if affected.insert(edge.to.clone()) {
+                pending.push(edge.to.clone());
+            }
+        }
+    }
+    let preserved: Vec<_> = plan
+        .scene_plans
+        .iter()
+        .filter(|scene| !affected.contains(&scene.id))
+        .map(|scene| {
+            (
+                scene.id.clone(),
+                scene.approval_status,
+                scene.rolling_summary.clone(),
+            )
+        })
+        .collect();
+    apply_output(plan, out);
+    for (id, status, summary) in preserved {
+        if let Some(scene) = plan.scene_plans.iter_mut().find(|scene| scene.id == id) {
+            scene.approval_status = status;
+            scene.rolling_summary = summary;
+        }
+    }
+}
+
 pub(crate) fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
     match &out.payload {
         AgentOutputPayload::Synopsis(synopsis) => {

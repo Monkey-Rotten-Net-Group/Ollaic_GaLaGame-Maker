@@ -341,7 +341,17 @@ async fn generate_configured_asset(
                 configured_model(&config.model)?,
                 |prompt, model, reference, ratio| {
                     crate::ai::commands::generate_image_media_with_aspect_ratio(
-                        None, prompt, model, reference, ratio,
+                        None,
+                        prompt,
+                        model,
+                        if task.kind == AssetKind::Background
+                            && config.provider.trim().eq_ignore_ascii_case("minimax")
+                        {
+                            None
+                        } else {
+                            reference
+                        },
+                        ratio,
                     )
                 },
             )
@@ -375,7 +385,20 @@ async fn generate_configured_asset(
         let model_path = figure_matting_model.clone()?;
         bytes = tokio::task::spawn_blocking(move || {
             matte_figure_bytes(bytes, |source| {
-                crate::matting::commands::matte_image(&model_path, source)
+                let matted = crate::matting::commands::matte_image(&model_path, source)?;
+                let image = image::load_from_memory(&matted)
+                    .map_err(|error| error.to_string())?
+                    .to_rgba8();
+                if crate::matting::commands::calculate_alpha_bounding_box(&image, 16).is_none() {
+                    return Err("figure matting produced an empty silhouette".into());
+                }
+                let normalized =
+                    crate::matting::commands::normalize_character_canvas(&image, 900, 1400)?;
+                let mut bytes = std::io::Cursor::new(Vec::new());
+                normalized
+                    .write_to(&mut bytes, image::ImageFormat::Png)
+                    .map_err(|error| error.to_string())?;
+                Ok(bytes.into_inner())
             })
         })
         .await

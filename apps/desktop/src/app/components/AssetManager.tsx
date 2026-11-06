@@ -143,12 +143,6 @@ function isAudioExt(ext: string): boolean {
   return ['mp3', 'ogg', 'wav', 'flac', 'aac'].includes(normalized);
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function formatCategory(category: string): string {
   const labels: Record<string, string> = {
     background: '背景',
@@ -611,8 +605,8 @@ export function AssetManager() {
     return () => { cancelled = true; };
   }, [activeTab, musicCategory, projectPath, bgmAssetNames]);
 
-  const aliasForAsset = (asset: Pick<AssetInfo, 'category' | 'name'>): string =>
-    assetMetadataEntry(metadata.aliases, asset.category, asset.name) ?? '';
+  const aliasForAsset = useCallback((asset: Pick<AssetInfo, 'category' | 'name'>): string =>
+    assetMetadataEntry(metadata.aliases, asset.category, asset.name) ?? '', [metadata.aliases]);
   const descriptionForAsset = (asset: Pick<AssetInfo, 'category' | 'name'>): string =>
     assetMetadataEntry(metadata.descriptions, asset.category, asset.name) ?? '';
   const referencesForAsset = (asset: Pick<AssetInfo, 'category' | 'name'>): string[] =>
@@ -631,19 +625,21 @@ export function AssetManager() {
   const filteredAssets = useMemo(() => assets.filter((a) => {
     const q = searchQuery.toLowerCase();
     return a.name.toLowerCase().includes(q) || aliasForAsset(a).toLowerCase().includes(q);
-  }), [assets, searchQuery, metadata]);
+  }), [assets, searchQuery, aliasForAsset]);
 
   const sceneLibraryItems: SceneLibraryItem[] = useMemo(() => {
     const cards = Object.values(metadata.sceneCards ?? {});
-    const assetByName = new Map(assets.map((asset) => [asset.name, asset]));
+    const backgrounds = assets.filter((asset) => asset.category === 'background');
+    const assetByName = new Map(backgrounds.map((asset) => [asset.name, asset]));
     const usedAssets = new Set<string>();
     const cardItems = cards.map((card) => {
       const asset = card.imageAsset ? assetByName.get(card.imageAsset) : undefined;
       if (asset) usedAssets.add(asset.name);
       return { kind: 'sceneCard' as const, card, asset };
     });
-    const looseAssets = assets
-      .filter((asset) => !usedAssets.has(asset.name))
+    const cgFiles = new Set(Object.values(metadata.cgCards ?? {}).map((card) => card.imageAsset));
+    const looseAssets = backgrounds
+      .filter((asset) => !usedAssets.has(asset.name) && !cgFiles.has(asset.name))
       .map((asset) => ({ kind: 'asset' as const, asset }));
     return [...cardItems, ...looseAssets].filter((item) => {
       const q = searchQuery.toLowerCase();
@@ -657,7 +653,7 @@ export function AssetManager() {
       }
       return item.asset.name.toLowerCase().includes(q) || aliasForAsset(item.asset).toLowerCase().includes(q);
     });
-  }, [assets, searchQuery, metadata]);
+  }, [assets, searchQuery, metadata, aliasForAsset]);
 
   // CG 卡片流：与场景独立的卡片集合，只展示 cgCards（不混入背景散图，体现 CG ≠ 背景）。
   const cgLibraryItems: SceneLibraryItem[] = useMemo(() => {
@@ -686,13 +682,22 @@ export function AssetManager() {
       if (!q) return true;
       return item.asset.name.toLowerCase().includes(q) || aliasForAsset(item.asset).toLowerCase().includes(q);
     });
-  }, [assets, searchQuery, metadata]);
+  }, [assets, searchQuery, aliasForAsset]);
 
   // Tab counts reflect total cards in library (files + planned cards)
   const tabCounts = {
-    scene: sceneLibraryItems.length,
-    cg: cgLibraryItems.length,
-    music: allAssets.filter(a => a.category === 'bgm' || a.category === 'vocal').length,
+    scene:
+      Object.keys(metadata.sceneCards ?? {}).length +
+      allAssets.filter(
+        (asset) =>
+          asset.category === 'background' &&
+          ![
+            ...Object.values(metadata.sceneCards ?? {}),
+            ...Object.values(metadata.cgCards ?? {}),
+          ].some((card) => card.imageAsset === asset.name),
+      ).length,
+    cg: Object.keys(metadata.cgCards ?? {}).length,
+    music: allAssets.filter((a) => a.category === 'bgm' || a.category === 'vocal').length,
     character: characterCount,
     dubbing: 0,
   };
@@ -706,27 +711,13 @@ export function AssetManager() {
     toast.success(`已复制指令：${cmd}`);
   }, []);
 
-  const totalCategorySizeMb = useMemo(() => {
-    const categoryFilter = activeTab === 'scene' ? 'background' : activeTab === 'cg' ? 'background' : activeTab === 'music' ? 'bgm' : 'figure';
-    const bytes = allAssets
-      .filter((a) => a.category === categoryFilter || (activeTab === 'music' && a.category === 'vocal'))
-      .reduce((sum, a) => sum + (a.size || 0), 0);
-    return (bytes / (1024 * 1024)).toFixed(1);
-  }, [allAssets, activeTab]);
-
   const currentCategoryCount = useMemo(() => {
-    if (activeTab === 'scene') return sceneLibraryItems.length;
-    if (activeTab === 'cg') return cgLibraryItems.length;
-    if (activeTab === 'music') return assets.length;
+    if (activeTab === 'scene') return tabCounts.scene;
+    if (activeTab === 'cg') return tabCounts.cg;
+    if (activeTab === 'music') return allAssets.filter((asset) => asset.category === (musicCategory === 'bgm' ? 'bgm' : 'vocal')).length;
     if (activeTab === 'character') return characterCount;
     return 0;
-  }, [activeTab, sceneLibraryItems.length, cgLibraryItems.length, assets.length, characterCount]);
-
-  const displayStoragePath = useMemo(() => {
-    if (!projectPath) return '—';
-    const sub = activeTab === 'scene' ? 'background' : activeTab === 'cg' ? 'background' : activeTab === 'music' ? 'bgm' : 'figure';
-    return `${projectPath}/game/${sub}`.replace(/\\/g, '/');
-  }, [projectPath, activeTab]);
+  }, [activeTab, tabCounts.scene, tabCounts.cg, allAssets, musicCategory, characterCount]);
 
   const categoryUnitName = useMemo(() => {
     if (activeTab === 'scene') return '场景背景';
@@ -1347,6 +1338,7 @@ export function AssetManager() {
                 <Search className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground opacity-70" />
                 <input
                   type="text"
+                  aria-label="搜索素材"
                   placeholder="搜索素材名称..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -1984,7 +1976,6 @@ export function AssetManager() {
                             {isAudioExt(asset.extension) && (
                               <span>{getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)}</span>
                             )}
-                            <span>{formatSize(asset.size)}</span>
                           </div>
                           {!isAudioExt(asset.extension) && (
                             <div className="mt-1 flex items-center gap-1 text-[11px] text-primary/80">
@@ -2056,7 +2047,14 @@ export function AssetManager() {
                         <div className="flex-1 min-w-0">
                           <h3 className="font-medium truncate">{aliasForAsset(asset) || asset.name}</h3>
                           <p className="text-sm text-muted-foreground">
-                            {aliasForAsset(asset) ? `${asset.name} · ` : ''}{formatCategory(asset.category)} · {asset.extension.toUpperCase()} · {isAudioExt(asset.extension) ? `${getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)} · ` : ''}{formatSize(asset.size)}
+                            {aliasForAsset(asset) ? `${asset.name} · ` : ''}
+                            {formatCategory(asset.category)} · {asset.extension.toUpperCase()}
+                            {isAudioExt(asset.extension) && (
+                              <>
+                                {' · '}
+                                {getAudioDurationLabel(asset.path, audioDurations, audioMetadataErrors)}
+                              </>
+                            )}
                           </p>
                           {isAudioExt(asset.extension) && progress > 0 && (
                             <div className="mt-2 h-1 rounded bg-secondary overflow-hidden">
@@ -2239,6 +2237,17 @@ export function AssetManager() {
                       </div>
                     )}
 
+                    <label className="block text-xs">
+                      描述
+                      <textarea
+                        aria-label="素材描述"
+                        value={descriptionForAsset(selectedAsset)}
+                        onChange={(event) => handleDescriptionChange(selectedAsset, event.target.value)}
+                        className="mt-1 w-full rounded border border-border p-2 bg-input-background"
+                        rows={4}
+                      />
+                    </label>
+
                     {/* References */}
                     {selectedAsset.category !== 'vocal' && (
                       <div>
@@ -2357,21 +2366,14 @@ export function AssetManager() {
                   </div>
                 ) : (
                   <div className="space-y-4 text-left select-none">
-                    <div className="rounded-lg border border-border/80 bg-surface-container-low p-3.5 space-y-2">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-surface-container-low p-3.5">
                       <div className="flex items-center gap-2 text-xs font-bold text-foreground">
                         <Boxes className="size-4 text-primary" />
                         <span>{categoryUnitName}概览</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                        <div className="rounded border border-border/60 bg-surface-container-lowest p-2">
-                          <span className="text-muted-foreground block text-[10px]">卡片总数</span>
-                          <span className="font-mono font-bold text-sm text-foreground">{currentCategoryCount}</span>
-                        </div>
-                        <div className="rounded border border-border/60 bg-surface-container-lowest p-2">
-                          <span className="text-muted-foreground block text-[10px]">磁盘占用</span>
-                          <span className="font-mono font-bold text-sm text-foreground">{totalCategorySizeMb} MB</span>
-                        </div>
-                      </div>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        卡片总数 {currentCategoryCount}
+                      </span>
                     </div>
 
                     <div className="rounded-lg border border-dashed border-border/80 p-3 text-[11px] text-muted-foreground space-y-1.5">
@@ -2410,17 +2412,6 @@ export function AssetManager() {
             )}
           </div>
 
-          {/* 3. Bottom Status Bar (Height 24px) */}
-          <footer className="flex h-6 shrink-0 items-center justify-between border-t border-border bg-surface-container-low px-4 text-[10.5px] text-muted-foreground select-none font-mono">
-            <div className="flex min-w-0 items-center gap-2 truncate">
-              <span className="truncate">存储路径: {displayStoragePath}</span>
-              <span className="opacity-40">•</span>
-              <span className="shrink-0">共 {currentCategoryCount} 个{categoryUnitName}</span>
-              <span className="opacity-40">•</span>
-              <span className="shrink-0">已用 {totalCategorySizeMb} MB</span>
-            </div>
-            <span className="shrink-0 text-[10px] uppercase tracking-wider opacity-60">WebGAL Asset Manager</span>
-          </footer>
         </div>
       )}
       <AssetAiGenerateDialog

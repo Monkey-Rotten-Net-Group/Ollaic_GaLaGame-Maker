@@ -115,7 +115,13 @@ pub(super) fn preserve_shared_assets(
     };
     for task in tasks {
         if let Some(previous) = plan.asset_plan.iter().find(|previous| {
-            previous.id == task.id
+            (previous.id == task.id
+                || (previous.kind == task.kind && previous.target_stem == task.target_stem)
+                || (previous.kind == "figure"
+                    && task.kind == "figure"
+                    && previous.character_ref == task.character_ref
+                    && previous.emotion.as_deref().unwrap_or("default")
+                        == task.emotion.as_deref().unwrap_or("default")))
                 && (task.kind == "figure" || task.kind == "background" || task.scene_ref.is_none())
         }) {
             *task = previous.clone();

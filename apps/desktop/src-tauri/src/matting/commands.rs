@@ -115,14 +115,15 @@ pub(crate) fn matte_image(model_path: &Path, image_bytes: &[u8]) -> Result<Vec<u
         *pixel = image::Rgba([r, g, b, alpha]);
     }
 
-    let normalized = normalize_character_canvas(&out, 900, 1400);
+    if calculate_alpha_bounding_box(&out, 16).is_none() {
+        return Err("抠图结果为空，请更换图片或调整背景后重试".into());
+    }
     let mut png_bytes: Vec<u8> = Vec::new();
-    normalized
-        .write_to(
-            &mut std::io::Cursor::new(&mut png_bytes),
-            image::ImageFormat::Png,
-        )
-        .map_err(|e| format!("编码透明 PNG 失败: {e}"))?;
+    out.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| format!("编码透明 PNG 失败: {e}"))?;
     Ok(png_bytes)
 }
 
@@ -167,15 +168,28 @@ pub fn normalize_character_canvas(
     image: &RgbaImage,
     target_width: u32,
     target_height: u32,
-) -> RgbaImage {
-    let Some((min_x, min_y, max_x, max_y)) = calculate_alpha_bounding_box(image, 16) else {
-        return RgbaImage::new(target_width, target_height);
-    };
-
+) -> Result<RgbaImage, String> {
+    // A single disconnected alpha pixel must not determine the standing canvas.
+    let mut cleaned = image.clone();
+    for (x, y, pixel) in image
+        .enumerate_pixels()
+        .filter(|(_, _, pixel)| pixel[3] > 16)
+    {
+        let has_neighbor = (y.saturating_sub(1)..=(y + 1).min(image.height() - 1)).any(|ny| {
+            (x.saturating_sub(1)..=(x + 1).min(image.width() - 1))
+                .any(|nx| (nx != x || ny != y) && image.get_pixel(nx, ny)[3] > 16)
+        });
+        if !has_neighbor {
+            cleaned.put_pixel(x, y, image::Rgba([pixel[0], pixel[1], pixel[2], 0]));
+        }
+    }
+    let image = &cleaned;
+    let (min_x, min_y, max_x, max_y) = calculate_alpha_bounding_box(image, 16)
+        .ok_or_else(|| "figure silhouette is empty after matting".to_string())?;
     let box_w = (max_x - min_x + 1) as f32;
     let box_h = (max_y - min_y + 1) as f32;
     if box_w <= 0.0 || box_h <= 0.0 || target_width == 0 || target_height == 0 {
-        return image.clone();
+        return Err("figure canvas dimensions must be positive".into());
     }
 
     let cropped =
@@ -197,7 +211,7 @@ pub fn normalize_character_canvas(
     let y_offset = target_height.saturating_sub(new_h);
 
     image::imageops::overlay(&mut output, &resized, x_offset as i64, y_offset as i64);
-    output
+    Ok(output)
 }
 
 /// 从图像四角采样像素，取各通道中位数作为背景色。
@@ -408,11 +422,11 @@ mod tests {
         let out = out.to_rgba8();
         assert_eq!(
             out.dimensions(),
-            (900, 1400),
-            "sprites use the shared stage canvas"
+            (256, 256),
+            "manual background removal preserves input dimensions"
         );
 
-        let center_alpha = out.get_pixel(out.width() / 2, out.height() * 3 / 4)[3] as u32;
+        let center_alpha = out.get_pixel(out.width() / 2, out.height() / 2)[3] as u32;
         let corner_alpha = out.get_pixel(2, 2)[3] as u32;
         assert!(
             center_alpha > corner_alpha,
@@ -493,7 +507,7 @@ mod tests {
                 img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
             }
         }
-        let normalized = normalize_character_canvas(&img, 100, 200);
+        let normalized = normalize_character_canvas(&img, 100, 200).unwrap();
         let bbox = calculate_alpha_bounding_box(&normalized, 16).expect("should find bbox");
         // max_y should be flush with bottom (199)
         assert_eq!(bbox.3, 199, "should align with bottom edge");
@@ -509,6 +523,22 @@ mod tests {
             (center_x as i32 - 49).abs() <= 2,
             "should be horizontally centered (actual: {})",
             center_x
+        );
+    }
+    #[test]
+    fn normalization_rejects_empty_silhouettes_and_ignores_isolated_alpha_noise() {
+        let mut image = RgbaImage::new(100, 200);
+        assert!(normalize_character_canvas(&image, 100, 200).is_err());
+        for y in 50..100 {
+            for x in 30..70 {
+                image.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        let expected = normalize_character_canvas(&image, 100, 200).unwrap();
+        image.put_pixel(0, 0, image::Rgba([255, 255, 255, 255]));
+        assert_eq!(
+            normalize_character_canvas(&image, 100, 200).unwrap(),
+            expected
         );
     }
 }

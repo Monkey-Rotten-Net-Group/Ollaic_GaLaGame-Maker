@@ -49,6 +49,27 @@ fn image_request_body(request: &ImageRequest<'_>) -> Result<serde_json::Value, S
         "n": 1,
     });
     if let Some(reference) = request.reference {
+        let converted;
+        let reference = if reference.mime == "image/webp" {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&reference.base64)
+                .map_err(|_| "MiniMax 人物参考图 base64 无效")?;
+            if bytes.len() >= MAX_REFERENCE_BYTES {
+                return Err("MiniMax 人物参考图必须小于 10 MB".into());
+            }
+            let image = image::load_from_memory(&bytes).map_err(|_| "MiniMax 人物参考图无效")?;
+            let mut png = std::io::Cursor::new(Vec::new());
+            image
+                .write_to(&mut png, image::ImageFormat::Png)
+                .map_err(|_| "参考图 PNG 转换失败")?;
+            converted = crate::ai::gateway::types::ImageReference {
+                mime: "image/png".into(),
+                base64: base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
+            };
+            &converted
+        } else {
+            reference
+        };
         if !matches!(reference.mime.as_str(), "image/jpeg" | "image/png") {
             return Err("MiniMax 人物参考图仅支持 JPEG 或 PNG".into());
         }
@@ -407,5 +428,21 @@ mod tests {
         assert_eq!(body["response_format"], "base64");
         assert_eq!(body["aspect_ratio"], "16:9");
         assert_eq!(generated.extension, "jpg");
+    }
+    #[test]
+    fn webp_character_references_are_converted_to_png() {
+        let reference = ImageReference {
+            mime: "image/webp".into(),
+            base64: encoded_image(image::ImageFormat::WebP),
+        };
+        let body = image_request_body(&ImageRequest {
+            reference: Some(&reference),
+            ..request()
+        })
+        .unwrap();
+        assert!(body["subject_reference"][0]["image_file"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 }

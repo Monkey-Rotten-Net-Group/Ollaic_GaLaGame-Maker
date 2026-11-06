@@ -99,7 +99,7 @@ interface AiInputBoxProps {
 
 // Keeps the draft in local state so typing only re-renders this small box,
 // not the whole StoryEditor tree (script list, worldline, timeline, ...).
-const AiInputBox = memo(function AiInputBox({
+export const AiInputBox = memo(function AiInputBox({
   value,
   busy,
   locked,
@@ -136,9 +136,6 @@ const AiInputBox = memo(function AiInputBox({
   }, [draft, matchingCommands.length]);
 
   const applySlashCommand = (cmd: SlashCommand) => {
-    if (cmd.triggerPlanMode && !isPlanMode) {
-      onTogglePlanMode();
-    }
     setDraft(cmd.insert);
     setSlashMenuOpen(false);
     textareaRef.current?.focus();
@@ -158,6 +155,7 @@ const AiInputBox = memo(function AiInputBox({
     } else {
       onSubmit(text);
     }
+    if (isPlanMode) onTogglePlanMode();
     setDraft('');
     setSlashMenuOpen(false);
   };
@@ -212,7 +210,9 @@ const AiInputBox = memo(function AiInputBox({
               }
               if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
                 event.preventDefault();
-                applySlashCommand(matchingCommands[slashIndex]);
+                const command = matchingCommands[slashIndex];
+                if (event.key === 'Enter' && draft.trim() === command.insert.trim()) submit();
+                else applySlashCommand(command);
                 return;
               }
               if (event.key === 'Escape') {
@@ -342,12 +342,13 @@ export function AiAssistantPanel({
   const activeSession = aiAgent.sessions.find((session) => session.id === aiAgent.activeId);
 
   const [contextScope, setContextScope] = useState<'node' | 'scene' | 'full'>('node');
+  const selectedNodeId = selectedNode?.id;
 
   useEffect(() => {
-    if (selectedNode) {
+    if (selectedNodeId !== undefined) {
       setContextScope('node');
     }
-  }, [selectedNode?.id]);
+  }, [selectedNodeId]);
 
   const nodeIndexLabel =
     selectedNodeIndex !== undefined && selectedNodeIndex >= 0
@@ -571,62 +572,67 @@ export function AiAssistantPanel({
             onPreviewScene={onPreviewScene}
           />
         )}
-        {aiAgent.messages.map((message) => (
-          <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <AiMessageBubble
-              role={message.role}
-              content={message.content}
-              steps={message.steps}
-              isStreaming={aiAgent.streamingIdRef.current === message.id && aiAgent.busy}
-              stopped={message.stopped}
-              diff={message.diff}
-              attachments={message.attachments}
-              onInsertSnippet={onInsertSnippet}
-              onDiffSnippet={onDiffSnippet}
+        <div
+          className="space-y-3"
+          ref={(element) => { element?.toggleAttribute('inert', disabled || aiAgent.busy || aiAgent.committing || !!aiAgent.pendingChangeSet); }}
+        >
+          {aiAgent.messages.map((message) => (
+            <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <AiMessageBubble
+                role={message.role}
+                content={message.content}
+                steps={message.steps}
+                isStreaming={aiAgent.streamingIdRef.current === message.id && aiAgent.busy}
+                stopped={message.stopped}
+                diff={message.diff}
+                attachments={message.attachments}
+                onInsertSnippet={onInsertSnippet}
+                onDiffSnippet={onDiffSnippet}
+              />
+            </div>
+          ))}
+          {aiAgent.busy && aiAgent.stepLabel && (
+            <div className="flex items-center gap-2 rounded-sm border border-border bg-surface-container-low px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              <span className="min-w-0 flex-1 truncate">{aiAgent.stepLabel}</span>
+            </div>
+          )}
+          {aiAgent.pendingChangeSet && aiAgent.status !== 'conflict' && (
+            <ChangeSetCard
+              changeSet={aiAgent.pendingChangeSet}
+              sceneHeaders={sceneHeaders}
+              committing={aiAgent.committing}
+              onAccept={() => { void aiAgent.acceptChange(); }}
+              onRevert={aiAgent.revertChange}
             />
-          </div>
-        ))}
-        {aiAgent.busy && aiAgent.stepLabel && (
-          <div className="flex items-center gap-2 rounded-sm border border-border bg-surface-container-low px-3 py-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-            <span className="min-w-0 flex-1 truncate">{aiAgent.stepLabel}</span>
-          </div>
-        )}
-        {aiAgent.pendingChangeSet && aiAgent.status !== 'conflict' && (
-          <ChangeSetCard
-            changeSet={aiAgent.pendingChangeSet}
-            sceneHeaders={sceneHeaders}
-            committing={aiAgent.committing}
-            onAccept={() => { void aiAgent.acceptChange(); }}
-            onRevert={aiAgent.revertChange}
-          />
-        )}
-        {aiAgent.status === 'conflict' && (
-          <ConflictCard
-            committing={aiAgent.committing}
-            onKeepManual={aiAgent.revertChange}
-            onApplyAi={() => { void aiAgent.forceApplyChange(); }}
-            onRegenerate={aiAgent.regenerateAfterConflict}
-          />
-        )}
-        {aiAgent.status === 'missing_assets' && aiAgent.missingIssues.length > 0 && (
-          <MissingAssetCard
-            issues={aiAgent.missingIssues}
-            onUseFallback={aiAgent.useFallbackAssets}
-            onOpenAssets={aiAgent.openAssets}
-            onRetryPrompt={aiAgent.retryWithExistingAssets}
-          />
-        )}
-        {aiAgent.error && aiAgent.status === 'error' && (
-          <ErrorCard
-            message={aiAgent.error.message}
-            canRetry={aiAgent.error.retryable}
-            cooldown={aiAgent.cooldown}
-            showSettings={aiAgent.error.kind === 'auth'}
-            onRetry={aiAgent.retry}
-            onOpenSettings={onOpenSettings}
-          />
-        )}
+          )}
+          {aiAgent.status === 'conflict' && (
+            <ConflictCard
+              committing={aiAgent.committing}
+              onKeepManual={aiAgent.revertChange}
+              onApplyAi={() => { void aiAgent.forceApplyChange(); }}
+              onRegenerate={aiAgent.regenerateAfterConflict}
+            />
+          )}
+          {aiAgent.status === 'missing_assets' && aiAgent.missingIssues.length > 0 && (
+            <MissingAssetCard
+              issues={aiAgent.missingIssues}
+              onUseFallback={aiAgent.useFallbackAssets}
+              onOpenAssets={aiAgent.openAssets}
+              onRetryPrompt={aiAgent.retryWithExistingAssets}
+            />
+          )}
+          {aiAgent.error && aiAgent.status === 'error' && (
+            <ErrorCard
+              message={aiAgent.error.message}
+              canRetry={aiAgent.error.retryable}
+              cooldown={aiAgent.cooldown}
+              showSettings={aiAgent.error.kind === 'auth'}
+              onRetry={aiAgent.retry}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
+        </div>
       </div>
 
       <div className="border-t border-border bg-surface-container-low p-3.5">
@@ -637,7 +643,15 @@ export function AiAssistantPanel({
           pending={aiAgent.pendingChangeSet?.status === 'pending'}
           isPlanMode={isPlanMode}
           onTogglePlanMode={() => setIsPlanMode((v) => !v)}
-          onSubmit={onSend}
+          onSubmit={(text) => {
+            if (text.startsWith('/')) { onSend(text); return; }
+            const context = contextScope === 'node' && selectedNode
+              ? `行级编辑，场景 ${currentSceneName}，节点 ${selectedNode.id}：${JSON.stringify(selectedNode)}`
+              : contextScope === 'full'
+                ? '全文编辑：可通过工具读取项目剧本后修改。'
+                : `仅编辑当前场景 ${currentSceneName}。`;
+            onSend(`编辑范围：${context}\n用户要求：${text}`);
+          }}
           onStop={aiAgent.stop}
           attachSlot={(
             <AiUploadsButton

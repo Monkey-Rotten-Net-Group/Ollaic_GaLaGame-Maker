@@ -43,7 +43,7 @@ export function SceneProductionQueue({
   const [previewScene, setPreviewScene] = useState<ScenePlan | null>(null);
   const [previewScript, setPreviewScript] = useState<string>("");
 
-  const scenes = plan.scenePlans ?? [];
+  const scenes = useMemo(() => plan.scenePlans ?? [], [plan.scenePlans]);
 
   // Character ID -> Name mapping
   const characterNames = useMemo(() => {
@@ -86,7 +86,11 @@ export function SceneProductionQueue({
         const draft = plan.sceneDrafts?.find((d) => d.sceneId === scene.id);
         if (draft) {
           text = draft.beats
-            .map((b) => `${b.speaker ? `${b.speaker}:` : ""}${b.text};`)
+            .map((beat) => {
+              const clean = (text: string) => text.trim().replace(/[\r\n]/g, ' ').replace(/;/g, '；');
+              const speaker = plan.characters?.find((character) => character.id === beat.speaker)?.name ?? beat.speaker;
+              return `${speaker ? clean(speaker).replace(/:/g, '：') : ''}:${clean(beat.text)};`;
+            })
             .join("\n");
         }
       }
@@ -217,7 +221,7 @@ export function SceneProductionQueue({
 
       {/* Scene Cards Grid */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {filteredScenes.map((scene, index) => {
+        {filteredScenes.map((scene) => {
           const hasScript = Boolean(
             plan.scenes?.includes(scene.file) ||
             plan.sceneDrafts?.some((d) => d.sceneId === scene.id),
@@ -228,7 +232,7 @@ export function SceneProductionQueue({
             <SceneCard
               key={scene.id}
               scene={scene}
-              sceneIndex={index}
+              sceneIndex={scenes.findIndex((item) => item.id === scene.id)}
               status={status}
               hasScript={hasScript}
               characterNames={characterNames}

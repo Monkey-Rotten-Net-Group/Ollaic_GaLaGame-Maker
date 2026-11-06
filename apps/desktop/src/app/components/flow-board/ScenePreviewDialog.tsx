@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Play, RefreshCw, Sliders, X } from "lucide-react";
 import type { ScenePlan, StoryPlan } from "../../lib/pipeline-types";
 import {
@@ -30,6 +30,7 @@ export function ScenePreviewDialog({
 
   return (
     <ScenePreviewDialogContent
+      key={`${projectPath}:${scene.id}`}
       onClose={onClose}
       projectPath={projectPath}
       scene={scene}
@@ -61,18 +62,12 @@ function ScenePreviewDialogContent({
     ...derived.variables,
   }));
 
-  // Reset variables if the target scene changes
-  useEffect(() => {
-    setVariables({ ...derived.variables });
-  }, [derived]);
-
   const preview = useRuntimePreview(projectPath, sceneScript, true, {
     entryVariables: variables,
   });
 
   const handleReset = () => {
     setVariables({ ...derived.variables });
-    preview.sync();
   };
 
   const handleVariableChange = (key: string, value: string) => {
@@ -199,6 +194,7 @@ function ScenePreviewDialogContent({
                           <div className="flex items-center gap-2">
                             <input
                               type="number"
+                              aria-label={`变量 ${key}`}
                               value={val}
                               onChange={(e) =>
                                 handleVariableChange(key, e.target.value)

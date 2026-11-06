@@ -681,7 +681,7 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
     );
     assert!(decision.contains("label:lbl_edge_0;"));
     assert!(decision.contains("setVar:linxia_trust=linxia_trust+1;"));
-    assert!(decision.contains("changeScene:ending_trust.txt -when=linxia_trust>=1;"));
+    assert!(decision.contains("jumpLabel:lbl_taken_0 -when=linxia_trust>=1;"));
     assert!(decision.contains("label:lbl_edge_1;"));
     assert!(decision.contains("setVar:protocol_obeyed=true;"));
     assert!(decision.contains("changeScene:ending_depart.txt;"));
@@ -3906,10 +3906,10 @@ async fn golden_vertical_slice_two_stage_director_lifecycle() {
 
     let decision_script = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
     assert!(decision_script
-        .contains("choose:握住她的手，一起承担:lbl_edge_0|遵守协议，回到日常:ending_depart.txt;"));
+        .contains("choose:握住她的手，一起承担:lbl_edge_0|遵守协议，回到日常:lbl_edge_1;"));
     assert!(decision_script.contains("label:lbl_edge_0;"));
-    assert!(decision_script.contains("setVar:linxia_trust+=2;"));
-    assert!(decision_script.contains("changeScene:ending_trust.txt -when=linxia_trust>=0;"));
+    assert!(decision_script.contains("setVar:linxia_trust=linxia_trust+(2);"));
+    assert!(decision_script.contains("jumpLabel:lbl_taken_0 -when=linxia_trust>=0;"));
 
     let plan = super::scene_review::approve_scene(&project, "decision").unwrap();
     assert_eq!(

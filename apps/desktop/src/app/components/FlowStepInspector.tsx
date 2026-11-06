@@ -71,6 +71,8 @@ export interface FlowStepInspectorProps {
   /** Imported audio filenames keyed by asset directory, for manual tasks. */
   importedAudioByDir?: Record<string, string[]>;
   selectedScene?: ScenePlan | null;
+  dependencySteps?: readonly FlowStepView[];
+  onDependenciesChange?: (stepId: string, dependsOn: string[]) => Promise<void>;
   onRunScene?: (sceneId: string) => void;
   onApproveScene?: (sceneId: string) => void;
   onUnlockScene?: (sceneId: string) => void;
@@ -161,11 +163,15 @@ export function FlowStepInspector({
   onBindImportedAudio,
   importedAudioByDir,
   selectedScene,
+  dependencySteps = [],
+  onDependenciesChange,
   onRunScene,
   onApproveScene,
   onUnlockScene,
   onPreviewScene,
 }: FlowStepInspectorProps) {
+  const [dependencyDraft, setDependencyDraft] = useState(selected?.dependsOn ?? []);
+  const [dependencyError, setDependencyError] = useState<string | null>(null);
   const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? "");
   const [artifactBusy, setArtifactBusy] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
@@ -175,12 +181,64 @@ export function FlowStepInspector({
 
   useEffect(() => {
     setPromptDraft(selected?.prompt ?? "");
+    setDependencyDraft(selected?.dependsOn ?? []);
+    setDependencyError(null);
     setArtifactBusy(null);
     setArtifactError(null);
     setArtifactPreviews({});
-  }, [selected?.id, selected?.prompt]);
+  }, [selected?.id, selected?.prompt, selected?.dependsOn]);
 
-  if (!selected) return null;
+  if (!selected) {
+    if (!selectedScene) return null;
+    return (
+      <aside
+        aria-label={`${selectedScene.title || selectedScene.id} 场景检查器`}
+        className="flex h-full flex-col gap-3 p-4 overflow-auto"
+      >
+        <header className="flex items-center justify-between">
+          <h2>{selectedScene.title || selectedScene.id}</h2>
+          <Button autoFocus variant="ghost" onClick={onClose} aria-label="关闭检查器">
+            <X />
+          </Button>
+        </header>
+        <p>{selectedScene.file}</p>
+        <p>{selectedScene.summary}</p>
+        {selectedScene.emotionalArc && <p>情绪走向：{selectedScene.emotionalArc}</p>}
+        {selectedScene.requiredBeats?.length ? (
+          <p>必备节拍：{selectedScene.requiredBeats.join('、')}</p>
+        ) : null}
+        {selectedScene.forbiddenReveals?.length ? (
+          <p>禁止剧透：{selectedScene.forbiddenReveals.join('、')}</p>
+        ) : null}
+        <p>当前运行没有此场景的执行记录。</p>
+        <div className="flex flex-wrap gap-2">
+          {onRunScene && (
+            <Button
+              disabled={busy || selectedScene.approvalStatus === 'approved'}
+              onClick={() => onRunScene(selectedScene.id)}
+            >
+              生成本场
+            </Button>
+          )}
+          {onApproveScene && selectedScene.approvalStatus === 'drafted' && (
+            <Button disabled={busy} onClick={() => onApproveScene(selectedScene.id)}>
+              批准本场
+            </Button>
+          )}
+          {onUnlockScene && selectedScene.approvalStatus === 'approved' && (
+            <Button disabled={busy} onClick={() => onUnlockScene(selectedScene.id)}>
+              解锁本场
+            </Button>
+          )}
+          {onPreviewScene && (
+            <Button disabled={busy} onClick={() => onPreviewScene(selectedScene)}>
+              试玩
+            </Button>
+          )}
+        </div>
+      </aside>
+    );
+  }
 
   const state = STATUS[selected.status];
   const stepEvents = events.filter(
@@ -386,6 +444,29 @@ export function FlowStepInspector({
                     ))}
                   </div>
                 </section>
+              )}
+
+              {onDependenciesChange && selected.status === 'pending' && (
+                <details>
+                  <summary className="cursor-pointer text-xs">调整前置步骤</summary>
+                  <div className="space-y-2 py-2">
+                    {dependencySteps.filter((step) => step.id !== selected.id).map((step) => (
+                      <label key={step.id} className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" aria-label={`等待${stepTitle(step.id)}`}
+                          checked={dependencyDraft.includes(step.id)}
+                          disabled={busy}
+                          onChange={(event) => setDependencyDraft((current) => event.target.checked
+                            ? [...current, step.id] : current.filter((id) => id !== step.id))} />
+                        {stepTitle(step.id)}
+                      </label>
+                    ))}
+                    <Button size="sm" disabled={busy} onClick={() => {
+                      setDependencyError(null);
+                      void onDependenciesChange(selected.id, dependencyDraft).catch((error) => setDependencyError(String(error)));
+                    }}>保存前置步骤</Button>
+                    {dependencyError && <p role="alert">{dependencyError}</p>}
+                  </div>
+                </details>
               )}
 
               <section>

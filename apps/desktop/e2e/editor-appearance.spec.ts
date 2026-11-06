@@ -9,27 +9,24 @@ test.beforeEach(async ({ page }) => {
 for (const width of [390, 1100, 1280, 1440]) {
   test(`global navigation replaces the sidebar at ${width}px`, async ({ page }, testInfo) => {
     await openFlowBoard(page, { width, height: 900 }, 'draft');
-    const navigation = page.getByRole('navigation', { name: '核心视图' });
-    await expect(navigation.getByRole('button')).toHaveCount(2);
+    if (width < 640) await page.getByRole('button', { name: '收起 Agent 面板' }).click();
+    const navigation = page.getByRole('navigation', { name: '工作区视图切换' });
+    await expect(navigation.getByRole('button')).toHaveCount(4);
     await expect(page.locator('.ollaic-sidenav, .ollaic-avatar')).toHaveCount(0);
     const workspace = await page.locator('.ollaic-workspace').boundingBox();
     if (!workspace) throw new Error('Workspace is missing');
     expect(workspace.x).toBeLessThanOrEqual(18);
     expect(workspace.width).toBeGreaterThanOrEqual(width - 36);
-    await expect(navigation).toHaveCSS('height', '42px');
-    await expect(navigation.getByRole('button', { name: '编辑', exact: true })).toHaveCSS(
-      'background-color',
-      'rgb(158, 42, 71)',
-    );
+    await expect(navigation.getByRole('button', { name: '工作流', exact: true })).toHaveAttribute('aria-current', 'page');
     await navigation.getByRole('button', { name: '资源库', exact: true }).click();
     await expect(page).toHaveURL(/\/editor\/alpha\/assets$/);
     await expect(navigation.getByRole('button', { name: '资源库', exact: true })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    await navigation.getByRole('button', { name: '编辑', exact: true }).click();
+    await navigation.getByRole('button', { name: '剧本编辑', exact: true }).click();
     await expect(page).toHaveURL(/\/editor\/alpha$/);
-    await expect(page.getByLabel('当前场景')).toBeVisible();
+    await expect(page.getByLabel('当前场景文件')).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath(`global-navigation-${width}.png`),
       animations: 'disabled',
@@ -43,12 +40,14 @@ for (const width of [390, 1100, 1280, 1440]) {
 
 test('global navigation preserves the unsaved-edit confirmation', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  await page.getByRole('switch', { name: '自动保存' }).uncheck();
-  await page.getByLabel('编辑器视图模式').click();
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
+  await page.getByRole('menuitemcheckbox', { name: '自动保存' }).uncheck();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
   await page.getByRole('menuitem', { name: '脚本源码', exact: true }).click();
   await page.getByLabel('WebGAL 脚本编辑器').fill('林夏:保留未保存的内容。;');
   await page
-    .getByRole('navigation', { name: '核心视图' })
+    .getByRole('navigation', { name: '工作区视图切换' })
     .getByRole('button', { name: '资源库', exact: true })
     .click();
   await expect(page.getByRole('alertdialog')).toContainText('有未保存的更改');
@@ -60,24 +59,16 @@ test('global navigation preserves the unsaved-edit confirmation', async ({ page 
   await expect(page).toHaveURL(/\/#\/$/);
 });
 
-test('scene and view mode dropdown menus use rounded popovers', async ({ page }) => {
+test('scene selector and file menu remain keyboard accessible', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  for (const label of ['当前场景', '编辑器视图模式']) {
-    await page.getByLabel(label).click();
-    const menu = page.getByRole('menu');
-    await expect(menu).toBeVisible();
-    const menuRadius = await menu.evaluate((el) =>
-      parseFloat(getComputedStyle(el).borderTopLeftRadius),
-    );
-    expect(menuRadius).toBeGreaterThanOrEqual(12);
-    const firstItem = menu.getByRole('menuitem').first();
-    const itemRadius = await firstItem.evaluate((el) =>
-      parseFloat(getComputedStyle(el).borderTopLeftRadius),
-    );
-    expect(itemRadius).toBeGreaterThanOrEqual(8);
-    await page.keyboard.press('Escape');
-    await expect(menu).toBeHidden();
-  }
+  const scenes = page.getByLabel('当前场景文件');
+  await expect(scenes.getByRole('option')).toHaveCount(2);
+  await scenes.selectOption('chapter2.txt');
+  await expect(scenes).toHaveValue('chapter2.txt');
+  await page.getByRole('button', { name: '文件与编辑操作' }).click();
+  await expect(page.getByRole('menuitem', { name: '脚本源码' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toBeHidden();
 });
 
 for (const width of [1100, 1280, 1440, 1599, 1600]) {
@@ -85,9 +76,9 @@ for (const width of [1100, 1280, 1440, 1599, 1600]) {
     page,
   }, testInfo) => {
     await openFlowBoard(page, { width, height: 900 }, 'draft');
-    await page.getByLabel('编辑器视图模式').click();
+    await page.getByRole('button', { name: '文件与编辑操作' }).click();
     await page.getByRole('menuitem', { name: '指令卡片', exact: true }).click();
-    const search = page.getByRole('textbox', { name: '搜索', exact: true });
+    const search = page.getByRole('textbox', { name: '全局搜索', exact: true });
     await expect(search).toBeVisible();
     const commands = page.locator('[data-cmd-card]');
     await expect(commands).toHaveCount(1);
@@ -124,7 +115,7 @@ test('editor toolbar labels stay on one line at desktop widths', async ({ page }
         .map((element) => element.textContent),
     );
     expect(wrappedLabels, `Wrapped labels at ${width}px`).toEqual([]);
-    const islands = await page.locator('.ollaic-topbar-island').evaluateAll((elements) =>
+    const islands = await page.locator('.ollaic-topbar-start, .ollaic-topbar-end').evaluateAll((elements) =>
       elements
         .map((element) => element.getBoundingClientRect())
         .filter((bounds) => bounds.width > 0)
@@ -150,13 +141,13 @@ test('editor toolbar labels stay on one line at desktop widths', async ({ page }
     .locator('..')
     .locator('..');
   await settings.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
+  await expect(page.getByLabel('AI 创作输入')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('editor-crimson-1440.png') });
 });
 
 test('assistant replies keep readable contrast across accent themes', async ({ page }) => {
   await openFlowBoard(page, { width: 1440, height: 900 }, 'draft');
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
+  await expect(page.getByLabel('AI 创作输入')).toBeVisible();
   const reply = page.locator('[data-message-role="assistant"]').first();
   await expect(reply).toBeVisible();
   for (const appearance of ['light', 'dark']) {
@@ -195,12 +186,11 @@ test('assistant replies keep readable contrast across accent themes', async ({ p
 for (const width of [390]) {
   test(`editor actions remain available in the overflow menu at ${width}px`, async ({ page }) => {
     await openFlowBoard(page, { width, height: 844 }, 'draft');
-    await page.getByRole('button', { name: '更多编辑操作' }).click();
+    await page.getByRole('button', { name: '文件与编辑操作' }).click();
     for (const name of [
       '撤销',
       '重做',
       '保存',
-      '打包发布',
       '打开项目',
       '导入场景',
       '导出场景',
@@ -209,7 +199,7 @@ for (const width of [390]) {
       await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
     }
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: '更多编辑操作' }).click();
+    await page.getByRole('button', { name: '文件与编辑操作' }).click();
     await page.getByRole('menuitem', { name: '快照管理', exact: true }).click();
     await expect(page.getByRole('heading', { name: '历史版本' })).toBeVisible();
   });
@@ -220,15 +210,16 @@ for (const width of [1100, 1280, 1440, 1600]) {
     page,
   }, testInfo) => {
     await openFlowBoard(page, { width, height: 900 }, 'draft');
-    const actions = page.getByRole('navigation', { name: '编辑器快捷操作' });
-    for (const name of ['撤销', '重做', '保存', '打包发布']) {
+    const actions = page.getByRole('banner', { name: '编辑工具栏' });
+    for (const name of ['撤销', '重做', '打包发布']) {
       await expect(actions.getByRole('button', { name, exact: true })).toBeInViewport();
     }
-    await expect(page.getByRole('textbox', { name: '搜索', exact: true })).toBeInViewport();
-    await actions.getByRole('button', { name: '保存', exact: true }).click();
-    await expect(page.getByLabel('已保存', { exact: true })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: '搜索', exact: true })).toBeInViewport();
-    await actions.getByRole('button', { name: '更多编辑操作' }).click();
+    await expect(page.getByRole('textbox', { name: '全局搜索', exact: true })).toBeInViewport();
+    await actions.getByRole('button', { name: '文件与编辑操作' }).click();
+    await page.getByRole('menuitem', { name: '保存', exact: true }).click();
+    await expect(actions.getByRole('status')).toContainText('已保存');
+    await expect(page.getByRole('textbox', { name: '全局搜索', exact: true })).toBeInViewport();
+    await actions.getByRole('button', { name: '文件与编辑操作' }).click();
     for (const name of ['打开项目', '导入场景', '导出场景', '快照管理']) {
       await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
     }

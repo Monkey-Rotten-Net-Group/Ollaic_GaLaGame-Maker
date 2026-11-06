@@ -58,18 +58,31 @@ pub fn adaptor_for(provider: &str, modality: Modality) -> Option<MediaAdaptor> {
     }
 }
 
+fn supported_image_request<'a>(
+    config: &crate::ai::config::AiProviderConfig,
+    request: &ImageRequest<'a>,
+) -> ImageRequest<'a> {
+    ImageRequest {
+        reference: request.reference.filter(|_| {
+            crate::ai::provider_capability::supports_reference_image(
+                &config.provider,
+                request.model,
+            )
+        }),
+        ..*request
+    }
+}
+
 impl MediaAdaptor {
     pub async fn image(
         self,
         ctx: &MediaCtx<'_>,
         request: &ImageRequest<'_>,
     ) -> Result<GeneratedMedia, String> {
-        if request.reference.is_some() {
-            crate::ai::provider_capability::require_reference_image_capability(
-                ctx.cfg,
-                request.model,
-            )?;
-        }
+        // Capability discovery reports the soft warning. Unsupported providers
+        // still generate from text rather than failing every expression variant.
+        let request = supported_image_request(ctx.cfg, request);
+        let request = &request;
         match self {
             MediaAdaptor::OpenAiCompatible => openai::generate_image(ctx.cfg, request).await,
             MediaAdaptor::DashScope => dashscope::generate_image(ctx, request).await,
@@ -107,37 +120,6 @@ fn unsupported(provider: &str, label: &str) -> String {
 mod tests {
     use super::*;
     use crate::ai::registry;
-
-    #[tokio::test]
-    async fn unsupported_reference_fails_before_any_network_request() {
-        let cfg = crate::ai::config::AiProviderConfig {
-            provider: "custom".into(),
-            model: "unknown-model".into(),
-            models: vec![],
-            api_key: String::new(),
-            base_url: "http://127.0.0.1:1".into(),
-        };
-        let reference = crate::ai::gateway::types::ImageReference {
-            mime: "image/png".into(),
-            base64: "QUJD".into(),
-        };
-        let error = MediaAdaptor::OpenAiCompatible
-            .image(
-                &MediaCtx {
-                    cfg: &cfg,
-                    app_handle: None,
-                },
-                &ImageRequest {
-                    model: "unknown-model",
-                    prompt: "portrait",
-                    reference: Some(&reference),
-                    aspect_ratio: Some("3:4"),
-                },
-            )
-            .await
-            .unwrap_err();
-        assert!(error.contains("不支持参考图垫图"), "{error}");
-    }
 
     /// The registry decides what the settings UI offers; this table decides
     /// what actually runs. If they disagree, a user can pick a provider that
@@ -191,5 +173,33 @@ mod tests {
     fn unknown_pairings_resolve_to_nothing() {
         assert_eq!(adaptor_for("anthropic", Modality::Image), None);
         assert_eq!(adaptor_for("elevenlabs", Modality::Image), None);
+    }
+    #[test]
+    fn unsupported_references_softly_fall_back_to_text_generation() {
+        let reference = crate::ai::gateway::types::ImageReference {
+            mime: "image/png".into(),
+            base64: "QUJD".into(),
+        };
+        for (provider, model) in [
+            ("aliyun", "wan2.2-t2i-plus"),
+            ("openai", "gpt-image-1"),
+            ("gemini", "imagen-3.0"),
+            ("custom", "unknown-model"),
+        ] {
+            let cfg = crate::ai::config::AiProviderConfig {
+                provider: provider.into(),
+                ..Default::default()
+            };
+            let request = ImageRequest {
+                model,
+                prompt: "portrait",
+                reference: Some(&reference),
+                aspect_ratio: Some("3:4"),
+            };
+            let effective = supported_image_request(&cfg, &request);
+            assert!(effective.reference.is_none(), "{provider}");
+            assert_eq!(effective.prompt, request.prompt);
+            assert_eq!(effective.aspect_ratio, request.aspect_ratio);
+        }
     }
 }
