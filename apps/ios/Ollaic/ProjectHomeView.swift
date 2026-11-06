@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum LibraryFilter: String, CaseIterable, Identifiable {
     case all, recent, favorites, trash
@@ -82,6 +83,7 @@ struct ProjectHomeView: View {
     @State private var confirmation: ProjectConfirmation?
     @State private var actionError: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var importing = false
 
     private var visibleProjects: [LocalProject] {
         var projects = library.projects.filter { project in
@@ -107,27 +109,50 @@ struct ProjectHomeView: View {
     }
 
     var body: some View {
-        Group {
-            if sizeClass == .regular {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    List(selection: Binding<LibraryFilter?>(get: { filter }, set: { if let value = $0 { filter = value } })) {
-                        Section("Project Library") {
-                            ForEach(LibraryFilter.allCases) { item in
-                                Label(item.title, systemImage: item.symbol)
-                                    .badge(projectCount(for: item))
-                                    .tag(item)
-                                    .accessibilityIdentifier("filter-\(item.rawValue)")
+        // The library keeps its column layout while the editor transitions above it.
+        NavigationStack(path: $path) {
+            Group {
+                if sizeClass == .regular {
+                    NavigationSplitView(columnVisibility: $columnVisibility) {
+                        List(selection: Binding<LibraryFilter?>(get: { filter }, set: { if let value = $0 { filter = value } })) {
+                            Section("Project Library") {
+                                ForEach(LibraryFilter.allCases) { item in
+                                    Label(item.title, systemImage: item.symbol)
+                                        .badge(projectCount(for: item))
+                                        .tag(item)
+                                        .accessibilityIdentifier("filter-\(item.rawValue)")
+                                }
                             }
                         }
+                        .navigationTitle("Ollaic")
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 300)
+                    } detail: {
+                        NavigationStack { libraryPage }
                     }
-                    .navigationTitle("Ollaic")
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 300)
-                } detail: { navigation }
-            } else {
-                navigation
+                } else {
+                    libraryPage
+                }
+            }
+            .toolbar(sizeClass == .regular ? .hidden : .visible, for: .navigationBar)
+            .navigationDestination(for: UUID.self) { id in
+                Group {
+                    if library.project(id)?.isDeleted == false {
+                        ProjectWorkspaceView(projectID: id)
+                    } else {
+                        ProjectDetailView(projectID: id)
+                    }
+                }
+                .toolbar(.visible, for: .navigationBar)
             }
         }
         .task { await library.load() }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.zip]) { result in
+            perform {
+                try await library.importArchive(result.get())
+                filter = .all
+                query = ""
+            }
+        }
         .sheet(item: $editor) { route in
             ProjectEditorSheet(project: route.project) { _ in
                 if route.project == nil { filter = .all; query = "" }
@@ -154,55 +179,54 @@ struct ProjectHomeView: View {
             Button("OK", role: .cancel) { actionError = nil }
         } message: { Text(actionError ?? "") }
         .onChange(of: filter) { _, _ in path.removeAll() }
-        .onChange(of: path) { _, value in
-            if sizeClass == .regular { columnVisibility = value.isEmpty ? .all : .detailOnly }
-        }
     }
 
-    private var navigation: some View {
-        NavigationStack(path: $path) {
-            libraryContent
-                .background(Color(uiColor: .systemGroupedBackground))
-                .navigationTitle(sizeClass == .regular ? filter.title : "Ollaic")
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Projects")
-                .scrollDismissesKeyboard(.interactively)
-                .navigationDestination(for: UUID.self) { id in
-                    if library.project(id)?.isDeleted == false {
-                        ProjectWorkspaceView(projectID: id)
-                    } else {
-                        ProjectDetailView(projectID: id)
-                    }
+    private var libraryPage: some View {
+        libraryContent
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(sizeClass == .regular ? filter.title : "Ollaic")
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Projects")
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Import Project ZIP", systemImage: "square.and.arrow.down") { importing = true }
+                        .disabled(!library.isLoaded || library.isSaving)
+                        .accessibilityIdentifier("import-project").help("Import Project ZIP")
                 }
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("New Project", systemImage: "plus") { editor = .create }
-                            .disabled(!library.isLoaded || library.isSaving)
-                            .accessibilityIdentifier("new-project")
-                            .help("New Project")
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Picker("View", selection: $layout) {
-                                Label("Grid", systemImage: "square.grid.2x2").tag("grid")
-                                Label("List", systemImage: "list.bullet").tag("list")
-                            }
-                            Picker("Sort By", selection: $sort) {
-                                Text("Last Modified").tag("modified")
-                                Text("Name").tag("name")
-                                Text("Date Created").tag("created")
-                            }
-                            .disabled(filter == .recent || filter == .trash)
-                            if filter == .trash && projectCount(for: .trash) > 0 {
-                                Divider()
-                                Button("Empty Trash", systemImage: "trash", role: .destructive) { confirmation = .emptyTrash }
-                                    .disabled(library.isSaving)
-                            }
-                        } label: { Label("View Options", systemImage: "ellipsis.circle") }
-                        .accessibilityIdentifier("view-options")
-                        .help("View Options")
-                    }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New Project", systemImage: "plus") { editor = .create }
+                        .disabled(!library.isLoaded || library.isSaving)
+                        .accessibilityIdentifier("new-project")
+                        .help("New Project")
                 }
-        }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("View", selection: $layout) {
+                            Label("Grid", systemImage: "square.grid.2x2").tag("grid")
+                            Label("List", systemImage: "list.bullet").tag("list")
+                        }
+                        Picker("Sort By", selection: $sort) {
+                            Text("Last Modified").tag("modified")
+                            Text("Name").tag("name")
+                            Text("Date Created").tag("created")
+                        }
+                        .disabled(filter == .recent || filter == .trash)
+                        if filter == .trash && projectCount(for: .trash) > 0 {
+                            Divider()
+                            Button("Empty Trash", systemImage: "trash", role: .destructive) { confirmation = .emptyTrash }
+                                .disabled(library.isSaving)
+                        }
+                    } label: { Label("View Options", systemImage: "ellipsis.circle") }
+                    .accessibilityIdentifier("view-options")
+                    .help("View Options")
+                }
+            }
+    }
+
+    private func navigateToProject(_ id: UUID) {
+        guard path.isEmpty else { return }
+        path.append(id)
     }
 
     @ViewBuilder private var libraryContent: some View {
@@ -221,7 +245,16 @@ struct ProjectHomeView: View {
                     emptyState.listRowBackground(Color.clear).listRowSeparator(.hidden)
                 } else {
                     ForEach(visibleProjects) { project in
-                        NavigationLink(value: project.id) { ProjectListRow(project: project) }
+                        Button { navigateToProject(project.id) } label: {
+                            HStack {
+                                ProjectListRow(project: project)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                                    .accessibilityHidden(true)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                            .buttonStyle(.plain)
                             .accessibilityIdentifier("project-item-\(project.id)")
                             .contextMenu { projectActions(project) }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -257,7 +290,7 @@ struct ProjectHomeView: View {
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : (sizeClass == .regular ? 200 : 150)), spacing: 14)], spacing: 16) {
                             ForEach(visibleProjects) { project in
-                                NavigationLink(value: project.id) { ProjectCard(project: project) }
+                                Button { navigateToProject(project.id) } label: { ProjectCard(project: project) }
                                     .buttonStyle(.plain)
                                     .accessibilityElement(children: .combine)
                                     .accessibilityIdentifier("project-item-\(project.id)")

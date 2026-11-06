@@ -6,13 +6,36 @@ Before changing a feature, state its observable acceptance conditions and assign
 each condition to the lowest layer that can verify it reliably. Use production
 parsers, repositories and components with isolated temporary projects.
 
+## Ownership
+
+The agent runs non-interactive checks: Rust/Swift/Kotlin tests, native bindings,
+real file IO, migrations, history, revision failures, archive round trips, builds,
+and runtime resource/session assertions. A simulator may host native tests, but
+the checks do not tap, type, scroll, or click through a user journey. Programmatic
+DOM clicks also count as interaction and stay outside agent verification.
+
+The user owns UI clicking and visual acceptance on phones and tablets, including
+navigation, keyboard behavior, media playback, and Files/document-provider workflows.
+For a control or navigation fix, the agent runs focused non-interactive regressions
+and hands the user the affected UI check. At a milestone, run the applicable complete
+non-interactive suite once; the user then checks the complete iPhone/iPad or Android
+workflow. Do not repeat full user journeys during routine iteration.
+
+Existing interaction suites remain available as optional diagnostics. The agent runs
+XCUITest, Compose interaction journeys, or scripted playback clicks only when the user
+explicitly requests that automation. Do not capture screenshots or recordings for acceptance.
+Automated technical assertions do not establish the user's UI acceptance.
+
 | Layer | Responsibility | Focused command |
 | --- | --- | --- |
 | Rust core | All 23 command kinds, lossless editing, file persistence, catalog extensions, reference updates and recovery | `pnpm test:core` |
 | Kotlin model | Undo/redo and bounded history | `pnpm android:test:unit` |
+| SwiftUI repository and WKWebView | Legacy migration, ZIP interoperability, revision conflicts, shared editor ownership and offline session lifecycle | `pnpm ios:test:unit` |
+| SwiftUI navigation (user) | Native library and editor journeys on iPhone and iPad | Manual acceptance; optional `pnpm ios:test:ui` |
+| iOS runtime preview | Pinned WebGAL loading/heartbeat, read-only entry inspection, restart, storage isolation and port cleanup | `WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip pnpm ios:test:preview` |
 | UniFFI and Android repository | Representative record/enum/optional/list mappings, errors, real Android file IO and archive interoperability | `pnpm android:test:bindings` |
-| Compose | Representative controls, source/form switching, save state, unsaved navigation and keyboard Back | `pnpm android:test:ui` |
-| Runtime preview | Engine installation, actual WebView/engine handshake, entry playback, restart and session cleanup | `WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip pnpm android:test:preview` |
+| Compose interaction (user) | Representative controls, source/form switching, save state, unsaved navigation and keyboard Back | Manual acceptance; optional `pnpm android:test:ui` |
+| Android playback interaction (user) | Entry playback, fullscreen and Activity navigation | Manual acceptance; optional `WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip pnpm android:test:preview` |
 | Visual acceptance (user) | Layout, animation, displayed media and complete system-picker workflows | User checks these together after integration |
 
 ## Acceptance coverage
@@ -28,14 +51,22 @@ parsers, repositories and components with isolated temporary projects.
 - `CoreBindingsTest` and `WorkspaceDraftStoreTest` call the packaged Rust library
   and write real files in unique cache directories. Cover cross-language and
   platform contracts without duplicating the complete Rust command matrix.
-- `EditorInteractionTest` mounts production Compose components. Text, choice,
+- Optional `EditorInteractionTest` mounts production Compose components. Text, choice,
   numeric, asset and character-linked fields represent shared control shapes;
   each command using those controls does not need a duplicate UI scenario.
   Save/dirty/error states and navigation belong at this layer.
 - `RuntimePreviewRepositoryTest` injects HTTP responses for deterministic download,
   cancellation, version rejection, and replacement recovery. `RuntimePreviewTest`
-  checks save failure and uses the actual engine ZIP for playback and lifecycle
-  assertions. See [runtime preview](runtime-preview.md) for fixture setup and coverage.
+  is an optional interaction suite that checks save failure and uses the engine ZIP
+  for playback and lifecycle assertions. See [runtime preview](runtime-preview.md)
+  for fixture setup and coverage.
+- `ProjectLibraryTests` retains legacy repository coverage and exercises real iOS-linked
+  Rust calls for migration, ZIPs, metadata, opaque files, scene references and conflicts.
+  `NativePreviewTests` mounts the production WKWebView configuration in a simulator window.
+  Its offline fixture checks readiness, storage isolation and server release; the optional
+  pinned ZIP adds real-engine loading and read-only entry inspection. It does not click the
+  entry/title controls or choices. CLI checks do not prove audio output, media codec
+  support, iCloud providers or physical-device behavior.
 
 For a feature commit, record which acceptance conditions passed, the focused
 command and any untested platform boundary. An APK build is not a device test.
@@ -48,14 +79,15 @@ command and any untested platform boundary. An APK build is not a device test.
 2. Commit that feature with its validation results. Keep implementation fixes
    with their feature and avoid accumulating unrelated changes for a large final
    emulator session.
-3. At integration completion, run `pnpm test:rust`,
-   `pnpm bindings:test:swift` when shared interfaces changed, and
-   `ANDROID_SERIAL=emulator-5554 pnpm android:test` once. The Android command
-   runs JVM and all instrumented tests on the selected device.
+3. At integration completion, run the applicable complete non-interactive checks once:
+   `pnpm test:rust`, `pnpm bindings:test:swift` when shared interfaces changed,
+   `pnpm ios:test` for iOS, and `pnpm android:test:unit` plus
+   `ANDROID_SERIAL=emulator-5554 pnpm android:test:bindings` for Android.
+   Supply the pinned ZIP to `ios:test:preview` when runtime integration changed.
+   These commands are separate from optional interaction suites.
 4. Hand the user a concise list of affected visual/boundary checks: for example,
    phone/wide layouts, animation, media playback/seek and system document pickers.
-   The user handles screen-based acceptance together; the agent does not manually
-   click through the emulator or capture screenshots. CLI checks can inspect an
+   The user handles clicking and screen-based acceptance together. CLI checks can inspect an
    exported ZIP with
    `cargo run --locked -p ollaic-core --example inspect-project -- /path/to/export.zip`.
    Assert data in core/integration tests and report visual acceptance separately.
@@ -64,9 +96,21 @@ command and any untested platform boundary. An APK build is not a device test.
 
 ## Test selection and synchronization
 
+`ios:test` and `ios:test:unit` select only `OllaicTests` and do not open the simulator
+host window. The default Xcode `Ollaic` scheme also excludes `OllaicUITests`.
+`ios:test:preview` selects only non-interactive `NativePreviewTests`. All iOS commands
+honor `IOS_SIMULATOR_UDID`; test execution in a simulator is distinct from UI automation.
+`pnpm ios:test:script` verifies command routing with stubbed tools and parses the shared schemes.
+
+The optional `ios:test:ui` command selects the separate `OllaicUI` scheme and opens
+the simulator host for accessibility. It is not an agent handoff requirement.
+When the user requests one automated UI regression, select that test with Xcode's
+`-only-testing:OllaicUITests/ProjectHomeTests/METHOD` option rather than running both journeys.
+
 `android:test:unit` needs no device. Instrumented commands honor
 `ANDROID_SERIAL` and otherwise choose one running emulator, never every attached
-device. A single class or method can be selected without editing a script:
+device. For explicitly requested interaction automation, a single class or method
+can be selected without editing a script:
 
 ```sh
 ANDROID_TEST_CLASS=com.ollaic.galagame_maker.ui.EditorInteractionTest#keyboardBackPreservesBottomSheetDraft pnpm android:test:ui
@@ -86,9 +130,9 @@ Use `waitUntil` for a save callback, saved state or actual IME visibility;
 use Compose idle synchronization for ordinary actions. Tests clean up their
 temporary projects and do not alter the user's library.
 
-The agent runs CLI checks, including automated semantic Compose assertions; the
-user owns tests requiring visual inspection. Do not extend temporary coordinate
-scripts, manually navigate the emulator, or capture screenshots for acceptance.
+The agent runs non-interactive CLI checks; the user owns interaction and visual acceptance.
+Do not extend temporary coordinate scripts, manually navigate the emulator, or capture
+screenshots for acceptance.
 If system UI automation is explicitly requested later, reserve it for system
 boundaries and wait for a selected document result, completed save, exported file
 or media state with a bounded timeout. Do not use fixed sleeps to guess completion.

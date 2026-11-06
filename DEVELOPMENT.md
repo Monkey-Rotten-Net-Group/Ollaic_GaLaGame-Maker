@@ -5,6 +5,7 @@ The development rules are written in English and live beside the code they gover
 | Area | Rules |
 | --- | --- |
 | Shared architecture, formatting, tests, and review | [AGENTS.md](AGENTS.md) |
+| Native iOS development and validation ownership | [apps/ios/AGENTS.md](apps/ios/AGENTS.md) |
 | TypeScript, naming, and frontend checks | [apps/desktop/AGENTS.md](apps/desktop/AGENTS.md) |
 | React components, UI behavior, and accessibility | [Component rules](apps/desktop/src/app/components/AGENTS.md) |
 | Hooks, effects, and asynchronous cleanup | [Hook rules](apps/desktop/src/app/hooks/AGENTS.md) |

@@ -29,15 +29,27 @@ internal object WorkspaceCodec {
 
   fun fromNative(projectId: String, snapshot: WorkspaceSnapshot): WorkspaceDraft {
     val cached = runCatching { decode(projectId, JSONObject(snapshot.editorState)) }.getOrNull()
-    if (cached != null && runCatching {
-      sources(cached).associate { it.fileName to it.source } == snapshot.scenes.associate { it.fileName to it.source }
-    }.getOrDefault(false)) return cached.copy(notes = snapshot.notes)
+    if (cached != null && runCatching { matchesSnapshot(cached, snapshot) }.getOrDefault(false)) return cached.copy(notes = snapshot.notes)
     return WorkspaceDraft(
       scenes = snapshot.scenes.sortedWith(compareBy({ it.fileName != "start.txt" }, { it.fileName })).map { scene ->
         DraftScene(name = scene.fileName.removeSuffix(".txt"), fileName = scene.fileName, blocks = blocks(scene.source))
       },
       notes = snapshot.notes,
     ).also { it.validate() }
+  }
+
+  fun rebindImportedCache(projectId: String, snapshot: WorkspaceSnapshot): String? = runCatching {
+    val root = JSONObject(snapshot.editorState)
+    val cached = decode(root.getString("projectId"), root)
+    if (!matchesSnapshot(cached, snapshot)) return@runCatching null
+    // Only imports may rebind ownership, after validating the cache against actual scripts.
+    root.put("projectId", projectId).toString()
+  }.getOrNull()
+
+  private fun matchesSnapshot(document: WorkspaceDraft, snapshot: WorkspaceSnapshot): Boolean {
+    val sourceFiles = sources(document)
+    return sourceFiles.size == snapshot.scenes.size &&
+      sourceFiles.associate { it.fileName to it.source } == snapshot.scenes.associate { it.fileName to it.source }
   }
 
   fun decode(projectId: String, root: JSONObject): WorkspaceDraft {

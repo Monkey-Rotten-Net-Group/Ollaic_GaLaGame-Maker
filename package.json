@@ -31,6 +31,11 @@
     "android:open": "bash scripts/android-native.sh open",
     "ios:dev": "bash scripts/ios-native.sh dev",
     "ios:build": "bash scripts/ios-native.sh build",
+    "ios:test": "bash scripts/ios-native.sh test",
+    "ios:test:unit": "bash scripts/ios-native.sh unit-test",
+    "ios:test:script": "node --test scripts/ios-native.test.mjs",
+    "ios:test:ui": "bash scripts/ios-native.sh ui-test",
+    "ios:test:preview": "bash scripts/ios-native.sh preview-test",
     "ios:open": "bash scripts/ios-native.sh open"
   },
   "devDependencies": {

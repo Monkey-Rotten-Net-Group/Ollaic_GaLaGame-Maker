@@ -1,6 +1,6 @@
 # Native Runtime Preview
 
-Android runs the pinned WebGAL web engine in a dedicated WebView. This first version
+Android and iOS/iPadOS run the pinned WebGAL engine in a dedicated native WebView. This version
 uses its normal entry screen and title menu to play `game/scene/start.txt`. Node jumps,
 current-scene launch, and live draft synchronization remain future work. Desktop keeps its existing
 preview controls and shares the HTTP/WebSocket host.
@@ -8,7 +8,7 @@ preview controls and shares the HTTP/WebSocket host.
 ## Engine Installation
 
 `crates/ollaic-runtime/webgal-version.txt` is the default engine version for desktop setup,
-desktop installation, and the generated native APIs. Android accepts only that version.
+desktop installation, and the generated native APIs. Both mobile clients accept only that version.
 Download uses its official GitHub web ZIP; Import accepts a flat archive or a single
 wrapper directory containing `index.html`, `assets/`, and `webgal-engine.json`.
 
@@ -18,7 +18,8 @@ Engine metadata is limited to 64 KiB and `index.html` to 2 MiB.
 Extraction occurs beside the destination. A failed replacement preserves the installed
 engine; an interrupted rename can restore its previous directory.
 
-The engine lives at `files/runtime/webgal-<version>/`, outside managed projects. Downloads
+The engine lives at `files/runtime/webgal-<version>/` on Android and
+`Library/Application Support/Runtime/webgal-<version>/` on iOS, outside managed projects. Downloads
 use bounded temporary files and HTTPS redirects restricted to GitHub release hosts.
 The first download requires internet access; an imported or installed engine runs offline.
 Project ZIP export retains its existing authoring behavior and does not install this engine
@@ -42,13 +43,17 @@ returns to the same editor scene and scroll position. Closing releases WebView, 
 and the native server. Going into the background ends the rendering session; returning
 to the foreground reloads from the beginning. Preview progress is intentionally temporary.
 
-The host binds only to an ephemeral `127.0.0.1` port. Android sessions require a random
+The host binds only to an ephemeral `127.0.0.1` port. Mobile sessions require a random
 session cookie and matching WebSocket origin. The page can read engine files and the
 selected project's `game/` resources, not private project/editor data. Canonical path
 checks reject escapes, and only known built-in engine resource directories can fall back
 to the engine template. User scripts and configuration never fall back to demo content.
 Media use streamed responses with HTTP Range support. WebView allows only the session
-origin, has no native JavaScript file-write bridge, and disables file/content URL access.
+origin, has no native JavaScript file-write bridge, and does not open file/content URLs.
+The shared server supplies a session-specific Content Security Policy. WKWebView uses a new
+nonpersistent data store for each session, discards storage on restart, and permits only
+same-origin navigation. iOS App Transport Security exceptions are limited to local networking
+and the loopback host; no arbitrary remote HTTP exception is enabled.
 
 ## Verification
 
@@ -67,7 +72,7 @@ the pinned engine's built-in registry entries.
 ```sh
 cargo test --locked -p ollaic-runtime
 WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip pnpm test:runtime:contracts
-WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip ANDROID_SERIAL=emulator-5554 pnpm android:test:preview
+WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip IOS_SIMULATOR_UDID=YOUR_DEVICE_UDID pnpm ios:test:preview
 ```
 
 The contract command runs generated resource, title, and animation cases through the actual
@@ -75,7 +80,20 @@ parser and animation lookup functions from the supplied pinned ZIP. It requires 
 emulator, or network access. The Rust tests independently cover editor round trips, resource
 references, malformed input, path boundaries, and interrupted registry updates.
 
-The Android command validates the local ZIP path before building, supplies the archive
+The iOS command runs non-interactive native tests with the pinned ZIP. It checks loading,
+the real heartbeat, read-only entry bounds/hit testing, restart, temporary storage isolation,
+unchanged project files and released ports. It does not click entry/title/choice controls.
+The user verifies those interactions, fullscreen, navigation and background/foreground
+behavior through the app. See [validation ownership](validation.md#ownership).
+
+The existing Android playback suite is optional interaction automation, outside normal
+agent verification:
+
+```sh
+WEBGAL_TEST_RUNTIME_ZIP=/path/to/WebGAL-4.6.0-web.zip ANDROID_SERIAL=emulator-5554 pnpm android:test:preview
+```
+
+This command validates the local ZIP path before building, supplies the archive
 to one selected emulator, and runs the preview repository and interaction tests. The
 real-engine test imports that archive into an isolated cache directory, waits for the
 production WebView and heartbeat, verifies that entry/title controls can receive input,

@@ -1,8 +1,37 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-private enum WorkspaceTab: String, CaseIterable, Identifiable {
-    case script, scenes, assets, project
-    var id: String { rawValue }
+@MainActor
+struct ProjectWorkspaceView: View {
+    @Environment(ProjectLibrary.self) private var library
+    let projectID: UUID
+    @State private var workspace: NativeWorkspace?
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            if library.project(projectID)?.isDeleted != false {
+                ContentUnavailableView("Project Unavailable", systemImage: "folder.badge.questionmark")
+            } else if let workspace { NativeEditorView(model: workspace) }
+            else if let error {
+                ContentUnavailableView {
+                    Label("Couldn't Load Editor", systemImage: "exclamationmark.triangle")
+                } description: { Text(error) } actions: { Button("Retry") { Task { await open() } } }
+            } else { ProgressView() }
+        }
+        .navigationTitle(library.project(projectID)?.name ?? String(localized: "Editor"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: projectID) { await open() }
+    }
+
+    private func open() async {
+        error = nil
+        do { workspace = try await library.nativeWorkspace(projectID) }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+private extension NativeTab {
     var title: String {
         switch self {
         case .script: String(localized: "Script")
@@ -21,436 +50,356 @@ private enum WorkspaceTab: String, CaseIterable, Identifiable {
     }
 }
 
-private enum WorkspaceSheet: Identifiable {
-    case entry(UUID, ScriptEntry?, ScriptKind), scene(DraftScene?), notes, project
-
+private enum NativeEditorSheet: Identifiable {
+    case command(UUID, NativeLine?, CommandKind?), scene(NativeScene?), source(UUID), project, characters(String?)
     var id: String {
         switch self {
-        case .entry(let scene, let entry, let kind): "entry-\(scene)-\(entry?.id.uuidString ?? kind.rawValue)"
+        case .command(let scene, let line, let kind): "command-\(scene)-\(line?.id.uuidString ?? String(describing: kind))"
         case .scene(let scene): "scene-\(scene?.id.uuidString ?? "new")"
-        case .notes: "notes"
+        case .source(let scene): "source-\(scene)"
         case .project: "project"
+        case .characters(let id): "characters-\(id ?? "all")"
         }
     }
 }
 
+struct SceneTextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
+}
+
+private struct ExportItem: Identifiable {
+    let id = UUID()
+    let report: ExportReport
+}
+
 @MainActor
-struct ProjectWorkspaceView: View {
+private struct NativeEditorView: View {
     @Environment(ProjectLibrary.self) private var library
     @Environment(\.horizontalSizeClass) private var sizeClass
-    let projectID: UUID
-    @State private var tab: WorkspaceTab = .script
-    @State private var selectedSceneID: UUID?
-    @State private var selectedEntryID: UUID?
-    @State private var sheet: WorkspaceSheet?
-    @State private var deletingScene: DraftScene?
-    @State private var loadError: String?
-    @State private var actionError: String?
-
-    private var project: LocalProject? { library.project(projectID) }
-    private var draft: WorkspaceDraft? { project?.workspace }
-    private var activeScene: DraftScene? {
-        draft?.scenes.first { $0.id == selectedSceneID } ?? draft?.scenes.first
-    }
+    @Bindable var model: NativeWorkspace
+    @State private var navigation = NativeEditorNavigation()
+    @State private var sheet: NativeEditorSheet?
+    @State private var preview = false
+    @State private var importingScene = false
+    @State private var exportingScene = false
+    @State private var sceneText = SceneTextDocument(text: "")
+    @State private var exportItem: ExportItem?
+    @State private var exportDirectory: URL?
+    @State private var deletingScene: NativeScene?
 
     var body: some View {
         Group {
-            if project == nil || project?.isDeleted == true {
-                ContentUnavailableView("Project Unavailable", systemImage: "folder.badge.questionmark")
-            } else if let loadError {
-                ContentUnavailableView {
-                    Label("Couldn't Load Editor", systemImage: "exclamationmark.triangle")
-                } description: { Text(loadError) } actions: {
-                    Button("Retry") { Task { await open() } }
-                }
-            } else if let draft {
+            if sizeClass == .regular {
                 VStack(spacing: 0) {
-                    if sizeClass == .regular {
-                        HStack {
-                            Picker("Workspace", selection: $tab) {
-                                ForEach(WorkspaceTab.allCases) { Text($0.title).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                            .frame(maxWidth: 480)
-                            .accessibilityIdentifier("workspace-tabs")
-                            Spacer(minLength: 16)
-                            saveState
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        Divider()
+                    Picker("Workspace", selection: $navigation.tab) {
+                        ForEach(NativeTab.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented).frame(maxWidth: 480).padding(12)
+                    .accessibilityIdentifier("workspace-tabs")
+                    Divider()
+                    GeometryReader { geometry in
                         HStack(spacing: 0) {
-                            if tab == .script {
-                                scenesPanel(draft)
-                                    .frame(width: 220)
+                            if navigation.tab == .script && geometry.size.width >= 720 {
+                                scenes.frame(width: 230)
                                 Divider()
                             }
-                            panel(tab, draft: draft)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    } else {
-                        TabView(selection: $tab) {
-                            ForEach(WorkspaceTab.allCases) { item in
-                                panel(item, draft: draft)
-                                    .tabItem { Label(item.title, systemImage: item.symbol) }
-                                    .tag(item)
-                            }
+                            panel(navigation.tab).frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
                 }
-                .disabled(library.isSaving)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                TabView(selection: $navigation.tab) {
+                    ForEach(NativeTab.allCases) { item in
+                        panel(item).tabItem { Label(item.title, systemImage: item.symbol) }.tag(item)
+                    }
+                }
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle(project?.name ?? String(localized: "Editor"))
-        .navigationBarTitleDisplayMode(.inline)
+        .disabled(model.isBusy)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Preview", systemImage: "play") {}.disabled(true).help("Preview")
+                Button("Preview", systemImage: "play") { preview = true }
+                    .disabled(model.isBusy).help("Preview").accessibilityIdentifier("workspace-preview")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Project Settings", systemImage: "slider.horizontal.3") { sheet = .project }
-                    Button("Writing Notes", systemImage: "note.text") { sheet = .notes }
+                    Button("Characters", systemImage: "person.2") { sheet = .characters(nil) }
                     Divider()
-                    Button("AI Assistant", systemImage: "sparkles") {}.disabled(true)
-                    Button("Export", systemImage: "square.and.arrow.up") {}.disabled(true)
+                    Button("Edit Scene Source", systemImage: "chevron.left.forwardslash.chevron.right") {
+                        if let scene = model.activeScene { sheet = .source(scene.id) }
+                    }
+                    Button("Import Scene Text", systemImage: "square.and.arrow.down") { importingScene = true }
+                    Button("Export Scene Text", systemImage: "doc.text") {
+                        sceneText = SceneTextDocument(text: model.activeScene?.source ?? "")
+                        exportingScene = true
+                    }
+                    Button("Export Project ZIP", systemImage: "square.and.arrow.up") {
+                        prepareExport()
+                    }
+                    Button("Reload", systemImage: "arrow.clockwise") { model.perform { try await model.load() } }
                 } label: { Label("Project Actions", systemImage: "ellipsis.circle") }
-                .disabled(draft == nil || library.isSaving)
-                .accessibilityIdentifier("workspace-options")
+                .disabled(model.isBusy).accessibilityIdentifier("workspace-options")
             }
         }
-        .task(id: projectID) { await open() }
         .sheet(item: $sheet) { route in
             switch route {
-            case .entry(let sceneID, let existing, let kind):
-                ScriptEntrySheet(entry: existing, kind: kind) { value in
-                    try await commit { draft in
-                        guard let sceneIndex = draft.scenes.firstIndex(where: { $0.id == sceneID }) else { throw WorkspaceError.missingScene }
-                        if let existing {
-                            guard let index = draft.scenes[sceneIndex].entries.firstIndex(where: { $0.id == existing.id }) else { throw WorkspaceError.missingEntry }
-                            draft.scenes[sceneIndex].entries[index] = value
-                        } else {
-                            draft.scenes[sceneIndex].entries.append(value)
-                        }
-                    }
-                    selectedEntryID = value.id
+            case .command(let scene, let line, let kind): CommandEditorSheet(model: model, sceneID: scene, line: line, kind: kind)
+            case .scene(let scene):
+                NativeTextSheet(title: scene == nil ? String(localized: "New Scene") : String(localized: "Rename Scene"),
+                                text: scene?.name ?? "", multiline: false, fieldID: "scene-name", saveID: "save-scene") { name, _ in
+                    try await model.saveScene(id: scene?.id, name: name)
                 }
-            case .scene(let existing):
-                SceneNameSheet(scene: existing) { name in
-                    let id = existing?.id ?? UUID()
-                    try await commit { draft in
-                        if existing != nil {
-                            guard let index = draft.scenes.firstIndex(where: { $0.id == id }) else { throw WorkspaceError.missingScene }
-                            draft.scenes[index].name = name
-                        } else {
-                            draft.scenes.append(DraftScene(id: id, name: name))
-                        }
-                    }
-                    if existing == nil { selectScene(id) }
+            case .source(let sceneID):
+                NativeTextSheet(title: String(localized: "Scene Source"), text: model.document?.scenes.first { $0.id == sceneID }?.source ?? "") { text, original in
+                    try await model.saveSceneSource(sceneID: sceneID, source: text, original: original)
                 }
-            case .notes:
-                WorkspaceNotesSheet(notes: draft?.notes ?? "") { notes in
-                    try await commit { $0.notes = notes }
-                }
-            case .project:
-                ProjectEditorSheet(project: project)
+            case .project: ProjectEditorSheet(project: library.project(model.projectID))
+            case .characters(let id): CharacterManagerView(model: model, initialCharacterID: id)
             }
         }
-        .confirmationDialog("Delete Scene?", isPresented: Binding(get: { deletingScene != nil }, set: { if !$0 { deletingScene = nil } }), titleVisibility: .visible) {
-            if let scene = deletingScene {
-                Button("Delete Scene", role: .destructive) {
-                    perform {
-                        try await commit { draft in
-                            guard draft.scenes.count > 1 else { throw WorkspaceError.invalidDocument }
-                            draft.scenes.removeAll { $0.id == scene.id }
-                        }
-                        if selectedSceneID == scene.id { selectedSceneID = draft?.scenes.first?.id }
-                    }
-                }
+        .sheet(item: $exportItem, onDismiss: {
+            if let exportDirectory { try? FileManager.default.removeItem(at: exportDirectory) }
+            exportDirectory = nil
+        }) { item in ProjectExportView(report: item.report) }
+        .fullScreenCover(isPresented: $preview) { RuntimePreviewView(projectURL: model.directory) }
+        .fileImporter(isPresented: $importingScene, allowedContentTypes: [.plainText]) { result in
+            model.perform {
+                try await model.importScene(result.get())
+                navigation.tab = .script
             }
+        }
+        .fileExporter(isPresented: $exportingScene, document: sceneText, contentType: .plainText,
+                      defaultFilename: model.activeScene?.fileName ?? "scene.txt") { result in
+            if case .failure(let error) = result { model.error = error.localizedDescription }
+        }
+        .confirmationDialog("Delete Scene?", isPresented: Binding(get: { deletingScene != nil }, set: { if !$0 { deletingScene = nil } }), titleVisibility: .visible) {
+            if let scene = deletingScene { Button("Delete Scene", role: .destructive) { model.perform { try await model.deleteScene(scene.id) } } }
             Button("Cancel", role: .cancel) {}
         } message: { Text(deletingScene?.name ?? "") }
-        .alert("Couldn't Save Changes", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK", role: .cancel) { actionError = nil }
-        } message: { Text(actionError ?? "") }
+        .alert("Couldn't Save Changes", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+            Button("OK", role: .cancel) { model.error = nil }
+        } message: { Text(model.error ?? "") }
     }
 
-    @ViewBuilder private func panel(_ tab: WorkspaceTab, draft: WorkspaceDraft) -> some View {
-        switch tab {
-        case .script:
-            scriptPanel
-        case .scenes:
-            scenesPanel(draft)
+    @ViewBuilder private func panel(_ item: NativeTab) -> some View {
+        switch item {
+        case .script: script
+        case .scenes: scenes
         case .assets:
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Assets").font(.headline)
-                    Spacer()
-                    Button("Import Assets", systemImage: "square.and.arrow.down") {}.disabled(true)
+            NativeAssetsView(model: model) { usage in
+                guard navigation.showUsage(usage, in: model) else { return }
+                switch navigation.usageTarget {
+                case .command(let sceneID, let lineID):
+                    if let line = model.document?.scenes.first(where: { $0.id == sceneID })?.lines.first(where: { $0.id == lineID }) {
+                        sheet = .command(sceneID, line, nil)
+                    }
+                case .character(let id): sheet = .characters(id)
+                case nil: break
                 }
-                .padding(16)
-                Divider()
-                ContentUnavailableView("No Assets", systemImage: "photo.on.rectangle")
             }
         case .project:
             Form {
                 Section("Project") {
-                    if let project {
+                    if let project = library.project(model.projectID) {
                         Text(project.name).font(.headline)
-                        if !project.synopsis.isEmpty { Text(project.synopsis).foregroundStyle(.secondary) }
+                        if !project.synopsis.isEmpty { Text(project.synopsis) }
                     }
                     Button("Project Settings", systemImage: "slider.horizontal.3") { sheet = .project }
                 }
                 Section("Overview") {
-                    LabeledContent("Scenes", value: "\(draft.scenes.count)")
-                    LabeledContent("Entries", value: "\(draft.scenes.reduce(0) { $0 + $1.entries.count })")
-                    LabeledContent("Characters", value: "\(draft.scenes.reduce(0) { $0 + $1.entries.reduce(0) { $0 + $1.text.count } })")
+                    LabeledContent("Scenes", value: "\(model.document?.scenes.count ?? 0)")
+                    LabeledContent("Assets", value: "\(model.assets.count)")
+                    LabeledContent("Characters", value: "\(model.characters?.characters.count ?? 0)")
                 }
                 Section {
-                    if draft.notes.isEmpty {
-                        Text("No Writing Notes").foregroundStyle(.secondary)
-                    } else {
-                        Text(draft.notes).textSelection(.enabled)
-                    }
-                    Button("Edit Notes", systemImage: "pencil") { sheet = .notes }
-                        .accessibilityIdentifier("edit-notes")
-                } header: { Text("Writing Notes") }
-            }
-        }
-    }
-
-    private var scriptPanel: some View {
-        VStack(spacing: 0) {
-            if let scene = activeScene {
-                HStack(spacing: 4) {
-                    Menu {
-                        if let draft {
-                            ForEach(draft.scenes) { item in
-                                Button { selectScene(item.id) } label: {
-                                    Label(item.name, systemImage: item.id == scene.id ? "checkmark" : "doc.text")
-                                }
-                            }
-                        }
-                        Divider()
-                        Button("New Scene", systemImage: "plus") { sheet = .scene(nil) }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "doc.text")
-                            Text(scene.name).lineLimit(1)
-                            Image(systemName: "chevron.down").font(.caption)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: 44)
-                    }
-                    .foregroundStyle(.primary)
-                    .accessibilityIdentifier("scene-picker")
-                    Button("Undo", systemImage: "arrow.uturn.backward", action: undo)
-                        .labelStyle(.iconOnly)
-                        .disabled(!library.canUndoWorkspace(projectID)).help("Undo").accessibilityIdentifier("workspace-undo")
-                        .frame(width: 44, height: 44)
-                    Button("Redo", systemImage: "arrow.uturn.forward", action: redo)
-                        .labelStyle(.iconOnly)
-                        .disabled(!library.canRedoWorkspace(projectID)).help("Redo").accessibilityIdentifier("workspace-redo")
-                        .frame(width: 44, height: 44)
-                    Menu {
-                        ForEach(ScriptKind.allCases) { kind in
-                            Button(kind.title, systemImage: kind.symbol) { sheet = .entry(scene.id, nil, kind) }
-                                .accessibilityIdentifier("new-\(kind.rawValue)")
-                        }
-                    } label: {
-                        Image(systemName: "plus").frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Add Entry")
-                    .accessibilityIdentifier("new-entry")
-                    .help("Add Entry")
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(.bar)
-                Divider()
-                if scene.entries.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Script Entries", systemImage: "text.alignleft")
-                    } actions: {
-                        Button("Add Dialogue", systemImage: "plus") { sheet = .entry(scene.id, nil, .dialogue) }
-                    }
-                } else {
-                    List {
-                        ForEach(Array(scene.entries.enumerated()), id: \.element.id) { index, entry in
-                            HStack(alignment: .top, spacing: 12) {
-                                Text(String(format: "%02d", index + 1))
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundStyle(.tertiary)
-                                    .frame(width: 24)
-                                    .padding(.top, 4)
-                                Button {
-                                    selectedEntryID = entry.id
-                                    sheet = .entry(scene.id, entry, entry.kind)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(spacing: 8) {
-                                            Label(entry.kind.title, systemImage: entry.kind.symbol)
-                                                .foregroundStyle(entry.kind == .dialogue ? Color.accentColor : entry.kind == .narration ? .blue : .teal)
-                                            if !entry.speaker.isEmpty { Text(entry.speaker).foregroundStyle(.primary) }
-                                        }
-                                        .font(.caption.weight(.semibold))
-                                        Text(entry.text).font(.body).foregroundStyle(.primary)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("\(entry.kind.title), \(entry.speaker), \(entry.text)")
-                                .accessibilityIdentifier("entry-content-\(entry.id)")
-                                Menu { entryActions(entry, index: index, scene: scene) } label: {
-                                    Image(systemName: "ellipsis").frame(width: 36, height: 44)
-                                }
-                                .accessibilityLabel("Entry Actions")
-                                .accessibilityIdentifier("entry-actions-\(index + 1)")
-                            }
-                            .padding(.vertical, 10)
-                            .listRowBackground(selectedEntryID == entry.id ? Color.accentColor.opacity(0.06) : Color(uiColor: .secondarySystemGroupedBackground))
-                            .contextMenu { entryActions(entry, index: index, scene: scene) }
-                            .swipeActions {
-                                Button("Delete Entry", systemImage: "trash", role: .destructive) {
-                                    perform { try await removeEntry(entry.id, sceneID: scene.id) }
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.plain)
-                    .accessibilityIdentifier("script-entries")
-                }
-                if sizeClass != .regular {
-                    HStack {
-                        Text("\(scene.entries.count) entries")
-                        Spacer()
-                        saveState
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.bar)
+                    Button("Characters", systemImage: "person.2") { sheet = .characters(nil) }
+                    Button("Preview", systemImage: "play") { preview = true }
+                    Button("Export Project ZIP", systemImage: "square.and.arrow.up", action: prepareExport)
                 }
             }
         }
     }
 
-    private func scenesPanel(_ draft: WorkspaceDraft) -> some View {
+    private var scenes: some View {
         List {
-            Section {
-                ForEach(draft.scenes) { scene in
-                    Button { selectScene(scene.id) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "doc.text").foregroundStyle(Color.accentColor)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(scene.name).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
-                                Text("\(scene.entries.count) entries").font(.caption).foregroundStyle(.secondary)
+            Button("New Scene", systemImage: "plus") { sheet = .scene(nil) }.accessibilityIdentifier("new-scene")
+            ForEach(model.document?.scenes ?? []) { scene in
+                Button {
+                    model.selectedSceneID = scene.id
+                    navigation.tab = .script
+                } label: {
+                    Label(scene.name, systemImage: model.activeScene?.id == scene.id ? "doc.text.fill" : "doc.text")
+                        .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .accessibilityIdentifier("scene-row-\(scene.id)")
+                .contextMenu {
+                    Button("Rename Scene", systemImage: "pencil") { sheet = .scene(scene) }
+                    if scene.fileName != "start.txt" {
+                        Button("Delete Scene", systemImage: "trash", role: .destructive) { deletingScene = scene }
+                    }
+                }
+            }
+        }
+    }
+
+    private var script: some View {
+        VStack(spacing: 0) {
+            HStack {
+                // The label bounds also define the menu's popover anchor.
+                Menu {
+                    ForEach(model.document?.scenes ?? []) { scene in
+                        Button(scene.name) { model.selectedSceneID = scene.id }
+                            .accessibilityIdentifier("scene-choice-\(scene.id)")
+                    }
+                    Button("New Scene", systemImage: "plus") { sheet = .scene(nil) }
+                } label: {
+                    Label(model.activeScene?.name ?? String(localized: "Scenes"), systemImage: "doc.text")
+                        .lineLimit(1).frame(minHeight: 44)
+                }
+                .labelStyle(.titleAndIcon).accessibilityIdentifier("scene-picker")
+                Spacer(minLength: 8)
+                Button("Undo", systemImage: "arrow.uturn.backward") { model.perform { try await model.restore(undo: true) } }
+                    .disabled(model.past.isEmpty).accessibilityIdentifier("workspace-undo").help("Undo")
+                Button("Redo", systemImage: "arrow.uturn.forward") { model.perform { try await model.restore(undo: false) } }
+                    .disabled(model.future.isEmpty).accessibilityIdentifier("workspace-redo").help("Redo")
+                Menu {
+                    ForEach(CommandKind.editorKinds, id: \.self) { kind in
+                        Button(kind.editorTitle, systemImage: kind.editorSymbol) {
+                            if let scene = model.activeScene { sheet = .command(scene.id, nil, kind) }
+                        }.accessibilityIdentifier(kind.editorIdentifier)
+                    }
+                    Button("Raw Command", systemImage: "chevron.left.forwardslash.chevron.right") {
+                        if let scene = model.activeScene { sheet = .command(scene.id, nil, nil) }
+                    }
+                } label: { Label("Add Entry", systemImage: "plus") }
+                .accessibilityIdentifier("new-entry").help("Add Entry")
+            }
+            .labelStyle(.iconOnly).buttonStyle(.borderless)
+            .frame(minHeight: 48).padding(.horizontal, 16)
+            Divider()
+            if let scene = model.activeScene {
+                List {
+                    ForEach(scene.lines.filter { !$0.isBlank }) { line in
+                        let decoded = line.decoded
+                        let category = decoded.command == "raw" ? nil : (try? readCommand(source: line.source))?.kind
+                        Button { sheet = .command(scene.id, line, nil) } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Label(category?.editorTitle ?? String(localized: "Raw Command"),
+                                          systemImage: category?.editorSymbol ?? "chevron.left.forwardslash.chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(category?.categoryColor ?? Color.secondary)
+                                    if !decoded.speaker.isEmpty {
+                                        Text(decoded.speaker).font(.caption.bold()).foregroundStyle(Color.primary)
+                                    }
+                                }
+                                Text(decoded.kind == "Command" ? decoded.preview : decoded.text)
+                                    .font(.body).foregroundStyle(Color.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            Spacer(minLength: 0)
-                            if scene.id == activeScene?.id { Image(systemName: "checkmark").font(.caption).foregroundStyle(Color.accentColor) }
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 6)
-                    }
-                    .accessibilityIdentifier("scene-\(scene.name)")
-                    .contextMenu {
-                        Button("Rename Scene", systemImage: "pencil") { sheet = .scene(scene) }
-                        Button("Delete Scene", systemImage: "trash", role: .destructive) { deletingScene = scene }
-                            .disabled(draft.scenes.count < 2)
-                    }
-                    .swipeActions {
-                        Button("Delete Scene", systemImage: "trash", role: .destructive) { deletingScene = scene }
-                            .disabled(draft.scenes.count < 2)
-                        Button("Rename Scene", systemImage: "pencil") { sheet = .scene(scene) }.tint(.blue)
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("entry-content-\(line.id)")
+                        .contextMenu {
+                            Button("Duplicate", systemImage: "plus.square.on.square") { lineAction(scene, line: line, action: .duplicate) }
+                            Button("Move Up", systemImage: "arrow.up") { lineAction(scene, line: line, action: .moveUp) }
+                            Button("Move Down", systemImage: "arrow.down") { lineAction(scene, line: line, action: .moveDown) }
+                            Button("Delete", systemImage: "trash", role: .destructive) { lineAction(scene, line: line, action: .delete) }
+                        }
                     }
                 }
-            } header: { Text("Scenes") }
-            Section {
-                Button("New Scene", systemImage: "plus") { sheet = .scene(nil) }
-                    .accessibilityIdentifier("new-scene")
-            }
-        }
-        .listStyle(.sidebar)
-        .accessibilityIdentifier("scene-list")
-    }
-
-    @ViewBuilder private func entryActions(_ entry: ScriptEntry, index: Int, scene: DraftScene) -> some View {
-        Button("Edit Entry", systemImage: "pencil") { sheet = .entry(scene.id, entry, entry.kind) }
-        Button("Duplicate", systemImage: "plus.square.on.square") {
-            perform {
-                try await commit { draft in
-                    guard let s = draft.scenes.firstIndex(where: { $0.id == scene.id }),
-                          let i = draft.scenes[s].entries.firstIndex(where: { $0.id == entry.id }) else { throw WorkspaceError.missingEntry }
-                    var copy = draft.scenes[s].entries[i]
-                    copy.id = UUID()
-                    draft.scenes[s].entries.insert(copy, at: i + 1)
+                .overlay {
+                    if scene.lines.allSatisfy(\.isBlank) {
+                        ContentUnavailableView("No Script Entries", systemImage: "text.alignleft")
+                    }
                 }
             }
         }
-        Button("Move Up", systemImage: "arrow.up") { moveEntry(entry.id, sceneID: scene.id, offset: -1) }.disabled(index == 0)
-        Button("Move Down", systemImage: "arrow.down") { moveEntry(entry.id, sceneID: scene.id, offset: 1) }.disabled(index == scene.entries.count - 1)
-        Button("Delete Entry", systemImage: "trash", role: .destructive) {
-            perform { try await removeEntry(entry.id, sceneID: scene.id) }
+    }
+
+    private func lineAction(_ scene: NativeScene, line: NativeLine, action: NativeLineAction) {
+        model.perform {
+            try await model.changeLine(sceneID: scene.id, lineID: line.id, action: action)
         }
     }
 
-    private var saveState: some View {
-        Label(library.isSaving ? String(localized: "Saving") : String(localized: "Saved"), systemImage: library.isSaving ? "clock" : "checkmark.circle")
-            .font(.caption).foregroundStyle(.secondary)
-            .accessibilityIdentifier("workspace-save-state")
-    }
-
-    private func selectScene(_ id: UUID) {
-        selectedSceneID = id
-        selectedEntryID = nil
-        tab = .script
-    }
-
-    private func open() async {
-        loadError = nil
-        do { try await library.openWorkspace(projectID) }
-        catch { loadError = error.localizedDescription }
-    }
-
-    private func commit(_ mutation: (inout WorkspaceDraft) throws -> Void) async throws {
-        try await library.editWorkspace(projectID, mutation: mutation)
-    }
-
-    private func undo() {
-        perform { try await library.undoWorkspace(projectID) }
-    }
-
-    private func redo() {
-        perform { try await library.redoWorkspace(projectID) }
-    }
-
-    private func removeEntry(_ id: UUID, sceneID: UUID) async throws {
-        try await commit { draft in
-            guard let index = draft.scenes.firstIndex(where: { $0.id == sceneID }) else { throw WorkspaceError.missingScene }
-            draft.scenes[index].entries.removeAll { $0.id == id }
+    private func prepareExport() {
+        model.perform {
+            let report = try await model.export()
+            exportDirectory = URL(fileURLWithPath: report.outputPath).deletingLastPathComponent()
+            exportItem = ExportItem(report: report)
         }
     }
+}
 
-    private func moveEntry(_ id: UUID, sceneID: UUID, offset: Int) {
-        perform {
-            try await commit { draft in
-                guard let s = draft.scenes.firstIndex(where: { $0.id == sceneID }),
-                      let i = draft.scenes[s].entries.firstIndex(where: { $0.id == id }) else { throw WorkspaceError.missingEntry }
-                let target = i + offset
-                guard draft.scenes[s].entries.indices.contains(target) else { return }
-                draft.scenes[s].entries.swapAt(i, target)
+struct ProjectExportView: View {
+    let report: ExportReport
+    var body: some View {
+        NavigationStack {
+            List {
+                ShareLink(item: URL(fileURLWithPath: report.outputPath)) { Label("Save or Share ZIP", systemImage: "square.and.arrow.up") }
+                if !report.warnings.isEmpty {
+                    Section("Export Warnings") { ForEach(report.warnings, id: \.self) { Text($0) } }
+                }
+            }.navigationTitle("Export Project ZIP")
+        }
+    }
+}
+
+struct NativeTextSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    @State var text: String
+    @State private var original: String
+    var multiline = true
+    var fieldID = "source-text"
+    var saveID = "save-source"
+    let save: (String, String) async throws -> Void
+    @State private var busy = false
+    @State private var error: String?
+
+    init(title: String, text: String, multiline: Bool = true, fieldID: String = "source-text", saveID: String = "save-source",
+         save: @escaping (String, String) async throws -> Void) {
+        self.title = title
+        _text = State(initialValue: text)
+        _original = State(initialValue: text)
+        self.multiline = multiline
+        self.fieldID = fieldID
+        self.saveID = saveID
+        self.save = save
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if multiline { TextEditor(text: $text).font(.system(.body, design: .monospaced)).frame(minHeight: 300).accessibilityIdentifier(fieldID) }
+                else { TextField("Name", text: $text).accessibilityIdentifier(fieldID) }
             }
-        }
-    }
-
-    private func perform(_ action: @escaping @MainActor () async throws -> Void) {
-        Task {
-            do { try await action() }
-            catch { actionError = error.localizedDescription }
+            .disabled(busy).navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        busy = true
+                        Task {
+                            defer { busy = false }
+                            do { try await save(text, original); dismiss() } catch { self.error = error.localizedDescription }
+                        }
+                    }.disabled(busy).accessibilityIdentifier(saveID)
+                }
+            }
+            .interactiveDismissDisabled(busy)
+            .alert("Couldn't Save Changes", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("OK", role: .cancel) { error = nil }
+            } message: { Text(error ?? "") }
         }
     }
 }
