@@ -16,6 +16,16 @@ use crate::ai::registry::Modality;
 struct GenerateResponse {
     #[serde(default)]
     candidates: Vec<Candidate>,
+    #[serde(default)]
+    predictions: Vec<Prediction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Prediction {
+    bytes_base64_encoded: String,
+    #[serde(default)]
+    mime_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,11 +55,16 @@ struct InlineData {
     data: String,
 }
 
-pub async fn generate_image(
-    cfg: &AiProviderConfig,
-    request: &ImageRequest<'_>,
-) -> Result<GeneratedMedia, String> {
-    let endpoint = gemini_endpoint(cfg, Modality::Image, request.model, "generateContent");
+fn image_request_body(request: &ImageRequest<'_>) -> serde_json::Value {
+    if request.model.to_ascii_lowercase().starts_with("imagen-") {
+        return serde_json::json!({
+            "instances": [{ "prompt": request.prompt }],
+            "parameters": {
+                "sampleCount": 1,
+                "aspectRatio": request.aspect_ratio.unwrap_or("1:1")
+            }
+        });
+    }
     // With a reference image this becomes image-to-image: the reference is
     // appended to `parts` as inline_data.
     let parts = match request.reference {
@@ -59,7 +74,28 @@ pub async fn generate_image(
         ]),
         None => serde_json::json!([{ "text": request.prompt }]),
     };
-    let body = serde_json::json!({ "contents": [{ "parts": parts }] });
+    let mut body = serde_json::json!({
+        "contents": [{ "parts": parts }],
+        "generationConfig": { "responseModalities": ["TEXT", "IMAGE"] }
+    });
+    if let Some(aspect_ratio) = request.aspect_ratio {
+        body["generationConfig"]["imageConfig"] =
+            serde_json::json!({ "aspectRatio": aspect_ratio });
+    }
+    body
+}
+
+pub async fn generate_image(
+    cfg: &AiProviderConfig,
+    request: &ImageRequest<'_>,
+) -> Result<GeneratedMedia, String> {
+    let action = if request.model.to_ascii_lowercase().starts_with("imagen-") {
+        "predict"
+    } else {
+        "generateContent"
+    };
+    let endpoint = gemini_endpoint(cfg, Modality::Image, request.model, action);
+    let body = image_request_body(request);
     let body =
         serde_json::to_string(&body).map_err(|e| format!("序列化 Gemini 图片生成请求失败: {e}"))?;
     let response = http_client()
@@ -88,6 +124,20 @@ pub async fn generate_image(
     }
     let parsed: GenerateResponse = serde_json::from_str(&text)
         .map_err(|e| format!("解析 Gemini 图片生成响应失败: {e}; 响应: {text}"))?;
+    if let Some(prediction) = parsed.predictions.into_iter().next() {
+        log_provider_event(
+            "image_generate",
+            cfg,
+            request.model,
+            &endpoint,
+            true,
+            "image generated",
+        );
+        return Ok(GeneratedMedia {
+            base64_data: prediction.bytes_base64_encoded,
+            extension: extension_from_mime(&prediction.mime_type, "png"),
+        });
+    }
     for candidate in parsed.candidates {
         let Some(content) = candidate.content else {
             continue;
@@ -115,6 +165,61 @@ pub async fn generate_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imagen_uses_predict_shape_and_reads_predictions() {
+        let body = image_request_body(&ImageRequest {
+            model: "imagen-4.0-generate-001",
+            prompt: "landscape",
+            reference: None,
+            aspect_ratio: Some("16:9"),
+        });
+        assert_eq!(body["instances"][0]["prompt"], "landscape");
+        assert_eq!(body["parameters"]["aspectRatio"], "16:9");
+        assert!(body.get("contents").is_none());
+        let response: GenerateResponse = serde_json::from_value(serde_json::json!({
+            "predictions": [{ "bytesBase64Encoded": "QUJD", "mimeType": "image/png" }]
+        }))
+        .unwrap();
+        assert_eq!(response.predictions[0].bytes_base64_encoded, "QUJD");
+    }
+
+    #[test]
+    fn native_image_request_passes_reference_and_aspect_ratio() {
+        let reference = crate::ai::gateway::types::ImageReference {
+            mime: "image/jpeg".into(),
+            base64: "QUJD".into(),
+        };
+        let request = ImageRequest {
+            model: "gemini-2.5-flash-image",
+            prompt: "portrait",
+            reference: Some(&reference),
+            aspect_ratio: Some("3:4"),
+        };
+        let body = image_request_body(&request);
+        assert_eq!(
+            body["contents"][0]["parts"][0]["inline_data"]["data"],
+            "QUJD"
+        );
+        assert_eq!(
+            body["contents"][0]["parts"][0]["inline_data"]["mime_type"],
+            "image/jpeg"
+        );
+        assert_eq!(
+            body["generationConfig"]["imageConfig"]["aspectRatio"],
+            "3:4"
+        );
+        let body = image_request_body(&ImageRequest {
+            reference: None,
+            aspect_ratio: Some("16:9"),
+            ..request
+        });
+        assert_eq!(body["contents"][0]["parts"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            body["generationConfig"]["imageConfig"]["aspectRatio"],
+            "16:9"
+        );
+    }
 
     /// Gemini can return text-only candidates (e.g. a safety refusal) before
     /// the image part, so parsing must skip past them rather than stop.

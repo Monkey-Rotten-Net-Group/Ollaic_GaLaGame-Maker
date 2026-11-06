@@ -5,9 +5,10 @@ pub const PENDING_CONFIGURATION_PREFIX: &str = "pending configuration:";
 /// Task is blocked because BGM/SFX can only be satisfied by importing audio.
 pub const PENDING_MANUAL_IMPORT_PREFIX: &str = "pending manual import:";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum AssetKind {
+    #[default]
     Background,
     Figure,
     Bgm,
@@ -72,7 +73,7 @@ pub struct AssetAttempt {
     pub used_local_fallback: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetTask {
     pub id: String,
@@ -85,6 +86,10 @@ pub struct AssetTask {
     pub character_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emotion: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_image: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialogue_index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

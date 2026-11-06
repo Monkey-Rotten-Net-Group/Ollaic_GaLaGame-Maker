@@ -8,6 +8,10 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 import {
   pipelineGetState,
+  pipelineRunSetup,
+  pipelineRunScene,
+  pipelineApproveScene,
+  pipelineUnlockScene,
   pipelinePause,
   pipelineResume,
   pipelineSkipStep,
@@ -50,5 +54,20 @@ describe('project-bound live run IPC', () => {
       projectPath,
     });
     expect(mockedInvoke).toHaveBeenCalledWith('pipeline_get_state', { runId: 'run_a', projectPath });
+  });
+});
+
+
+describe('scene-scoped production IPC', () => {
+  it('sends scene identity and fallback authorization explicitly', async () => {
+    mockedInvoke.mockResolvedValue('run-scene');
+    await pipelineRunSetup('/project', 'brief', false);
+    await pipelineRunScene('/project', 'encounter', true);
+    await pipelineApproveScene('/project', 'opening');
+    await pipelineUnlockScene('/project', 'opening');
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_run_setup', { projectPath: '/project', prompt: 'brief', allowLocalFallback: false });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_run_scene', { projectPath: '/project', sceneId: 'encounter', allowLocalFallback: true });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_approve_scene', { projectPath: '/project', sceneId: 'opening' });
+    expect(mockedInvoke).toHaveBeenCalledWith('pipeline_unlock_scene', { projectPath: '/project', sceneId: 'opening' });
   });
 });

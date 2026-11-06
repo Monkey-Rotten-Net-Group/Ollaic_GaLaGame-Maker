@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Braces,
@@ -16,33 +16,41 @@ import {
   Upload,
   Workflow,
   X,
-} from 'lucide-react';
-import type { FlowStepView } from '../lib/flow-state';
-import { stepTitle } from '../lib/flow-presentation';
-import { isAssetQueueStep } from '../lib/pipeline-types';
-import type { AssetQueueState, AssetTaskStatus, StepStatus } from '../lib/pipeline-types';
-import type { PipelineEventRecord } from './PipelineEventLedger';
-import { Button } from './ui/button';
-import { ScrollArea } from './ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Textarea } from './ui/textarea';
-import { cn } from './ui/utils';
+} from "lucide-react";
+import type { FlowStepView } from "../lib/flow-state";
+import { stepTitle } from "../lib/flow-presentation";
+import { isAssetQueueStep } from "../lib/pipeline-types";
+import type {
+  AssetQueueState,
+  AssetTaskStatus,
+  ScenePlan,
+  StepStatus,
+} from "../lib/pipeline-types";
+import type { PipelineEventRecord } from "./PipelineEventLedger";
+import { Button } from "./ui/button";
+import { ScrollArea } from "./ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Textarea } from "./ui/textarea";
+import { cn } from "./ui/utils";
 
 const STATUS: Record<StepStatus, { label: string; className: string }> = {
-  pending: { label: '待运行', className: 'bg-muted-foreground' },
-  running: { label: '运行中', className: 'bg-blue-500' },
-  succeeded: { label: '已完成', className: 'bg-emerald-500' },
-  failed: { label: '失败', className: 'bg-destructive' },
-  awaitingInput: { label: '待输入', className: 'bg-amber-500' },
-  skipped: { label: '已跳过', className: 'bg-muted-foreground' },
+  pending: { label: "待运行", className: "bg-muted-foreground" },
+  running: { label: "运行中", className: "bg-blue-500" },
+  succeeded: { label: "已完成", className: "bg-emerald-500" },
+  failed: { label: "失败", className: "bg-destructive" },
+  awaitingInput: { label: "待输入", className: "bg-amber-500" },
+  skipped: { label: "已跳过", className: "bg-muted-foreground" },
 };
 
-const ASSET_STATUS: Record<AssetTaskStatus, { label: string; className: string }> = {
-  pending: { label: '等待', className: 'bg-muted-foreground' },
-  running: { label: '生成中', className: 'bg-blue-500' },
-  retrying: { label: '重试中', className: 'bg-amber-500' },
-  succeeded: { label: '已完成', className: 'bg-emerald-500' },
-  failed: { label: '失败', className: 'bg-destructive' },
+const ASSET_STATUS: Record<
+  AssetTaskStatus,
+  { label: string; className: string }
+> = {
+  pending: { label: "等待", className: "bg-muted-foreground" },
+  running: { label: "生成中", className: "bg-blue-500" },
+  retrying: { label: "重试中", className: "bg-amber-500" },
+  succeeded: { label: "已完成", className: "bg-emerald-500" },
+  failed: { label: "失败", className: "bg-destructive" },
 };
 
 export interface FlowStepInspectorProps {
@@ -59,33 +67,39 @@ export interface FlowStepInspectorProps {
   onPreviewAssetArtifact?: (taskId: string, attempt: number) => Promise<string>;
   onDeleteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
   onPromoteAssetArtifact?: (taskId: string, attempt: number) => Promise<void>;
-  steps?: readonly FlowStepView[];
-  canEditDependencies?: boolean;
-  onUpdateDependencies?: (stepId: string, dependsOn: string[]) => void;
   onBindImportedAudio?: (taskId: string, filename: string) => Promise<void>;
   /** Imported audio filenames keyed by asset directory, for manual tasks. */
   importedAudioByDir?: Record<string, string[]>;
+  selectedScene?: ScenePlan | null;
+  dependencySteps?: readonly FlowStepView[];
+  onDependenciesChange?: (stepId: string, dependsOn: string[]) => Promise<void>;
+  onRunScene?: (sceneId: string) => void;
+  onApproveScene?: (sceneId: string) => void;
+  onUnlockScene?: (sceneId: string) => void;
+  onPreviewScene?: (scene: ScenePlan) => void;
 }
 
-const PENDING_MANUAL_IMPORT_PREFIX = 'pending manual import:';
-const PENDING_CONFIGURATION_PREFIX = 'pending configuration:';
+const PENDING_MANUAL_IMPORT_PREFIX = "pending manual import:";
+const PENDING_CONFIGURATION_PREFIX = "pending configuration:";
 
 /** The asset directory a manual audio task binds into. */
 function audioDirForKind(kind: string) {
-  if (kind === 'bgm') return 'bgm';
-  if (kind === 'sfx') return 'vocal';
+  if (kind === "bgm") return "bgm";
+  if (kind === "sfx") return "vocal";
   return null;
 }
 
 /** Why a task is still pending, so the UI can offer the matching next action. */
-function pendingReason(error: string | null | undefined): 'manual' | 'configuration' | null {
-  if (error?.startsWith(PENDING_MANUAL_IMPORT_PREFIX)) return 'manual';
-  if (error?.startsWith(PENDING_CONFIGURATION_PREFIX)) return 'configuration';
+function pendingReason(
+  error: string | null | undefined,
+): "manual" | "configuration" | null {
+  if (error?.startsWith(PENDING_MANUAL_IMPORT_PREFIX)) return "manual";
+  if (error?.startsWith(PENDING_CONFIGURATION_PREFIX)) return "configuration";
   return null;
 }
 
 function formatted(value: string | null | undefined) {
-  if (!value) return '';
+  if (!value) return "";
   try {
     return JSON.stringify(JSON.parse(value), null, 2);
   } catch {
@@ -94,21 +108,29 @@ function formatted(value: string | null | undefined) {
 }
 
 function duration(ms: number | null | undefined) {
-  if (ms == null) return '未完成';
+  if (ms == null) return "未完成";
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 function timestamp(value: number | null | undefined) {
-  if (value == null) return '未记录';
-  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+  if (value == null) return "未记录";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
-function DataBlock({ value, tone = 'default' }: { value: string; tone?: 'default' | 'error' }) {
+function DataBlock({
+  value,
+  tone = "default",
+}: {
+  value: string;
+  tone?: "default" | "error";
+}) {
   return (
     <pre
       className={cn(
-        'max-h-72 overflow-auto whitespace-pre-wrap break-words border border-border/70 bg-surface-container-lowest p-3 font-mono-family text-[11px] leading-5',
-        tone === 'error' ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'text-foreground/85',
+        "max-h-72 overflow-auto whitespace-pre-wrap break-words border border-border/70 bg-surface-container-lowest p-3 font-mono-family text-[11px] leading-5",
+        tone === "error"
+          ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : "text-foreground/85",
       )}
     >
       {formatted(value)}
@@ -117,7 +139,11 @@ function DataBlock({ value, tone = 'default' }: { value: string; tone?: 'default
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <h3 className="mb-2 font-mono-family text-[10px] font-semibold text-muted-foreground">{children}</h3>;
+  return (
+    <h3 className="mb-2 font-mono-family text-[10px] font-semibold text-muted-foreground">
+      {children}
+    </h3>
+  );
 }
 
 export function FlowStepInspector({
@@ -134,37 +160,96 @@ export function FlowStepInspector({
   onPreviewAssetArtifact,
   onDeleteAssetArtifact,
   onPromoteAssetArtifact,
-  steps = [],
-  canEditDependencies = false,
-  onUpdateDependencies,
   onBindImportedAudio,
   importedAudioByDir,
+  selectedScene,
+  dependencySteps = [],
+  onDependenciesChange,
+  onRunScene,
+  onApproveScene,
+  onUnlockScene,
+  onPreviewScene,
 }: FlowStepInspectorProps) {
-  const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? '');
-  const [dependencies, setDependencies] = useState(selected?.dependsOn ?? []);
+  const [dependencyDraft, setDependencyDraft] = useState(selected?.dependsOn ?? []);
+  const [dependencyError, setDependencyError] = useState<string | null>(null);
+  const [promptDraft, setPromptDraft] = useState(selected?.prompt ?? "");
   const [artifactBusy, setArtifactBusy] = useState<string | null>(null);
   const [artifactError, setArtifactError] = useState<string | null>(null);
-  const [artifactPreviews, setArtifactPreviews] = useState<Record<string, string>>({});
+  const [artifactPreviews, setArtifactPreviews] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
-    setPromptDraft(selected?.prompt ?? '');
+    setPromptDraft(selected?.prompt ?? "");
+    setDependencyDraft(selected?.dependsOn ?? []);
+    setDependencyError(null);
     setArtifactBusy(null);
     setArtifactError(null);
     setArtifactPreviews({});
-  }, [selected?.id, selected?.prompt]);
+  }, [selected?.id, selected?.prompt, selected?.dependsOn]);
 
-  useEffect(() => {
-    setDependencies(selected?.dependsOn ?? []);
-  }, [selected?.id, selected?.dependsOn]);
-
-  if (!selected) return null;
+  if (!selected) {
+    if (!selectedScene) return null;
+    return (
+      <aside
+        aria-label={`${selectedScene.title || selectedScene.id} 场景检查器`}
+        className="flex h-full flex-col gap-3 p-4 overflow-auto"
+      >
+        <header className="flex items-center justify-between">
+          <h2>{selectedScene.title || selectedScene.id}</h2>
+          <Button autoFocus variant="ghost" onClick={onClose} aria-label="关闭检查器">
+            <X />
+          </Button>
+        </header>
+        <p>{selectedScene.file}</p>
+        <p>{selectedScene.summary}</p>
+        {selectedScene.emotionalArc && <p>情绪走向：{selectedScene.emotionalArc}</p>}
+        {selectedScene.requiredBeats?.length ? (
+          <p>必备节拍：{selectedScene.requiredBeats.join('、')}</p>
+        ) : null}
+        {selectedScene.forbiddenReveals?.length ? (
+          <p>禁止剧透：{selectedScene.forbiddenReveals.join('、')}</p>
+        ) : null}
+        <p>当前运行没有此场景的执行记录。</p>
+        <div className="flex flex-wrap gap-2">
+          {onRunScene && (
+            <Button
+              disabled={busy || selectedScene.approvalStatus === 'approved'}
+              onClick={() => onRunScene(selectedScene.id)}
+            >
+              生成本场
+            </Button>
+          )}
+          {onApproveScene && selectedScene.approvalStatus === 'drafted' && (
+            <Button disabled={busy} onClick={() => onApproveScene(selectedScene.id)}>
+              批准本场
+            </Button>
+          )}
+          {onUnlockScene && selectedScene.approvalStatus === 'approved' && (
+            <Button disabled={busy} onClick={() => onUnlockScene(selectedScene.id)}>
+              解锁本场
+            </Button>
+          )}
+          {onPreviewScene && (
+            <Button disabled={busy} onClick={() => onPreviewScene(selectedScene)}>
+              试玩
+            </Button>
+          )}
+        </div>
+      </aside>
+    );
+  }
 
   const state = STATUS[selected.status];
-  const stepEvents = events.filter((record) => (
-    'stepId' in record.event && record.event.stepId === selected.id
-  ));
-  const showAssetQueue = selected.kind === 'asset' && isAssetQueueStep(selected);
-  const runArtifactAction = async (key: string, action: () => Promise<void>) => {
+  const stepEvents = events.filter(
+    (record) => "stepId" in record.event && record.event.stepId === selected.id,
+  );
+  const showAssetQueue =
+    selected.kind === "asset" && isAssetQueueStep(selected);
+  const runArtifactAction = async (
+    key: string,
+    action: () => Promise<void>,
+  ) => {
     setArtifactBusy(key);
     setArtifactError(null);
     try {
@@ -188,33 +273,64 @@ export function FlowStepInspector({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-sm font-semibold">{stepTitle(selected.id)}</h2>
+              <h2 className="truncate text-sm font-semibold">
+                {stepTitle(selected.id)}
+              </h2>
             </div>
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className={cn('size-1.5 shrink-0 rounded-full', state.className)} aria-hidden="true" />
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  state.className,
+                )}
+                aria-hidden="true"
+              />
               <span>{state.label}</span>
               <span aria-hidden="true">/</span>
               <span>尝试 {selected.attempt}</span>
             </div>
           </div>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="关闭步骤检查器" autoFocus>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="关闭步骤检查器"
+            autoFocus
+          >
             <X />
           </Button>
         </div>
       </header>
 
-      <Tabs key={selected.id} defaultValue={selected.status === 'succeeded' ? 'output' : 'details'} className="min-h-0 flex-1 gap-0">
+      <Tabs
+        key={selected.id}
+        defaultValue={selected.status === "succeeded" ? "output" : "details"}
+        className="min-h-0 flex-1 gap-0"
+      >
         <TabsList className="h-10 w-full shrink-0 justify-start rounded-none border-b border-border bg-surface-container-lowest p-0">
-          <TabsTrigger value="details" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="details"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <GitBranch /> 详情
           </TabsTrigger>
-          <TabsTrigger value="output" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="output"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <Braces /> 输出
           </TabsTrigger>
-          <TabsTrigger value="history" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="history"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <History /> 记录
           </TabsTrigger>
-          <TabsTrigger value="logs" className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent">
+          <TabsTrigger
+            value="logs"
+            className="h-10 rounded-none border-0 px-4 text-xs data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:bg-transparent"
+          >
             <ListTree /> 日志
           </TabsTrigger>
         </TabsList>
@@ -222,42 +338,136 @@ export function FlowStepInspector({
         <TabsContent value="details" className="min-h-0 flex-1">
           <ScrollArea className="h-full">
             <div className="space-y-5 p-4">
-              <section>
-                <SectionLabel>依赖</SectionLabel>
-                {selected.dependsOn.length ? (
+              {selectedScene && (
+                <section className="rounded-lg border border-border bg-surface-container-low p-3.5 text-xs">
+                  <SectionLabel>分场合约 (Scene Contract)</SectionLabel>
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-foreground">
+                        {selectedScene.title || selectedScene.id}
+                      </span>
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        {selectedScene.file}
+                      </span>
+                    </div>
+                    {selectedScene.emotionalArc && (
+                      <p className="text-muted-foreground">
+                        <strong className="text-foreground">情绪走向：</strong>{" "}
+                        {selectedScene.emotionalArc}
+                      </p>
+                    )}
+                    {selectedScene.requiredBeats &&
+                      selectedScene.requiredBeats.length > 0 && (
+                        <div>
+                          <strong className="text-foreground">
+                            必备节拍：
+                          </strong>
+                          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                            {selectedScene.requiredBeats.map((b, i) => (
+                              <li key={i}>{b}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    {selectedScene.forbiddenReveals &&
+                      selectedScene.forbiddenReveals.length > 0 && (
+                        <div>
+                          <strong className="text-destructive">
+                            禁止剧透：
+                          </strong>
+                          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-destructive/90">
+                            {selectedScene.forbiddenReveals.map((r, i) => (
+                              <li key={i}>{r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    <div className="flex flex-wrap gap-2 border-t border-border/60 pt-2.5">
+                      {onRunScene && (
+                        <Button
+                          size="sm"
+                          disabled={
+                            busy || selectedScene.approvalStatus === "approved"
+                          }
+                          onClick={() => onRunScene(selectedScene.id)}
+                        >
+                          生成本场
+                        </Button>
+                      )}
+                      {selectedScene.approvalStatus === "approved"
+                        ? onUnlockScene && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => onUnlockScene(selectedScene.id)}
+                            >
+                              解锁本场
+                            </Button>
+                          )
+                        : onApproveScene && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => onApproveScene(selectedScene.id)}
+                            >
+                              通过并锁定
+                            </Button>
+                          )}
+                      {onPreviewScene && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={() => onPreviewScene(selectedScene)}
+                        >
+                          试玩本场
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {selected.dependsOn.length > 0 && (
+                <section>
+                  <SectionLabel>前置依赖</SectionLabel>
                   <div className="flex flex-wrap gap-1.5">
                     {selected.dependsOn.map((dependency) => (
-                      <code key={dependency} className="border border-border bg-surface-container-low px-2 py-1 text-[11px] text-foreground">
+                      <code
+                        key={dependency}
+                        className="border border-border bg-surface-container-low px-2 py-1 text-[11px] text-foreground"
+                      >
                         {stepTitle(dependency)}
                       </code>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">无</p>
-                )}
-                {onUpdateDependencies && (
-                  <details className="mt-3 text-xs">
-                    <summary className="cursor-pointer text-muted-foreground">调整前置步骤</summary>
-                    <p className="mt-2 leading-5 text-muted-foreground">仅可在暂停时调整待运行步骤。取消等待关系不会补齐缺少的故事数据。</p>
-                    <div className="mt-2 space-y-2">
-                      {steps.filter((step) => step.id !== selected.id).map((step) => (
-                        <label key={step.id} className="flex items-center gap-2">
-                          <input type="checkbox" aria-label={`等待${stepTitle(step.id)}`} className="size-3.5 accent-primary"
-                            checked={dependencies.includes(step.id)}
-                            disabled={busy || !canEditDependencies || selected.status !== 'pending'}
-                            onChange={(event) => setDependencies((current) => event.target.checked
-                              ? [...current, step.id] : current.filter((id) => id !== step.id))} />
-                          {stepTitle(step.id)}
-                        </label>
-                      ))}
-                    </div>
-                    <Button variant="outline" size="sm" className="mt-3"
-                      disabled={busy || !canEditDependencies || selected.status !== 'pending'
-                        || JSON.stringify([...dependencies].sort()) === JSON.stringify([...selected.dependsOn].sort())}
-                      onClick={() => onUpdateDependencies(selected.id, dependencies)}>保存前置步骤</Button>
-                  </details>
-                )}
-              </section>
+                </section>
+              )}
+
+              {onDependenciesChange && selected.status === 'pending' && (
+                <details>
+                  <summary className="cursor-pointer text-xs">调整前置步骤</summary>
+                  <div className="space-y-2 py-2">
+                    {dependencySteps.filter((step) => step.id !== selected.id).map((step) => (
+                      <label key={step.id} className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" aria-label={`等待${stepTitle(step.id)}`}
+                          checked={dependencyDraft.includes(step.id)}
+                          disabled={busy}
+                          onChange={(event) => setDependencyDraft((current) => event.target.checked
+                            ? [...current, step.id] : current.filter((id) => id !== step.id))} />
+                        {stepTitle(step.id)}
+                      </label>
+                    ))}
+                    <Button size="sm" disabled={busy} onClick={() => {
+                      setDependencyError(null);
+                      void onDependenciesChange(selected.id, dependencyDraft).catch((error) => setDependencyError(String(error)));
+                    }}>保存前置步骤</Button>
+                    {dependencyError && <p role="alert">{dependencyError}</p>}
+                  </div>
+                </details>
+              )}
 
               <section>
                 <SectionLabel>步骤要求</SectionLabel>
@@ -267,14 +477,18 @@ export function FlowStepInspector({
                   placeholder="留空时沿用生产目标"
                   aria-label={`${selected.id} 步骤 Prompt`}
                   className="min-h-28 rounded-sm bg-surface-container-lowest font-mono-family text-[11px] leading-5"
-                  disabled={selected.status === 'running' || busy}
+                  disabled={selected.status === "running" || busy}
                 />
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
                   className="mt-2"
-                  disabled={busy || selected.status === 'running' || promptDraft === selected.prompt}
+                  disabled={
+                    busy ||
+                    selected.status === "running" ||
+                    promptDraft === selected.prompt
+                  }
                   onClick={() => onPromptRerun(selected.id, promptDraft)}
                 >
                   <PencilLine /> 保存并重跑
@@ -302,149 +516,285 @@ export function FlowStepInspector({
                 <section>
                   <SectionLabel>资产任务</SectionLabel>
                   {artifactError && (
-                    <div role="alert" className="mb-3 flex items-start gap-2 border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    <div
+                      role="alert"
+                      className="mb-3 flex items-start gap-2 border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive"
+                    >
+                      <AlertTriangle
+                        className="mt-0.5 size-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
                       <span className="break-words">{artifactError}</span>
                     </div>
                   )}
                   {assetQueue?.tasks.length ? (
-                    <ol className="divide-y divide-border border border-border" aria-label="资产任务列表">
+                    <ol
+                      className="divide-y divide-border border border-border"
+                      aria-label="资产任务列表"
+                    >
                       {assetQueue.tasks.map((task) => {
                         const status = ASSET_STATUS[task.status];
-                        const error = task.error ?? task.attempts[task.attempts.length - 1]?.error;
+                        const error =
+                          task.error ??
+                          task.attempts[task.attempts.length - 1]?.error;
                         const pending = pendingReason(task.error);
                         const audioDir = audioDirForKind(task.kind);
-                        const importCandidates = task.status === 'pending' && pending === 'manual' && audioDir
-                          ? (importedAudioByDir?.[audioDir] ?? [])
-                          : [];
+                        const importCandidates =
+                          task.status === "pending" &&
+                          pending === "manual" &&
+                          audioDir
+                            ? (importedAudioByDir?.[audioDir] ?? [])
+                            : [];
                         return (
-                          <li key={task.id} className="space-y-2 bg-surface-container-lowest p-3 text-xs">
+                          <li
+                            key={task.id}
+                            className="space-y-2 bg-surface-container-lowest p-3 text-xs"
+                          >
                             <div className="flex min-w-0 items-center gap-2">
-                              <span className={cn('size-1.5 shrink-0 rounded-full', status.className)} aria-hidden="true" />
-                              <strong className="min-w-0 flex-1 truncate" title={task.targetStem}>{task.targetStem}</strong>
-                              <span className="shrink-0 text-[10px] text-muted-foreground">{task.kind} · {status.label}</span>
+                              <span
+                                className={cn(
+                                  "size-1.5 shrink-0 rounded-full",
+                                  task.status === 'succeeded' && task.usedLocalFallback && !audioDir
+                                    ? 'bg-amber-500'
+                                    : status.className,
+                                )}
+                                aria-hidden="true"
+                              />
+                              <strong
+                                className="min-w-0 flex-1 truncate"
+                                title={task.targetStem}
+                              >
+                                {task.targetStem}
+                              </strong>
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                {task.kind} ·{' '}
+                                {task.status === 'succeeded' && task.usedLocalFallback
+                                  ? audioDir
+                                    ? '本地音频'
+                                    : '待补充素材'
+                                  : status.label}
+                              </span>
                             </div>
-                            <p className="break-words leading-5 text-foreground/85">{task.prompt}</p>
+                            <p className="break-words leading-5 text-foreground/85">
+                              {task.prompt}
+                            </p>
                             <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono-family text-[10px] text-muted-foreground">
-                              <span>场景 {task.sceneRef || '未指定'}</span>
-                              {task.characterRef && <span>角色 {task.characterRef}</span>}
-                              <span>重试 {Math.max(0, task.attempts.length - 1)}</span>
+                              <span>场景 {task.sceneRef || "未指定"}</span>
+                              {task.characterRef && (
+                                <span>角色 {task.characterRef}</span>
+                              )}
+                              <span>
+                                重试 {Math.max(0, task.attempts.length - 1)}
+                              </span>
                             </div>
-                            {task.assetFile && <p className="break-all font-mono-family text-[10px] text-emerald-700 dark:text-emerald-400">正式素材 {task.assetFile}</p>}
-                            {task.attempts.filter((attempt) => attempt.artifact).map((attempt) => {
-                              const key = `${task.id}:${attempt.attempt}`;
-                              const preview = artifactPreviews[key];
-                              return (
-                                <div key={key} className="space-y-2 border-t border-border/70 pt-2">
-                                  <p className="break-all font-mono-family text-[10px] text-muted-foreground">
-                                    候选 {attempt.attempt} · {attempt.artifact}
-                                  </p>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {onPreviewAssetArtifact && (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={artifactBusy !== null}
-                                        aria-label={`预览 ${task.targetStem} 候选 ${attempt.attempt}`}
-                                        onClick={() => void runArtifactAction(`preview:${key}`, async () => {
-                                          const data = await onPreviewAssetArtifact(task.id, attempt.attempt);
-                                          setArtifactPreviews((current) => ({ ...current, [key]: data }));
-                                        })}
-                                      >
-                                        {artifactBusy === `preview:${key}` ? <Loader2 className="animate-spin" /> : <Eye />}
-                                        预览
-                                      </Button>
+                            {task.assetFile && (!task.usedLocalFallback || audioDir) && (
+                              <p className="break-all font-mono-family text-[10px] text-emerald-700 dark:text-emerald-400">
+                                {task.usedLocalFallback ? '本地音频' : '正式素材'} {task.assetFile}
+                              </p>
+                            )}
+                            {task.attempts
+                              .filter(
+                                (attempt) =>
+                                  attempt.artifact && (!attempt.usedLocalFallback || audioDir),
+                              )
+                              .map((attempt) => {
+                                const key = `${task.id}:${attempt.attempt}`;
+                                const preview = artifactPreviews[key];
+                                return (
+                                  <div
+                                    key={key}
+                                    className="space-y-2 border-t border-border/70 pt-2"
+                                  >
+                                    <p className="break-all font-mono-family text-[10px] text-muted-foreground">
+                                      候选 {attempt.attempt} ·{" "}
+                                      {attempt.artifact}
+                                    </p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {onPreviewAssetArtifact && (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={artifactBusy !== null}
+                                          aria-label={`预览 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                          onClick={() =>
+                                            void runArtifactAction(
+                                              `preview:${key}`,
+                                              async () => {
+                                                const data =
+                                                  await onPreviewAssetArtifact(
+                                                    task.id,
+                                                    attempt.attempt,
+                                                  );
+                                                setArtifactPreviews(
+                                                  (current) => ({
+                                                    ...current,
+                                                    [key]: data,
+                                                  }),
+                                                );
+                                              },
+                                            )
+                                          }
+                                        >
+                                          {artifactBusy === `preview:${key}` ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Eye />
+                                          )}
+                                          预览
+                                        </Button>
+                                      )}
+                                      {onPromoteAssetArtifact && (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          disabled={artifactBusy !== null}
+                                          aria-label={`应用 ${task.targetStem} 候选 ${attempt.attempt} 到素材库`}
+                                          onClick={() =>
+                                            void runArtifactAction(
+                                              `promote:${key}`,
+                                              () =>
+                                                onPromoteAssetArtifact(
+                                                  task.id,
+                                                  attempt.attempt,
+                                                ),
+                                            )
+                                          }
+                                        >
+                                          {artifactBusy === `promote:${key}` ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Upload />
+                                          )}
+                                          应用到素材库
+                                        </Button>
+                                      )}
+                                      {onDeleteAssetArtifact && (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="text-destructive"
+                                          disabled={artifactBusy !== null}
+                                          aria-label={`删除 ${task.targetStem} 候选 ${attempt.attempt}`}
+                                          onClick={() =>
+                                            void runArtifactAction(
+                                              `delete:${key}`,
+                                              async () => {
+                                                await onDeleteAssetArtifact(
+                                                  task.id,
+                                                  attempt.attempt,
+                                                );
+                                                setArtifactPreviews(
+                                                  (current) => {
+                                                    const next = { ...current };
+                                                    delete next[key];
+                                                    return next;
+                                                  },
+                                                );
+                                              },
+                                            )
+                                          }
+                                        >
+                                          {artifactBusy === `delete:${key}` ? (
+                                            <Loader2 className="animate-spin" />
+                                          ) : (
+                                            <Trash2 />
+                                          )}
+                                          删除
+                                        </Button>
+                                      )}
+                                    </div>
+                                    {preview?.startsWith("data:image/") && (
+                                      <img
+                                        src={preview}
+                                        alt={`${task.targetStem} 候选 ${attempt.attempt}`}
+                                        className="max-h-48 w-full object-contain"
+                                      />
                                     )}
-                                    {onPromoteAssetArtifact && (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={artifactBusy !== null}
-                                        aria-label={`提升 ${task.targetStem} 候选 ${attempt.attempt}`}
-                                        onClick={() => void runArtifactAction(`promote:${key}`, () => onPromoteAssetArtifact(task.id, attempt.attempt))}
-                                      >
-                                        {artifactBusy === `promote:${key}` ? <Loader2 className="animate-spin" /> : <Upload />}
-                                        提升
-                                      </Button>
-                                    )}
-                                    {onDeleteAssetArtifact && (
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="text-destructive"
-                                        disabled={artifactBusy !== null}
-                                        aria-label={`删除 ${task.targetStem} 候选 ${attempt.attempt}`}
-                                        onClick={() => void runArtifactAction(`delete:${key}`, async () => {
-                                          await onDeleteAssetArtifact(task.id, attempt.attempt);
-                                          setArtifactPreviews((current) => {
-                                            const next = { ...current };
-                                            delete next[key];
-                                            return next;
-                                          });
-                                        })}
-                                      >
-                                        {artifactBusy === `delete:${key}` ? <Loader2 className="animate-spin" /> : <Trash2 />}
-                                        删除
-                                      </Button>
+                                    {preview?.startsWith("data:audio/") && (
+                                      <audio
+                                        src={preview}
+                                        controls
+                                        className="w-full"
+                                        aria-label={`${task.targetStem} 候选 ${attempt.attempt} 音频预览`}
+                                      />
                                     )}
                                   </div>
-                                  {preview?.startsWith('data:image/') && (
-                                    <img src={preview} alt={`${task.targetStem} 候选 ${attempt.attempt}`} className="max-h-48 w-full object-contain" />
-                                  )}
-                                  {preview?.startsWith('data:audio/') && (
-                                    <audio src={preview} controls className="w-full" aria-label={`${task.targetStem} 候选 ${attempt.attempt} 音频预览`} />
-                                  )}
+                                );
+                              })}
+                            {pending === "manual" && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                                BGM/音效不支持 AI
+                                生成，请在素材库导入音频后绑定到该任务。
+                              </p>
+                            )}
+                            {pending === "configuration" && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                                该媒体任务等待供应商配置，可在 AI
+                                设置中补齐后重跑。
+                              </p>
+                            )}
+                            {importCandidates.length > 0 &&
+                              onBindImportedAudio && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[11px] text-muted-foreground">
+                                    绑定已导入音频
+                                  </span>
+                                  {importCandidates.map((filename) => {
+                                    const key = `bind:${task.id}:${filename}`;
+                                    return (
+                                      <Button
+                                        key={key}
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={artifactBusy !== null}
+                                        aria-label={`绑定 ${task.targetStem} 已导入音频 ${filename}`}
+                                        onClick={() =>
+                                          void runArtifactAction(key, () =>
+                                            onBindImportedAudio(
+                                              task.id,
+                                              filename,
+                                            ),
+                                          )
+                                        }
+                                      >
+                                        {artifactBusy === key ? (
+                                          <Loader2 className="animate-spin" />
+                                        ) : (
+                                          <Upload />
+                                        )}
+                                        {filename}
+                                      </Button>
+                                    );
+                                  })}
                                 </div>
-                              );
-                            })}
-                            {pending === 'manual' && (
-                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                                BGM/音效不支持 AI 生成，请在素材库导入音频后绑定到该任务。
+                              )}
+                            {error && (
+                              <p className="break-words text-[11px] text-destructive">
+                                {error}
                               </p>
                             )}
-                            {pending === 'configuration' && (
-                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                                该媒体任务等待供应商配置，可在 AI 设置中补齐后重跑。
-                              </p>
-                            )}
-                            {importCandidates.length > 0 && onBindImportedAudio && (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-[11px] text-muted-foreground">绑定已导入音频</span>
-                                {importCandidates.map((filename) => {
-                                  const key = `bind:${task.id}:${filename}`;
-                                  return (
-                                    <Button
-                                      key={key}
-                                      type="button"
-                                      size="sm"
-                                      variant="outline"
-                                      disabled={artifactBusy !== null}
-                                      aria-label={`绑定 ${task.targetStem} 已导入音频 ${filename}`}
-                                      onClick={() => void runArtifactAction(key, () => onBindImportedAudio(task.id, filename))}
-                                    >
-                                      {artifactBusy === key ? <Loader2 className="animate-spin" /> : <Upload />}
-                                      {filename}
-                                    </Button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                            {error && <p className="break-words text-[11px] text-destructive">{error}</p>}
                           </li>
                         );
                       })}
                     </ol>
                   ) : (
-                    <p className="text-xs text-muted-foreground">暂无资产任务</p>
+                    <p className="text-xs text-muted-foreground">
+                      暂无资产任务
+                    </p>
                   )}
                 </section>
               )}
               <section>
-              <SectionLabel>结构化输出</SectionLabel>
-              {selected.output ? <DataBlock value={selected.output} /> : <p className="text-xs text-muted-foreground">暂无输出</p>}
+                <SectionLabel>结构化输出</SectionLabel>
+                {selected.output ? (
+                  <DataBlock value={selected.output} />
+                ) : (
+                  <p className="text-xs text-muted-foreground">暂无输出</p>
+                )}
               </section>
             </div>
           </ScrollArea>
@@ -455,10 +805,26 @@ export function FlowStepInspector({
             {selected.history.length ? (
               <div className="divide-y divide-border">
                 {[...selected.history].reverse().map((attempt) => (
-                  <details key={attempt.attempt} className="group px-4 py-3" open={attempt.attempt === selected.attempt}>
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
-                      <span className={cn('size-1.5 rounded-full', attempt.error ? 'bg-destructive' : attempt.finishedAt ? 'bg-emerald-500' : 'bg-blue-500')} aria-hidden="true" />
-                      <span className="font-semibold">尝试 {attempt.attempt}</span>
+                  <details
+                    key={attempt.attempt}
+                    className="group px-4 py-3"
+                    open={attempt.attempt === selected.attempt}
+                  >
+                    <summary className="flex cursor-pointer list-none items-center gap-2 text-xs">
+                      <span
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          attempt.error
+                            ? "bg-destructive"
+                            : attempt.finishedAt
+                              ? "bg-emerald-500"
+                              : "bg-blue-500",
+                        )}
+                        aria-hidden="true"
+                      />
+                      <span className="font-semibold">
+                        尝试 {attempt.attempt}
+                      </span>
                       <span className="ml-auto flex items-center gap-1 font-mono-family text-[10px] text-muted-foreground">
                         <Clock3 className="size-3" aria-hidden="true" />
                         {duration(attempt.durationMs)}
@@ -468,27 +834,40 @@ export function FlowStepInspector({
                       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
                         <div>
                           <dt className="text-muted-foreground">开始</dt>
-                          <dd className="mt-0.5 font-mono-family">{timestamp(attempt.startedAt)}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {timestamp(attempt.startedAt)}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">结束</dt>
-                          <dd className="mt-0.5 font-mono-family">{timestamp(attempt.finishedAt)}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {timestamp(attempt.finishedAt)}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">成本</dt>
-                          <dd className="mt-0.5 font-mono-family">{attempt.cost == null ? '未记录' : attempt.cost}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {attempt.cost == null ? "未记录" : attempt.cost}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">Token</dt>
-                          <dd className="mt-0.5 font-mono-family">{(attempt.promptTokens ?? 0) + (attempt.completionTokens ?? 0)}</dd>
+                          <dd className="mt-0.5 font-mono-family">
+                            {(attempt.promptTokens ?? 0) +
+                              (attempt.completionTokens ?? 0)}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-muted-foreground">降级</dt>
-                          <dd className="mt-0.5">{attempt.downgrade ?? '无'}</dd>
+                          <dd className="mt-0.5">
+                            {attempt.downgrade ?? "无"}
+                          </dd>
                         </div>
                         <div className="col-span-2">
                           <dt className="text-muted-foreground">回滚快照</dt>
-                          <dd className="mt-0.5 break-all font-mono-family">{attempt.rollbackSnapshot ?? '无'}</dd>
+                          <dd className="mt-0.5 break-all font-mono-family">
+                            {attempt.rollbackSnapshot ?? "无"}
+                          </dd>
                         </div>
                       </dl>
                       <section>
@@ -517,7 +896,9 @@ export function FlowStepInspector({
                         <section>
                           <SectionLabel>警告</SectionLabel>
                           <ul className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-                            {attempt.warnings.map((warning, index) => <li key={`${index}-${warning}`}>{warning}</li>)}
+                            {attempt.warnings.map((warning, index) => (
+                              <li key={`${index}-${warning}`}>{warning}</li>
+                            ))}
                           </ul>
                         </section>
                       )}
@@ -536,40 +917,71 @@ export function FlowStepInspector({
             {stepEvents.length ? (
               <ol className="divide-y divide-border">
                 {stepEvents.map(({ event, receivedAt }, index) => (
-                  <li key={`${receivedAt}-${event.type}-${index}`} className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 px-4 py-3 text-xs">
+                  <li
+                    key={`${receivedAt}-${event.type}-${index}`}
+                    className="grid grid-cols-[5rem_minmax(0,1fr)] gap-3 px-4 py-3 text-xs"
+                  >
                     <time className="font-mono-family text-[10px] text-muted-foreground">
-                      {new Date(receivedAt).toLocaleTimeString('zh-CN', { hour12: false })}
+                      {new Date(receivedAt).toLocaleTimeString("zh-CN", {
+                        hour12: false,
+                      })}
                     </time>
                     <span>
-                      {event.type === 'stepStarted' && '开始执行'}
-                      {event.type === 'stepSucceeded' && '执行完成'}
-                      {event.type === 'stepSkipped' && '已跳过'}
-                      {event.type === 'stepFailed' && `执行失败：${event.error}`}
+                      {event.type === "stepStarted" && "开始执行"}
+                      {event.type === "stepSucceeded" && "执行完成"}
+                      {event.type === "stepSkipped" && "已跳过"}
+                      {event.type === "stepFailed" &&
+                        `执行失败：${event.error}`}
                     </span>
                   </li>
                 ))}
               </ol>
             ) : (
-              <p className="p-4 text-xs text-muted-foreground">暂无此步骤的运行日志</p>
+              <p className="p-4 text-xs text-muted-foreground">
+                暂无此步骤的运行日志
+              </p>
             )}
           </ScrollArea>
         </TabsContent>
       </Tabs>
 
       <footer className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-surface-container-low px-4 py-3">
-        {selected.status === 'succeeded' && onOpenArtifact && (['character', 'asset'].includes(selected.kind) || selected.id === 'scene') && (
-          <Button type="button" size="sm" onClick={() => onOpenArtifact(selected)}>
-            <SquareArrowOutUpRight />
-            {selected.kind === 'character' ? '打开角色' : selected.kind === 'asset' ? '打开资源库' : '打开场景'}
-          </Button>
-        )}
-        {selected.status !== 'running' && (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onRetry(selected.id)}>
+        {selected.status === "succeeded" &&
+          onOpenArtifact &&
+          (["character", "asset"].includes(selected.kind) ||
+            selected.id === "scene") && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onOpenArtifact(selected)}
+            >
+              <SquareArrowOutUpRight />
+              {selected.kind === "character"
+                ? "打开角色"
+                : selected.kind === "asset"
+                  ? "打开资源库"
+                  : "打开场景"}
+            </Button>
+          )}
+        {selected.status !== "running" && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onRetry(selected.id)}
+          >
             <RotateCcw /> 从此步重跑
           </Button>
         )}
-        {selected.status === 'pending' && !detached && (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSkip(selected.id)}>
+        {selected.status === "pending" && !detached && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onSkip(selected.id)}
+          >
             <SkipForward /> 跳过
           </Button>
         )}

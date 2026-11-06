@@ -229,6 +229,33 @@ export function useSceneDocument() {
     commitEditedNodes(updated);
   }, [clipboardNode, commitEditedNodes, flushPendingHistory, pushHistory]);
 
+  const applySnippet = useCallback(
+    (parsed: WebGalNode[], selectedId?: string, replace = false) => {
+      if (!parsed.length) return;
+      const current = nodesRef.current;
+      const selectedIndex = current.findIndex((node) => node.id === selectedId);
+      if (replace && selectedIndex < 0) return;
+      const index = selectedIndex < 0 ? current.length : selectedIndex + (replace ? 0 : 1);
+      const used = new Set(current.map((node) => node.id));
+      let sequence = 1;
+      const inserted = parsed.map((node) => {
+        while (used.has(String(sequence))) sequence += 1;
+        const id = String(sequence++);
+        used.add(id);
+        return { ...node, id };
+      });
+      flushPendingHistory();
+      pushHistory(current);
+      commitEditedNodes([
+        ...current.slice(0, index),
+        ...inserted,
+        ...current.slice(index + (replace ? 1 : 0)),
+      ]);
+    },
+    [commitEditedNodes, flushPendingHistory, pushHistory],
+  );
+
+
 
   return {
     nodes,
@@ -248,6 +275,7 @@ export function useSceneDocument() {
     pushHistory,
     undo,
     redo,
+    commitEditedNodes,
     insertNode,
     createUnlockNode,
     updateSelectedNode,
@@ -257,5 +285,6 @@ export function useSceneDocument() {
     cutNode,
     reorderNodes,
     pasteNode,
+    applySnippet,
   };
 }

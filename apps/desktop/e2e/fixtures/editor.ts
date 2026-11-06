@@ -1,10 +1,11 @@
 import { expect, type Page } from '@playwright/test';
 
-export async function openFlowBoard(page: Page, viewport: { width: number; height: number }, mode: 'existing' | 'draft' = 'existing') {
+export async function installEditorFixture(page: Page, viewport: { width: number; height: number }, mode: 'existing' | 'draft' = 'existing') {
   await page.setViewportSize(viewport);
   await page.addInitScript((mode) => {
     const now = Date.now();
     const run = {
+      scope: { type: 'project', sceneId: '' },
       runId: 'run_qa',
       projectPath: '/tmp/flow-qa',
       prompt: '近未来校园中，两位创作者共同完成一部视觉小说',
@@ -78,7 +79,7 @@ export async function openFlowBoard(page: Page, viewport: { width: number; heigh
       memory: { worldbook: '创作者使用记忆编辑终端完成视觉小说', glossary: {} },
       chapters: [{ id: 'chapter-1', title: '重逢', summary: '制作开始' }],
       characters: [{ id: 'hero', name: '陆川' }, { id: 'heroine', name: '林夏' }],
-      scenePlans: [{ id: 'opening', file: 'start.txt', chapterId: 'chapter-1', title: '重逢', summary: '制作开始', characterIds: ['hero', 'heroine'] }],
+      scenePlans: [{ id: 'opening', file: 'start.txt', chapterId: 'chapter-1', title: '重逢', summary: '制作开始', characterIds: ['hero', 'heroine'], approvalStatus: 'pending' }],
       branches: { entryScene: 'opening', edges: [] },
       sceneDrafts: [],
       assetPlan: [{ id: 'bg_opening', kind: 'background', targetStem: 'bg_opening', prompt: '工作室', sceneRef: 'opening', status: 'pending' }],
@@ -123,6 +124,15 @@ export async function openFlowBoard(page: Page, viewport: { width: number; heigh
         if (command === 'pipeline_get_capabilities') return { chatError: null, assetError: '未配置素材接口' };
         if (command === 'pipeline_list_runs') return hasRun ? [run] : [];
         if (command === 'pipeline_get_plan') return hasRun ? plan : null;
+        if (command === 'pipeline_run_setup' || command === 'pipeline_run_scene') {
+          hasRun = true;
+          run.scope = command === 'pipeline_run_scene'
+            ? { type: 'scene', sceneId: String(args.sceneId) }
+            : { type: 'setup', sceneId: '' };
+          run.status = 'running';
+          run.prompt = String(args.prompt ?? run.prompt);
+          return run.runId;
+        }
         if (command === 'pipeline_start') {
           hasRun = true;
           run.prompt = String(args.prompt);
@@ -130,6 +140,7 @@ export async function openFlowBoard(page: Page, viewport: { width: number; heigh
           return run.runId;
         }
         if (command === 'pipeline_resume') run.status = 'running';
+        if (command === 'pipeline_pause') run.status = 'paused';
         if (command === 'pipeline_update_dependencies') {
           const step = run.steps.find((step) => step.def.id === args.stepId);
           if (step) step.def.dependsOn = args.dependsOn as string[];
@@ -145,7 +156,11 @@ export async function openFlowBoard(page: Page, viewport: { width: number; heigh
       unregisterListener(_event: string, id: number) { callbacks.delete(id); },
     };
   }, mode);
+}
+
+export async function openFlowBoard(page: Page, viewport: { width: number; height: number }, mode: 'existing' | 'draft' = 'existing') {
+  await installEditorFixture(page, viewport, mode);
   await page.goto('/#/flow/alpha');
   if (mode === 'existing') await expect(page.getByTestId('flow-run-status')).toContainText('已暂停');
-  else await expect(page.getByRole('heading', { name: '安排这次生产' })).toBeVisible();
+  else await expect(page.getByRole('heading', { name: 'Stage 1 · 立项企划与角色定锚', exact: true })).toBeAttached();
 }

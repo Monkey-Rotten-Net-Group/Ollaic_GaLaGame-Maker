@@ -127,6 +127,39 @@ impl EventSink for StepSucceededStoreSabotagingSink {
 struct MissingMediaCapabilityFactory;
 struct UnusedAssetGenerator;
 
+struct RecoveringImageFactory(Arc<RecoveringImageGenerator>);
+struct RecoveringImageGenerator(AtomicU32);
+
+impl AssetGeneratorFactory for RecoveringImageFactory {
+    fn create(
+        &self,
+        _project: Option<&std::path::Path>,
+        _allow_local_fallback: bool,
+        _cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Arc<dyn AssetGenerator> {
+        self.0.clone()
+    }
+}
+
+impl AssetGenerator for RecoveringImageGenerator {
+    fn generate<'a>(
+        &'a self,
+        _task: &'a AssetTask,
+    ) -> Pin<Box<dyn Future<Output = Result<GeneratedArtifact, String>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::new_rgb8(1, 1)
+                .write_to(&mut bytes, image::ImageFormat::Png)
+                .unwrap();
+            Ok(GeneratedArtifact {
+                extension: "png".into(),
+                bytes: bytes.into_inner(),
+                used_local_fallback: self.0.fetch_add(1, Ordering::SeqCst) == 0,
+            })
+        })
+    }
+}
+
 struct LockProbeAgent {
     entered: Arc<Semaphore>,
     release: Arc<Notify>,
@@ -158,6 +191,7 @@ impl AssetGeneratorFactory for MissingMediaCapabilityFactory {
 
     fn create(
         &self,
+        _project_path: Option<&std::path::Path>,
         _allow_local_fallback: bool,
         _cancelled: Arc<std::sync::atomic::AtomicBool>,
     ) -> Arc<dyn AssetGenerator> {
@@ -284,6 +318,7 @@ fn chapters_output() -> AgentOutput {
         ],
         scene_plans: Vec::new(),
         branches: Default::default(),
+        variables: Vec::new(),
     })
 }
 
@@ -508,6 +543,42 @@ fn ipc_contract_serializes_to_camel_case() {
     assert_eq!(v["steps"][0]["def"]["kind"], "plan");
     assert_eq!(v["steps"][0]["status"], "pending");
     assert_eq!(v["steps"][1]["def"]["dependsOn"][0], "plan");
+
+    let var_def = crate::story_plan::VariableDef {
+        id: "trust".to_string(),
+        kind: crate::story_plan::VariableKind::Integer,
+        initial_value: "0".to_string(),
+        description: "林夏信任度".to_string(),
+    };
+    let var_v = serde_json::to_value(&var_def).unwrap();
+    assert_eq!(var_v["id"], "trust");
+    assert_eq!(var_v["kind"], "integer");
+    assert_eq!(var_v["initialValue"], "0");
+    assert_eq!(var_v["description"], "林夏信任度");
+
+    let edge = crate::story_plan::BranchEdge {
+        from: "s1".to_string(),
+        to: "s2".to_string(),
+        choice: Some("c".to_string()),
+        condition: Some("trust > 0".to_string()),
+        effects: vec!["trust=trust+1".to_string()],
+    };
+    let edge_v = serde_json::to_value(&edge).unwrap();
+    assert_eq!(edge_v["from"], "s1");
+    assert_eq!(edge_v["to"], "s2");
+    assert_eq!(edge_v["choice"], "c");
+    assert_eq!(edge_v["condition"], "trust > 0");
+    assert_eq!(edge_v["effects"][0], "trust=trust+1");
+
+    let beat = crate::story_plan::DialogueBeat {
+        kind: crate::story_plan::BeatKind::Monologue,
+        speaker: None,
+        text: "内心独白".to_string(),
+        figure_cues: vec![],
+    };
+    let beat_v = serde_json::to_value(&beat).unwrap();
+    assert_eq!(beat_v["kind"], "monologue");
+    assert_eq!(beat_v["text"], "内心独白");
 }
 
 #[test]
@@ -597,28 +668,27 @@ async fn runs_full_p2_recipe_and_binds_generated_assets() {
     assert!(project.join("game/scene/start.txt").is_file());
     assert!(project.join("game/scene/ending_trust.txt").is_file());
     let opening = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    assert!(opening.contains("setVar:linxia_trust=0;"));
+    assert!(opening.contains("setVar:protocol_obeyed=false;"));
     assert!(opening.contains("林夏:"));
     assert!(opening.contains("changeScene:chapter_01.txt;"));
     assert!(opening.contains("changeBg:"));
     assert!(opening.contains("bgm:"));
     assert!(opening.contains("changeFigure:"));
     let decision = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
-    assert!(decision.contains(
-        "choose:握住她的手，一起承担:ending_trust.txt|遵守协议，回到日常:ending_depart.txt;"
-    ));
+    assert!(
+        decision.contains("choose:握住她的手，一起承担:lbl_edge_0|遵守协议，回到日常:lbl_edge_1;")
+    );
+    assert!(decision.contains("label:lbl_edge_0;"));
+    assert!(decision.contains("setVar:linxia_trust=linxia_trust+1;"));
+    assert!(decision.contains("jumpLabel:lbl_taken_0 -when=linxia_trust>=1;"));
+    assert!(decision.contains("label:lbl_edge_1;"));
+    assert!(decision.contains("setVar:protocol_obeyed=true;"));
+    assert!(decision.contains("changeScene:ending_depart.txt;"));
     assert!(project.join("game/config/characters.json").is_file());
-    assert!(project
-        .join("game/background")
-        .read_dir()
-        .unwrap()
-        .next()
-        .is_some());
-    assert!(project
-        .join("game/figure")
-        .read_dir()
-        .unwrap()
-        .next()
-        .is_some());
+    assert!(!project.join("game/background").exists());
+    assert!(!project.join("game/figure").exists());
+    assert!(!opening.lines().any(|line| line.starts_with("changeBg:")));
     assert!(project
         .join("game/bgm")
         .read_dir()
@@ -1928,6 +1998,60 @@ async fn retrying_a_completed_step_resets_it_and_its_downstream() {
 }
 
 #[tokio::test]
+async fn retrying_completed_asset_step_regenerates_placeholder_images() {
+    let project = fresh_project("retry_placeholder_images");
+    std::fs::create_dir_all(project.join("game/scene")).unwrap();
+    std::fs::write(project.join("game/scene/start.txt"), "; empty\n").unwrap();
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let generator = Arc::new(RecoveringImageGenerator(AtomicU32::new(0)));
+    let pipeline = Pipeline::with_default_agents()
+        .with_asset_generators_for_test(Arc::new(RecoveringImageFactory(generator.clone())));
+    let recipe = FlowRecipe::new().step(StepDef::new("assetQueue", StepKind::Asset).asset_queue());
+    let handle = pipeline
+        .create_run(
+            &project,
+            "run-retry-placeholder",
+            "brief",
+            &recipe,
+            &clock,
+            &sink,
+        )
+        .unwrap();
+    let mut plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    plan.scenes = vec!["start.txt".into()];
+    plan.asset_plan.push(crate::story_plan::AssetTaskPlan {
+        id: "bg_opening".into(),
+        kind: "background".into(),
+        target_stem: "bg_opening".into(),
+        prompt: "empty corridor".into(),
+        status: "pending".into(),
+        ..Default::default()
+    });
+    crate::story_plan::save_plan(&project, &plan).unwrap();
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(handle.state.lock().await.status, RunStatus::Completed);
+    assert!(crate::asset_queue::load_queue(&project).unwrap().tasks[0].used_local_fallback);
+
+    handle
+        .retry_step(&project, "assetQueue", &sink, &clock)
+        .await
+        .unwrap();
+    pipeline
+        .execute(&project, handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(handle.state.lock().await.status, RunStatus::Completed);
+    assert_eq!(generator.0.load(Ordering::SeqCst), 2);
+    let queue = crate::asset_queue::load_queue(&project).unwrap();
+    assert!(!queue.tasks[0].used_local_fallback);
+    assert_eq!(queue.tasks[0].attempts.len(), 2);
+    assert_eq!(handle.state.lock().await.steps[0].history.len(), 2);
+    std::fs::remove_dir_all(project).unwrap();
+}
+
+#[tokio::test]
 async fn scene_write_failure_fails_the_step_instead_of_claiming_success() {
     let project = fresh_project("scene_write_failure");
     let sink = RecordingSink::new();
@@ -2888,4 +3012,1086 @@ async fn edited_step_prompt_is_used_by_retry() {
     assert_eq!(history.len(), 2);
     let input: serde_json::Value = serde_json::from_str(&history[1].input_snapshot).unwrap();
     assert_eq!(input["stepInstruction"], "revised direction");
+}
+
+#[allow(clippy::type_complexity)]
+struct TailCapturingDialogist {
+    inputs: Arc<std::sync::Mutex<Vec<(Option<String>, String)>>>,
+}
+
+impl Agent for TailCapturingDialogist {
+    fn run<'a>(
+        &'a self,
+        context: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.inputs.lock().unwrap().push((
+                context.target_scene_id.map(str::to_string),
+                context.preceding_scene_tail.to_string(),
+            ));
+            crate::agents::DialogistAgent.run(context).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn setup_then_sequential_scene_runs_preserve_reviewed_files_and_use_saved_tail() {
+    use crate::pipeline::dsl::{scene_recipe, setup_recipe, FlowScope};
+    let project = fresh_project("scene_scoped_sequence");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let inputs = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register_named(
+        "dialogist",
+        Box::new(TailCapturingDialogist {
+            inputs: inputs.clone(),
+        }),
+    );
+    let pipeline = Pipeline::new(agents);
+    let setup = setup_recipe();
+    let setup_handle = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "setup",
+            prompt: "A scene-centered story",
+            recipe: &setup,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, setup_handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(setup_handle.state.lock().await.status, RunStatus::Completed);
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert!(plan.scene_drafts.is_empty());
+    assert!(plan.scenes.is_empty());
+    let anchors = crate::asset_queue::store::load_queue(&project).unwrap();
+    assert_eq!(anchors.tasks.len(), plan.characters.len());
+    assert!(anchors.tasks.iter().all(|task| task.status
+        == crate::asset_queue::AssetTaskStatus::Succeeded
+        && task.emotion.as_deref() == Some("default")));
+    assert!(!project.join("game/scene/start.txt").exists());
+    let opening = scene_recipe("opening");
+    let first = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "opening",
+            prompt: &plan.prompt,
+            recipe: &opening,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, first.clone(), &sink, &clock)
+        .await;
+    assert_eq!(first.state.lock().await.status, RunStatus::Completed);
+    let mut text = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    for index in 0..12 {
+        text.push_str(&format!("\n林夏:Manually edited line {index};"));
+    }
+    std::fs::write(project.join("game/scene/start.txt"), &text).unwrap();
+    super::scene_review::approve_scene(&project, "opening").unwrap();
+    let encounter = scene_recipe("encounter");
+    let next = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "encounter",
+            prompt: &plan.prompt,
+            recipe: &encounter,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    // The durable scene identity survives attaching after a process restart.
+    next.pause(&project, &sink, &clock).await.unwrap();
+    let attached = pipeline.attach_run(&project, "encounter", &clock).unwrap();
+    assert_eq!(
+        attached.state.lock().await.scope,
+        FlowScope::Scene {
+            scene_id: "encounter".into()
+        }
+    );
+    let resumed = pipeline
+        .resume_run(&project, "encounter", &sink, &clock)
+        .unwrap();
+    pipeline
+        .execute(&project, resumed.clone(), &sink, &clock)
+        .await;
+    assert_eq!(resumed.state.lock().await.status, RunStatus::Completed);
+    let final_plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert_eq!(final_plan.scene_drafts.len(), 2);
+    assert_eq!(final_plan.scenes.len(), 2);
+    assert_eq!(
+        final_plan
+            .scene_plans
+            .iter()
+            .find(|scene| scene.id == "opening")
+            .unwrap()
+            .approval_status,
+        crate::story_plan::types::SceneApprovalStatus::Approved
+    );
+    assert_eq!(
+        std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap(),
+        text
+    );
+    assert!(project.join("game/scene/chapter_01.txt").is_file());
+    let inputs = inputs.lock().unwrap();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[0], (Some("opening".into()), String::new()));
+    assert_eq!(inputs[1].0.as_deref(), Some("encounter"));
+    assert!(inputs[1].1.contains("Manually edited line 2"));
+    assert!(inputs[1].1.contains("Manually edited line 11"));
+    assert!(!inputs[1].1.contains("Manually edited line 1;"));
+    assert_eq!(inputs[1].1.lines().count(), 11); // predecessor ID plus exactly ten saved lines
+    drop(inputs);
+    assert!(pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "locked_opening",
+            prompt: &plan.prompt,
+            recipe: &opening,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .is_err());
+    assert!(
+        !crate::pipeline::store::run_state_path(&project, "locked_opening")
+            .unwrap()
+            .exists()
+    );
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[tokio::test]
+async fn scene_scope_rejects_unknown_targets_and_preserves_the_project_brief() {
+    use crate::pipeline::dsl::{scene_recipe, setup_recipe};
+    let project = fresh_project("scene_scope_validation");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+    let pipeline = Pipeline::with_default_agents();
+    let setup = setup_recipe();
+    let handle = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "setup",
+            prompt: "Original brief",
+            recipe: &setup,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline.execute(&project, handle, &sink, &clock).await;
+    let recipe = scene_recipe("../outside");
+    assert!(pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "invalid",
+            prompt: "Replacement",
+            recipe: &recipe,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .is_err());
+    assert!(!crate::pipeline::store::run_state_path(&project, "invalid")
+        .unwrap()
+        .exists());
+    let recipe = scene_recipe("opening");
+    let _ = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "valid",
+            prompt: "Scene-only instruction",
+            recipe: &recipe,
+            allow_local_fallback: true,
+            step_timeout: None,
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    assert_eq!(
+        crate::story_plan::load_plan(&project)
+            .unwrap()
+            .unwrap()
+            .prompt,
+        "Original brief"
+    );
+    let _ = std::fs::remove_dir_all(project);
+}
+
+struct GoldenOutlineAgent;
+
+impl Agent for GoldenOutlineAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(async move {
+            let variables = vec![crate::story_plan::types::VariableDef {
+                id: "linxia_trust".to_string(),
+                kind: crate::story_plan::types::VariableKind::Integer,
+                initial_value: "0".to_string(),
+                description: "林夏对陆川的信任度".to_string(),
+            }];
+            let chapters = vec![
+                crate::story_plan::types::ChapterPlan {
+                    id: "ch1".to_string(),
+                    title: "第一章 · 秘密的开端".to_string(),
+                    summary: "日常出现裂缝，两人的命运在此交织。".to_string(),
+                },
+                crate::story_plan::types::ChapterPlan {
+                    id: "ch2".to_string(),
+                    title: "第二章 · 命运的决断".to_string(),
+                    summary: "面临最终选择，决定共同承担还是归于平静。".to_string(),
+                },
+            ];
+            let scene_plans = vec![
+                crate::story_plan::types::ScenePlan {
+                    location_id: None,
+                    time_of_day: None,
+                    id: "opening".to_string(),
+                    file: "start.txt".to_string(),
+                    chapter_id: "ch1".to_string(),
+                    title: "听见回声".to_string(),
+                    summary: "走廊广播异常重复，陆川与林夏首次相遇。".to_string(),
+                    character_ids: vec!["protagonist".to_string(), "heroine".to_string()],
+                    pov_character_id: Some("protagonist".to_string()),
+                    emotional_arc: "困惑日常 -> 警惕确认".to_string(),
+                    required_beats: vec![
+                        "放学后听到走廊广播异常重复".to_string(),
+                        "在空教室发现未接电源的录音机".to_string(),
+                        "林夏指出磁带上写着陆川的学号".to_string(),
+                    ],
+                    forbidden_reveals: vec!["静默协议的终极代价".to_string()],
+                    entry_state: vec!["日常世界表面安稳".to_string()],
+                    min_beats: 10,
+                    approval_status: crate::story_plan::types::SceneApprovalStatus::Pending,
+                    rolling_summary: None,
+                },
+                crate::story_plan::types::ScenePlan {
+                    location_id: None,
+                    time_of_day: None,
+                    id: "decision".to_string(),
+                    file: "decision.txt".to_string(),
+                    chapter_id: "ch1".to_string(),
+                    title: "锚点选择".to_string(),
+                    summary: "静默协议启动，面临握手承担或回到日常的关键分岔。".to_string(),
+                    character_ids: vec!["protagonist".to_string(), "heroine".to_string()],
+                    pov_character_id: Some("protagonist".to_string()),
+                    emotional_arc: "两难压力 -> 意志决断".to_string(),
+                    required_beats: vec![
+                        "整栋大楼断电陷入静默领域".to_string(),
+                        "录音机吐出主人公自己的声音".to_string(),
+                        "面临握手承担或回到日常的关键分岔".to_string(),
+                    ],
+                    forbidden_reveals: vec![],
+                    entry_state: vec!["电力切断，协议完全覆盖".to_string()],
+                    min_beats: 10,
+                    approval_status: crate::story_plan::types::SceneApprovalStatus::Pending,
+                    rolling_summary: None,
+                },
+                crate::story_plan::types::ScenePlan {
+                    location_id: None,
+                    time_of_day: None,
+                    id: "ending_trust".to_string(),
+                    file: "ending_trust.txt".to_string(),
+                    chapter_id: "ch2".to_string(),
+                    title: "共同承担".to_string(),
+                    summary: "陆川选择相信林夏，两人带着代价继续追索真相。".to_string(),
+                    character_ids: vec!["protagonist".to_string(), "heroine".to_string()],
+                    pov_character_id: Some("protagonist".to_string()),
+                    emotional_arc: "代价沉重 -> 坚定前行".to_string(),
+                    required_beats: vec![
+                        "握紧林夏冰冷的手确认彼此存在".to_string(),
+                        "晨光破晓照出被抹除名字的记忆".to_string(),
+                        "立下绝不独自承担代价的新盟约".to_string(),
+                    ],
+                    forbidden_reveals: vec![],
+                    entry_state: vec!["已选择信任分支，信任度增加".to_string()],
+                    min_beats: 10,
+                    approval_status: crate::story_plan::types::SceneApprovalStatus::Pending,
+                    rolling_summary: None,
+                },
+                crate::story_plan::types::ScenePlan {
+                    location_id: None,
+                    time_of_day: None,
+                    id: "ending_depart".to_string(),
+                    file: "ending_depart.txt".to_string(),
+                    chapter_id: "ch2".to_string(),
+                    title: "归于静默".to_string(),
+                    summary: "陆川退回安稳日常，林夏从记忆中消逝。".to_string(),
+                    character_ids: vec!["protagonist".to_string()],
+                    pov_character_id: Some("protagonist".to_string()),
+                    emotional_arc: "平静释然 -> 隐秘怅惘".to_string(),
+                    required_beats: vec![
+                        "松开手任由日常记忆覆盖".to_string(),
+                        "清晨广播恢复正常，身旁空无一人".to_string(),
+                        "独自按下无标签录音机听见笑声".to_string(),
+                    ],
+                    forbidden_reveals: vec![],
+                    entry_state: vec!["已选择遵守协议分支".to_string()],
+                    min_beats: 10,
+                    approval_status: crate::story_plan::types::SceneApprovalStatus::Pending,
+                    rolling_summary: None,
+                },
+            ];
+            let branches = crate::story_plan::types::BranchGraph {
+                entry_scene: "opening".to_string(),
+                edges: vec![
+                    crate::story_plan::types::BranchEdge {
+                        from: "opening".to_string(),
+                        to: "decision".to_string(),
+                        choice: None,
+                        condition: None,
+                        effects: vec![],
+                    },
+                    crate::story_plan::types::BranchEdge {
+                        from: "decision".to_string(),
+                        to: "ending_trust".to_string(),
+                        choice: Some("握住她的手，一起承担".to_string()),
+                        condition: Some("linxia_trust>=0".to_string()),
+                        effects: vec!["linxia_trust+=2".to_string()],
+                    },
+                    crate::story_plan::types::BranchEdge {
+                        from: "decision".to_string(),
+                        to: "ending_depart".to_string(),
+                        choice: Some("遵守协议，回到日常".to_string()),
+                        condition: None,
+                        effects: vec![],
+                    },
+                ],
+            };
+            Ok(AgentOutput::new(AgentOutputPayload::Outline {
+                chapters,
+                scene_plans,
+                branches,
+                variables,
+            }))
+        })
+    }
+}
+
+struct GoldenCharacterAgent;
+
+impl Agent for GoldenCharacterAgent {
+    fn run<'a>(
+        &'a self,
+        _ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(async move {
+            let characters = vec![
+                crate::characters::types::Character {
+                    id: "protagonist".to_string(),
+                    name: "陆川".to_string(),
+                    aliases: vec![],
+                    description: "习惯先观察再行动的转学生，第一人称内心独白视角。".to_string(),
+                    personality: "克制、敏锐、害怕连累别人。".to_string(),
+                    reference_images: vec![],
+                    stance: "中立".to_string(),
+                    keywords: vec!["主人公".to_string(), "转学生".to_string()],
+                    dialogue_style: "短句，先确认事实再表达感受。".to_string(),
+                    gender: "男".to_string(),
+                    age: "17".to_string(),
+                    sprites: vec![crate::characters::types::CharacterSprite {
+                        emotion: "default".to_string(),
+                        file: String::new(),
+                        prompt: None,
+                    }],
+                    default_voice: None,
+                    voice_timbre: None,
+                    relations: vec![],
+                    color_theme: None,
+                    notes: String::new(),
+                },
+                crate::characters::types::Character {
+                    id: "heroine".to_string(),
+                    name: "林夏".to_string(),
+                    aliases: vec![],
+                    description: "掌握静默协议真相的少女，追查被抹去的异常记录。".to_string(),
+                    personality: "冷静外表下有强烈的责任感。".to_string(),
+                    reference_images: vec![],
+                    stance: "越界者".to_string(),
+                    keywords: vec!["女主角".to_string(), "知情者".to_string()],
+                    dialogue_style: "语气简洁，常用反问试探。".to_string(),
+                    gender: "女".to_string(),
+                    age: "17".to_string(),
+                    sprites: vec![
+                        crate::characters::types::CharacterSprite {
+                            emotion: "default".to_string(),
+                            file: String::new(),
+                            prompt: None,
+                        },
+                        crate::characters::types::CharacterSprite {
+                            emotion: "smile".to_string(),
+                            file: String::new(),
+                            prompt: None,
+                        },
+                        crate::characters::types::CharacterSprite {
+                            emotion: "serious".to_string(),
+                            file: String::new(),
+                            prompt: None,
+                        },
+                    ],
+                    default_voice: None,
+                    voice_timbre: None,
+                    relations: vec![],
+                    color_theme: None,
+                    notes: String::new(),
+                },
+            ];
+            Ok(AgentOutput::new(AgentOutputPayload::Characters(characters)))
+        })
+    }
+}
+
+struct GoldenDialogistAgent;
+
+impl Agent for GoldenDialogistAgent {
+    fn run<'a>(
+        &'a self,
+        ctx: &'a AgentContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut drafts = Vec::new();
+            for scene in ctx
+                .scene_plans
+                .iter()
+                .filter(|s| ctx.target_scene_id.is_none_or(|t| s.id == t))
+            {
+                let beats = match scene.id.as_str() {
+                    "opening" => vec![
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "放学铃响过很久，走廊尽头的广播却又重复了一遍早晨的报时。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "……刚才也是这个时间。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Monologue,
+                            speaker: Some("陆川".into()),
+                            text: "（挂钟指针明明在往前走，声音却像卡带一样停在同一个刻度。）"
+                                .into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "你听见了。那就别装作只是设备故障。".into(),
+                            figure_cues: vec![crate::story_plan::types::FigureCue {
+                                action: crate::story_plan::types::FigureCueAction::Show,
+                                character_id: "heroine".into(),
+                                position: Some(
+                                    crate::story_plan::types::FigureStagePosition::Right,
+                                ),
+                                emotion: "default".into(),
+                            }],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "你一直在等能听见的人？".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Monologue,
+                            speaker: Some("陆川".into()),
+                            text: "（她的眼神太清醒了，甚至没有一丝恶作剧被拆穿的慌乱。）".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "不。我在确认下一个被卷进来的人是谁。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "她把录音机推到桌沿，磁带上写着陆川今天才拿到的学号。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "现在，你还想把它当成偶然吗？".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "告诉我真相。".into(),
+                            figure_cues: vec![],
+                        },
+                    ],
+                    "decision" => vec![
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "整座教学楼的灯同时熄灭，只剩录音机的转轴仍在转动。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "协议会给你一个完整、安稳、没有我的日常。".into(),
+                            figure_cues: vec![crate::story_plan::types::FigureCue {
+                                action: crate::story_plan::types::FigureCueAction::Show,
+                                character_id: "heroine".into(),
+                                position: Some(
+                                    crate::story_plan::types::FigureStagePosition::Right,
+                                ),
+                                emotion: "serious".into(),
+                            }],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "那你呢？".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "回到我本来该消失的位置。很公平。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Monologue,
+                            speaker: Some("陆川".into()),
+                            text:
+                                "（哪有什么公平。如果连并肩作战的人都忘记，这种安全根本毫无意义。）"
+                                    .into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "公平不是替别人把选择做完。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "录音机吐出最后一截磁带，里面传来陆川自己的声音。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "我以前说过，会把你当作确认真实的锚点。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "所以这一次，别因为一句旧承诺勉强自己。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "选择的时刻到了。".into(),
+                            figure_cues: vec![],
+                        },
+                    ],
+                    "ending_trust" => vec![
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "陆川握住林夏冰冷的手，广播里的报时第一次继续向前。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "不是因为旧承诺。是因为现在的我仍然会选你。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "越界以后，我们都会失去一部分安全。".into(),
+                            figure_cues: vec![crate::story_plan::types::FigureCue {
+                                action: crate::story_plan::types::FigureCueAction::Show,
+                                character_id: "heroine".into(),
+                                position: Some(
+                                    crate::story_plan::types::FigureStagePosition::Right,
+                                ),
+                                emotion: "smile".into(),
+                            }],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Monologue,
+                            speaker: Some("陆川".into()),
+                            text: "（即使未来充满未知的风险，此刻掌心的温度却是真实的。）".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "那就一起记住失去的部分。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "晨光落进走廊，所有被删除的名字短暂地浮现在玻璃上。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("林夏".into()),
+                            text: "第一条新规则：不准一个人擅自承担全部代价。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "同意。第二条，遇到异常先叫对方名字。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "他们并肩走向仍未醒来的城市，录音机安静地停在新的刻度。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "我们走吧，林夏。".into(),
+                            figure_cues: vec![],
+                        },
+                    ],
+                    "ending_depart" => vec![
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "陆川松开手，广播声像潮水一样盖过林夏的名字。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Monologue,
+                            speaker: Some("陆川".into()),
+                            text: "（退回日常，是保护所有人最理智的选择。）".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Monologue,
+                            speaker: Some("陆川".into()),
+                            text: "（可我为什么已经开始害怕忘记？）".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "胸口空荡荡的，像是什么极其重要的齿轮被悄然抽走。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "灯光恢复时，窗边只剩一台没有标签的录音机。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "有人在这里吗？".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "空荡的走廊只有自己的回声。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Dialogue,
+                            speaker: Some("陆川".into()),
+                            text: "只是觉得这里不该这么安静。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "他按下播放键，磁带深处传来一声几乎听不清的笑。".into(),
+                            figure_cues: vec![],
+                        },
+                        crate::story_plan::types::DialogueBeat {
+                            kind: crate::story_plan::types::BeatKind::Narration,
+                            speaker: None,
+                            text: "日常继续流淌，仿佛什么都不曾发生。".into(),
+                            figure_cues: vec![],
+                        },
+                    ],
+                    _ => vec![],
+                };
+                drafts.push(crate::story_plan::types::SceneDraft {
+                    scene_id: scene.id.clone(),
+                    title: scene.title.clone(),
+                    stage_managed: true,
+                    beats,
+                });
+            }
+            Ok(AgentOutput::new(AgentOutputPayload::SceneDrafts(drafts)))
+        })
+    }
+}
+
+#[tokio::test]
+async fn golden_vertical_slice_two_stage_director_lifecycle() {
+    use crate::pipeline::dsl::{scene_recipe, setup_recipe};
+    use crate::story_plan::types::SceneApprovalStatus;
+
+    let project = fresh_project("golden_vertical_slice");
+    let sink = RecordingSink::new();
+    let clock = StepClock::new();
+
+    // 1. Setup pipeline with custom 2-character 4-scene slice agents
+    let mut agents = AgentRegistry::with_defaults();
+    agents.register(StepKind::Outline, Box::new(GoldenOutlineAgent));
+    agents.register(StepKind::Character, Box::new(GoldenCharacterAgent));
+    agents.register_named("dialogist", Box::new(GoldenDialogistAgent));
+    let pipeline = Pipeline::new(agents);
+
+    // ==========================================
+    // STAGE 1: Global Setup & Visual Anchors
+    // ==========================================
+    let setup = setup_recipe();
+    let setup_handle = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "golden_setup",
+            prompt: "A vertical slice mystery romance story",
+            recipe: &setup,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+
+    pipeline
+        .execute(&project, setup_handle.clone(), &sink, &clock)
+        .await;
+    assert_eq!(setup_handle.state.lock().await.status, RunStatus::Completed);
+
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    // 2 Characters: 陆川 (protagonist) & 林夏 (heroine)
+    assert_eq!(plan.characters.len(), 2);
+    assert_eq!(plan.characters[0].name, "陆川");
+    assert_eq!(plan.characters[0].id, "protagonist");
+    assert_eq!(plan.characters[1].name, "林夏");
+    assert_eq!(plan.characters[1].id, "heroine");
+
+    // 4 Scenes: opening, decision, ending_trust, ending_depart
+    assert_eq!(plan.scene_plans.len(), 4);
+    assert_eq!(plan.scene_plans[0].id, "opening");
+    assert_eq!(plan.scene_plans[1].id, "decision");
+    assert_eq!(plan.scene_plans[2].id, "ending_trust");
+    assert_eq!(plan.scene_plans[3].id, "ending_depart");
+
+    // All scenes start in Pending status; no scene files generated during Stage 1
+    assert!(plan
+        .scene_plans
+        .iter()
+        .all(|s| s.approval_status == SceneApprovalStatus::Pending));
+    assert!(plan.scenes.is_empty());
+    assert!(plan.scene_drafts.is_empty());
+
+    // 1 Variable: linxia_trust
+    assert_eq!(plan.variables.len(), 1);
+    assert_eq!(plan.variables[0].id, "linxia_trust");
+    assert_eq!(plan.variables[0].initial_value, "0");
+
+    // Character visual anchors generated
+    let queue = crate::asset_queue::store::load_queue(&project).unwrap();
+    assert_eq!(queue.tasks.len(), 2);
+    assert!(queue
+        .tasks
+        .iter()
+        .all(|t| t.status == crate::asset_queue::AssetTaskStatus::Succeeded));
+
+    // ==========================================
+    // STAGE 2: Scene-by-Scene Production & Approval
+    // ==========================================
+
+    // --- Scene 1: opening (start.txt) ---
+    let opening_recipe = scene_recipe("opening");
+    let opening_run = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_opening",
+            prompt: &plan.prompt,
+            recipe: &opening_recipe,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, opening_run.clone(), &sink, &clock)
+        .await;
+    assert_eq!(opening_run.state.lock().await.status, RunStatus::Completed);
+
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert_eq!(
+        plan.scene_plans[0].approval_status,
+        SceneApprovalStatus::Drafted
+    );
+    assert_eq!(
+        plan.scene_plans[1].approval_status,
+        SceneApprovalStatus::Pending
+    );
+
+    let start_script = std::fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
+    assert!(start_script.contains("intro:听见回声;"));
+    assert!(start_script.contains("setVar:linxia_trust=0;"));
+    assert!(start_script.contains("changeScene:decision.txt;"));
+
+    // Approve opening scene
+    let plan = super::scene_review::approve_scene(&project, "opening").unwrap();
+    assert_eq!(
+        plan.scene_plans[0].approval_status,
+        SceneApprovalStatus::Approved
+    );
+    assert!(plan.scene_plans[0].rolling_summary.is_some());
+
+    // --- Scene 2: decision (decision.txt with variable branch) ---
+    let decision_recipe = scene_recipe("decision");
+    let decision_run = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_decision",
+            prompt: &plan.prompt,
+            recipe: &decision_recipe,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, decision_run.clone(), &sink, &clock)
+        .await;
+    assert_eq!(decision_run.state.lock().await.status, RunStatus::Completed);
+
+    let plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert_eq!(
+        plan.scene_plans[1].approval_status,
+        SceneApprovalStatus::Drafted
+    );
+
+    let decision_script = std::fs::read_to_string(project.join("game/scene/decision.txt")).unwrap();
+    assert!(decision_script
+        .contains("choose:握住她的手，一起承担:lbl_edge_0|遵守协议，回到日常:lbl_edge_1;"));
+    assert!(decision_script.contains("label:lbl_edge_0;"));
+    assert!(decision_script.contains("setVar:linxia_trust=linxia_trust+(2);"));
+    assert!(decision_script.contains("jumpLabel:lbl_taken_0 -when=linxia_trust>=0;"));
+
+    let plan = super::scene_review::approve_scene(&project, "decision").unwrap();
+    assert_eq!(
+        plan.scene_plans[1].approval_status,
+        SceneApprovalStatus::Approved
+    );
+
+    // --- Scene 3: ending_trust (ending_trust.txt) ---
+    let trust_recipe = scene_recipe("ending_trust");
+    let trust_run = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_ending_trust",
+            prompt: &plan.prompt,
+            recipe: &trust_recipe,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, trust_run.clone(), &sink, &clock)
+        .await;
+    assert_eq!(trust_run.state.lock().await.status, RunStatus::Completed);
+
+    let trust_script =
+        std::fs::read_to_string(project.join("game/scene/ending_trust.txt")).unwrap();
+    assert!(trust_script.contains("intro:共同承担;"));
+    assert!(trust_script.contains("end:;") || trust_script.contains("end;"));
+
+    let plan = super::scene_review::approve_scene(&project, "ending_trust").unwrap();
+    assert_eq!(
+        plan.scene_plans[2].approval_status,
+        SceneApprovalStatus::Approved
+    );
+
+    // --- Scene 4: ending_depart (ending_depart.txt) ---
+    let depart_recipe = scene_recipe("ending_depart");
+    let depart_run = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "run_ending_depart",
+            prompt: &plan.prompt,
+            recipe: &depart_recipe,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, depart_run.clone(), &sink, &clock)
+        .await;
+    assert_eq!(depart_run.state.lock().await.status, RunStatus::Completed);
+
+    let depart_script =
+        std::fs::read_to_string(project.join("game/scene/ending_depart.txt")).unwrap();
+    assert!(depart_script.contains("intro:归于静默;"));
+    assert!(depart_script.contains("end:;") || depart_script.contains("end;"));
+
+    let plan = super::scene_review::approve_scene(&project, "ending_depart").unwrap();
+    assert_eq!(
+        plan.scene_plans[3].approval_status,
+        SceneApprovalStatus::Approved
+    );
+    assert!(plan
+        .scene_plans
+        .iter()
+        .all(|s| s.approval_status == SceneApprovalStatus::Approved));
+
+    // ==========================================
+    // STAGE 2: Downstream Stale Invalidation
+    // ==========================================
+    // Unlocking opening and re-running it must mark downstream scenes Stale
+    let plan = super::scene_review::unlock_scene(&project, "opening").unwrap();
+    assert_eq!(
+        plan.scene_plans[0].approval_status,
+        SceneApprovalStatus::Drafted
+    );
+
+    let rerun_opening = pipeline
+        .create_scoped_run_with_timeout(RunCreation {
+            project_path: &project,
+            run_id: "rerun_opening",
+            prompt: &plan.prompt,
+            recipe: &opening_recipe,
+            allow_local_fallback: true,
+            step_timeout: Some(Duration::from_secs(10)),
+            clock: &clock,
+            sink: &sink,
+        })
+        .unwrap();
+    pipeline
+        .execute(&project, rerun_opening.clone(), &sink, &clock)
+        .await;
+    assert_eq!(
+        rerun_opening.state.lock().await.status,
+        RunStatus::Completed
+    );
+
+    let stale_plan = crate::story_plan::load_plan(&project).unwrap().unwrap();
+    assert_eq!(
+        stale_plan.scene_plans[0].approval_status,
+        SceneApprovalStatus::Drafted
+    );
+    assert_eq!(
+        stale_plan.scene_plans[1].approval_status,
+        SceneApprovalStatus::Stale
+    );
+    assert_eq!(
+        stale_plan.scene_plans[2].approval_status,
+        SceneApprovalStatus::Stale
+    );
+    assert_eq!(
+        stale_plan.scene_plans[3].approval_status,
+        SceneApprovalStatus::Stale
+    );
+
+    // Locked script files remain preserved despite downstream invalidation
+    assert!(project.join("game/scene/decision.txt").is_file());
+    assert!(project.join("game/scene/ending_trust.txt").is_file());
+    assert!(project.join("game/scene/ending_depart.txt").is_file());
+
+    // Re-approve opening
+    super::scene_review::approve_scene(&project, "opening").unwrap();
+
+    // ==========================================
+    // BUNDLED MOOD AUDIO & ZERO ORPHANED ASSETS
+    // ==========================================
+    // Verify BGM was synthesized via bundled mood fallback
+    let bgm_file = project.join("game/bgm/bgm_main_theme.wav");
+    assert!(bgm_file.is_file(), "BGM file must exist in game/bgm/");
+    let bgm_bytes = std::fs::read(&bgm_file).unwrap();
+    assert!(bgm_bytes.len() >= 44, "BGM WAV must contain header");
+    assert_eq!(&bgm_bytes[0..4], b"RIFF");
+    assert_eq!(&bgm_bytes[8..12], b"WAVE");
+
+    // Verify metadata source tag has source:bundled_mood
+    let metadata =
+        crate::assets::commands::read_asset_metadata(&project.to_string_lossy()).unwrap();
+    let bgm_tags = metadata
+        .tags
+        .get("bgm/bgm_main_theme.wav")
+        .expect("BGM tags exist");
+    assert!(
+        bgm_tags.contains(&crate::asset_queue::binder::BUNDLED_MOOD_SOURCE_TAG.to_string()),
+        "BGM must be tagged with source:bundled_mood"
+    );
+
+    // Verify zero orphaned assets: all assets referenced by scene commands exist on disk
+    for scene_file in [
+        "start.txt",
+        "decision.txt",
+        "ending_trust.txt",
+        "ending_depart.txt",
+    ] {
+        let content = std::fs::read_to_string(project.join("game/scene").join(scene_file)).unwrap();
+        let nodes = crate::webgal::parser::parse_script(&content);
+        for node in &nodes {
+            if let Some(asset) = &node.asset {
+                if asset == "none" {
+                    continue;
+                }
+                let path = match node.cmd_type {
+                    crate::webgal::types::CommandType::ChangeBg => {
+                        project.join("game/background").join(asset)
+                    }
+                    crate::webgal::types::CommandType::ChangeFigure => {
+                        project.join("game/figure").join(asset)
+                    }
+                    crate::webgal::types::CommandType::Bgm => project.join("game/bgm").join(asset),
+                    _ => continue,
+                };
+                assert!(
+                    path.is_file(),
+                    "Referenced asset {asset} in {scene_file} must exist at {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(project);
 }

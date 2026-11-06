@@ -8,6 +8,11 @@ import { openProject, type ProjectInfo } from '../lib/webgal-ipc';
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: vi.fn() }));
 vi.mock('../lib/webgal-ipc');
 
+async function confirmPermanentRemoval() {
+  const dialog = await screen.findByRole('alertdialog', { name: '彻底移除项目？' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '彻底移除' }));
+}
+
 const projects: Project[] = ['A', 'B'].map((id) => ({
   id, name: `Project ${id}`, path: `/projects/${id}`, description: '',
   lastModified: '', isFavorite: false, sceneCount: 1,
@@ -80,6 +85,7 @@ describe.each(['card', 'folder'] as const)('ProjectHome pending %s opens', (entr
     const finishOpening = await startOpening(entry);
     fireEvent.click(screen.getByRole('button', { name: /^回收站（/ }));
     fireEvent.click(record('B').getByRole('button', { name: '永久移除 Project B' }));
+    await confirmPermanentRemoval();
     await finishOpening();
 
     expect(screen.getByText('Editor')).toBeInTheDocument();
@@ -92,6 +98,7 @@ describe.each(['card', 'folder'] as const)('ProjectHome pending %s opens', (entr
     fireEvent.click(record('A').getByRole('button', { name: '移入回收站 Project A' }));
     fireEvent.click(screen.getByRole('button', { name: /^回收站（/ }));
     fireEvent.click(record('A').getByRole('button', { name: '永久移除 Project A' }));
+    await confirmPermanentRemoval();
     await finishOpening();
 
     expect(screen.queryByText('Editor')).not.toBeInTheDocument();

@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tauri::Emitter;
 
-use crate::pipeline::dsl::selected_recipe;
+use crate::pipeline::dsl::{scene_recipe, selected_recipe, setup_recipe, FlowScope};
 use crate::pipeline::events::{EventSink, PipelineEvent};
 use crate::pipeline::project_state::record_run_summary;
 use crate::pipeline::recovery::{
@@ -125,6 +125,11 @@ pub fn pipeline_get_capabilities(orchestrator: tauri::State<'_, Orchestrator>) -
             Some("未配置可用的对话模型，请在 AI 设置中填写模型和接口信息".into())
         },
         asset_error: orchestrator.pipeline.asset_capability_error(),
+        reference_image_warning: {
+            let config = crate::ai::config::load_image_config();
+            (!crate::ai::provider_capability::supports_reference_image(&config.provider, &config.model))
+                .then(|| "当前图片模型不支持参考图垫图，角色不同表情可能出现长相漂移；建议切换至 Gemini、Seedream 或 SD WebUI。".into())
+        },
     }
 }
 
@@ -133,6 +138,7 @@ pub fn pipeline_get_capabilities(orchestrator: tauri::State<'_, Orchestrator>) -
 pub struct FlowCapabilities {
     chat_error: Option<String>,
     asset_error: Option<String>,
+    reference_image_warning: Option<String>,
 }
 
 #[tauri::command]
@@ -188,6 +194,117 @@ pub async fn pipeline_start(
         .await
         .map_err(|e| e.to_string())?;
     Ok(run_id)
+}
+
+#[tauri::command]
+pub async fn pipeline_run_setup(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    app: tauri::AppHandle,
+    project_path: String,
+    prompt: String,
+    allow_local_fallback: Option<bool>,
+) -> Result<String, String> {
+    start_scoped_run(
+        &orchestrator,
+        &app,
+        project_path,
+        Some(prompt),
+        FlowScope::Setup,
+        allow_local_fallback == Some(true),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn pipeline_run_scene(
+    orchestrator: tauri::State<'_, Orchestrator>,
+    app: tauri::AppHandle,
+    project_path: String,
+    scene_id: String,
+    allow_local_fallback: Option<bool>,
+) -> Result<String, String> {
+    start_scoped_run(
+        &orchestrator,
+        &app,
+        project_path,
+        None,
+        FlowScope::Scene { scene_id },
+        allow_local_fallback == Some(true),
+    )
+    .await
+}
+
+async fn start_scoped_run(
+    orchestrator: &Orchestrator,
+    app: &tauri::AppHandle,
+    project_path: String,
+    prompt: Option<String>,
+    scope: FlowScope,
+    allow_local_fallback: bool,
+) -> Result<String, String> {
+    if !allow_local_fallback && !crate::ai::commands::has_agent_chat_config() {
+        return Err("未配置可用的对话模型，请配置 AI 或允许本地内容降级。".into());
+    }
+    orchestrator.validate_flow_step_capability()?;
+    let project = PathBuf::from(project_path);
+    let prompt = match prompt {
+        Some(prompt) if !prompt.trim().is_empty() => prompt,
+        Some(_) => return Err("请输入制作需求".into()),
+        None => {
+            story_plan::load_plan(&project)
+                .map_err(|error| error.to_string())?
+                .ok_or("StoryPlan is missing")?
+                .prompt
+        }
+    };
+    let recipe = match scope {
+        FlowScope::Setup => setup_recipe(),
+        FlowScope::Scene { scene_id } => scene_recipe(scene_id),
+        FlowScope::Project => return Err("expected setup or scene scope".into()),
+    };
+    let run_id = new_run_id();
+    let sink = make_sink(app);
+    let entry = orchestrator
+        .runs
+        .insert_active_with(&run_id, &project, || {
+            let handle = orchestrator
+                .pipeline
+                .create_scoped_run_with_timeout(RunCreation {
+                    project_path: &project,
+                    run_id: &run_id,
+                    prompt: &prompt,
+                    recipe: &recipe,
+                    allow_local_fallback,
+                    step_timeout: orchestrator.flow_step_timeout_for_new_run(),
+                    clock: &SystemClock,
+                    sink: &sink,
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(ManagedRun {
+                handle,
+                project_path: project.clone(),
+                driving: Arc::new(AtomicBool::new(false)),
+            })
+        })
+        .await?;
+    spawn_driver(
+        orchestrator.pipeline.clone(),
+        entry.handle.clone(),
+        entry.driving.clone(),
+        project,
+        app.clone(),
+    );
+    Ok(run_id)
+}
+
+#[tauri::command]
+pub fn pipeline_approve_scene(project_path: String, scene_id: String) -> Result<StoryPlan, String> {
+    super::scene_review::approve_scene(Path::new(&project_path), &scene_id)
+}
+
+#[tauri::command]
+pub fn pipeline_unlock_scene(project_path: String, scene_id: String) -> Result<StoryPlan, String> {
+    super::scene_review::unlock_scene(Path::new(&project_path), &scene_id)
 }
 
 async fn attach_run_if_needed(

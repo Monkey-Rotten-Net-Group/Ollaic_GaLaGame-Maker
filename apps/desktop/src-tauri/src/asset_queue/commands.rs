@@ -39,7 +39,7 @@ pub async fn asset_queue_delete_artifact(
     task_id: String,
     attempt: u32,
 ) -> Result<AssetQueue, String> {
-    let _guard = super::lock_queue_writes().await;
+    let _guard = super::lock_queue_writes(Path::new(&project_path)).await?;
     let project = Path::new(&project_path);
     delete_artifact(project, &task_id, attempt)
 }
@@ -50,7 +50,7 @@ pub async fn asset_queue_promote_artifact(
     task_id: String,
     attempt: u32,
 ) -> Result<AssetQueue, String> {
-    let _guard = super::lock_queue_writes().await;
+    let _guard = super::lock_queue_writes(Path::new(&project_path)).await?;
     let project = Path::new(&project_path);
     promote_artifact(project, &task_id, attempt)
 }
@@ -63,7 +63,7 @@ pub async fn asset_queue_bind_imported_audio(
     task_id: String,
     filename: String,
 ) -> Result<AssetQueue, String> {
-    let _guard = super::lock_queue_writes().await;
+    let _guard = super::lock_queue_writes(Path::new(&project_path)).await?;
     let project = Path::new(&project_path);
     bind_imported_audio(project, &task_id, &filename)
 }
@@ -95,6 +95,8 @@ mod tests {
                 scene_ref: Some("start.txt".into()),
                 character_ref: None,
                 emotion: None,
+                reference_image: None,
+                aspect_ratio: None,
                 dialogue_index: None,
                 text: None,
                 status: AssetTaskStatus::Failed,

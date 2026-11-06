@@ -17,6 +17,7 @@ fn fresh_project_dir(name: &str) -> std::path::PathBuf {
 fn plan_round_trips_through_disk() {
     let project = fresh_project_dir("round_trip");
     let plan = StoryPlan {
+        visual_style: Default::default(),
         version: 1,
         prompt: "赛博朋克校园恋爱悬疑短篇".to_string(),
         synopsis: "一名转学生在校园服务器里发现了一段不该存在的记忆。".to_string(),
@@ -43,12 +44,15 @@ fn plan_round_trips_through_disk() {
         },
         characters: Vec::new(),
         scene_plans: vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
             id: "opening".to_string(),
             file: "start.txt".to_string(),
             chapter_id: "ch1".to_string(),
             title: "异常信号".to_string(),
             summary: "转学生第一次听见余像。".to_string(),
             character_ids: Vec::new(),
+            ..Default::default()
         }],
         branches: BranchGraph {
             entry_scene: "opening".to_string(),
@@ -56,19 +60,24 @@ fn plan_round_trips_through_disk() {
                 from: "opening".to_string(),
                 to: "opening".to_string(),
                 choice: None,
+                ..Default::default()
             }],
         },
+        variables: Vec::new(),
         scene_drafts: vec![SceneDraft {
             scene_id: "opening".to_string(),
             title: "异常信号".to_string(),
             stage_managed: false,
             beats: vec![DialogueBeat {
+                kind: BeatKind::Dialogue,
                 speaker: None,
                 text: "雨落在窗上。".to_string(),
                 figure_cues: Vec::new(),
             }],
         }],
         asset_plan: vec![AssetTaskPlan {
+            aspect_ratio: None,
+            reference_image: None,
             id: "bg_opening".to_string(),
             kind: "background".to_string(),
             target_stem: "bg_opening".to_string(),
@@ -138,18 +147,22 @@ fn rejects_figure_cue_for_character_outside_scene_cast() {
                 .unwrap(),
         ];
     plan.scene_plans = vec![ScenePlan {
+        location_id: None,
+        time_of_day: None,
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "chapter".into(),
         title: "Opening".into(),
         summary: "Empty room".into(),
         character_ids: Vec::new(),
+        ..Default::default()
     }];
     plan.scene_drafts = vec![SceneDraft {
         scene_id: "opening".into(),
         title: "Opening".into(),
         stage_managed: true,
         beats: vec![DialogueBeat {
+            kind: BeatKind::Dialogue,
             speaker: None,
             text: "The room is empty.".into(),
             figure_cues: vec![FigureCue {
@@ -191,6 +204,7 @@ fn rejects_outline_with_duplicate_chapter_ids() {
 fn refuses_to_save_an_invalid_plan() {
     let project = fresh_project_dir("invalid_save");
     let plan = StoryPlan {
+        visual_style: Default::default(),
         version: 2,
         prompt: "p".to_string(),
         synopsis: String::new(),
@@ -199,6 +213,7 @@ fn refuses_to_save_an_invalid_plan() {
         characters: Vec::new(),
         scene_plans: Vec::new(),
         branches: BranchGraph::default(),
+        variables: Vec::new(),
         scene_drafts: Vec::new(),
         asset_plan: Vec::new(),
         scenes: Vec::new(),
@@ -219,12 +234,15 @@ fn rejects_scene_plan_with_path_traversal() {
         summary: "开场".to_string(),
     });
     plan.scene_plans.push(ScenePlan {
+        location_id: None,
+        time_of_day: None,
         id: "opening".to_string(),
         file: "../start.txt".to_string(),
         chapter_id: "ch1".to_string(),
         title: "开场".to_string(),
         summary: "开场".to_string(),
         character_ids: Vec::new(),
+        ..Default::default()
     });
     let error = validate(&plan).unwrap_err();
     assert!(error.to_string().contains("$.scenePlans[0].file"));
@@ -271,12 +289,15 @@ fn invalid_cross_node_reference_reports_json_path() {
         summary: "Summary".into(),
     });
     plan.scene_plans.push(ScenePlan {
+        location_id: None,
+        time_of_day: None,
         id: "opening".into(),
         file: "start.txt".into(),
         chapter_id: "missing".into(),
         title: "Opening".into(),
         summary: "Summary".into(),
         character_ids: Vec::new(),
+        ..Default::default()
     });
     let error = validate(&plan).unwrap_err();
     assert!(error.to_string().contains("$.scenePlans[0].chapterId"));
@@ -358,4 +379,205 @@ fn invalid_glossary_entry_uses_escaped_json_path() {
     ]);
     let error = validate(&plan).unwrap_err();
     assert!(error.to_string().contains(r#"$.memory.glossary["a.b"]"#));
+}
+
+#[test]
+fn legacy_plan_defaults_visual_fields_and_round_trips_new_fields() {
+    let mut plan: StoryPlan = serde_json::from_str(r#"{"prompt":"legacy"}"#).unwrap();
+    assert_eq!(plan.visual_style, Default::default());
+    plan.visual_style.style_prompt = "cel shading".into();
+    plan.visual_style.style_reference_image = Some("game/style.png".into());
+    let encoded = serde_json::to_value(&plan).unwrap();
+    assert_eq!(encoded["visualStyle"]["stylePrompt"], "cel shading");
+    assert_eq!(serde_json::from_value::<StoryPlan>(encoded).unwrap(), plan);
+}
+
+#[test]
+fn saves_unconnected_scene_cards_during_authoring() {
+    let mut plan = StoryPlan::new("brief");
+    plan.chapters.push(ChapterPlan {
+        id: "ch1".into(),
+        title: "Chapter 1".into(),
+        summary: "Summary".into(),
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "entry".into(),
+        file: "start.txt".into(),
+        chapter_id: "ch1".into(),
+        title: "Entry".into(),
+        summary: "Entry scene".into(),
+        character_ids: vec![],
+        ..Default::default()
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "unreachable".into(),
+        file: "unreachable.txt".into(),
+        chapter_id: "ch1".into(),
+        title: "Island".into(),
+        summary: "Unreachable scene".into(),
+        character_ids: vec![],
+        ..Default::default()
+    });
+    plan.branches = BranchGraph {
+        entry_scene: "entry".into(),
+        edges: vec![BranchEdge {
+            from: "entry".into(),
+            to: "entry".into(),
+            choice: None,
+            ..Default::default()
+        }],
+    };
+
+    validate(&plan).unwrap();
+    let project = fresh_project_dir("unconnected_authoring");
+    save_plan(&project, &plan).unwrap();
+    assert_eq!(load_plan(&project).unwrap().unwrap(), plan);
+}
+
+#[test]
+fn preserves_legacy_terminal_scenes_without_ending_names() {
+    let mut plan = StoryPlan::new("brief");
+    plan.chapters.push(ChapterPlan {
+        id: "ch1".into(),
+        title: "Chapter 1".into(),
+        summary: "Summary".into(),
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "entry".into(),
+        file: "start.txt".into(),
+        chapter_id: "ch1".into(),
+        title: "Entry".into(),
+        summary: "Entry scene".into(),
+        character_ids: vec![],
+        ..Default::default()
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "trap".into(),
+        file: "middle.txt".into(),
+        chapter_id: "ch1".into(),
+        title: "Middle Scene".into(),
+        summary: "Non-ending scene that has no continuation".into(),
+        character_ids: vec![],
+        ..Default::default()
+    });
+    plan.branches = BranchGraph {
+        entry_scene: "entry".into(),
+        edges: vec![BranchEdge {
+            from: "entry".into(),
+            to: "trap".into(),
+            choice: None,
+            ..Default::default()
+        }],
+    };
+
+    validate(&plan).unwrap();
+    let project = fresh_project_dir("legacy_terminal");
+    save_plan(&project, &plan).unwrap();
+    assert_eq!(load_plan(&project).unwrap().unwrap(), plan);
+}
+
+#[test]
+fn rejects_condition_reading_undefined_variable() {
+    let mut plan = StoryPlan::new("brief");
+    plan.chapters.push(ChapterPlan {
+        id: "ch1".into(),
+        title: "Chapter 1".into(),
+        summary: "Summary".into(),
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "entry".into(),
+        file: "start.txt".into(),
+        chapter_id: "ch1".into(),
+        title: "Entry".into(),
+        summary: "Entry scene".into(),
+        character_ids: vec![],
+        ..Default::default()
+    });
+    plan.variables = vec![VariableDef {
+        id: "trust".into(),
+        kind: VariableKind::Integer,
+        initial_value: "0".into(),
+        description: "信任度".into(),
+    }];
+    plan.branches = BranchGraph {
+        entry_scene: "entry".into(),
+        edges: vec![BranchEdge {
+            from: "entry".into(),
+            to: "entry".into(),
+            choice: Some("Choice".into()),
+            condition: Some("undefined_var > 0".into()),
+            effects: vec![],
+        }],
+    };
+
+    let error = validate(&plan).unwrap_err();
+    assert!(
+        error.to_string().contains("$.branches.edges[0].condition"),
+        "Error should report undefined variable path: {}",
+        error
+    );
+}
+
+#[test]
+fn rejects_condition_reading_variable_with_no_writes() {
+    let mut plan = StoryPlan::new("brief");
+    plan.chapters.push(ChapterPlan {
+        id: "ch1".into(),
+        title: "Chapter 1".into(),
+        summary: "Summary".into(),
+    });
+    plan.scene_plans.push(ScenePlan {
+        id: "entry".into(),
+        file: "start.txt".into(),
+        chapter_id: "ch1".into(),
+        title: "Entry".into(),
+        summary: "Entry scene".into(),
+        character_ids: vec![],
+        ..Default::default()
+    });
+    plan.variables = vec![VariableDef {
+        id: "isolated_flag".into(),
+        kind: VariableKind::Boolean,
+        initial_value: "false".into(),
+        description: "从不被写入的标记".into(),
+    }];
+    plan.branches = BranchGraph {
+        entry_scene: "entry".into(),
+        edges: vec![BranchEdge {
+            from: "entry".into(),
+            to: "entry".into(),
+            choice: Some("Choice".into()),
+            condition: Some("isolated_flag == true".into()),
+            effects: vec![],
+        }],
+    };
+
+    let error = validate(&plan).unwrap_err();
+    assert!(
+        error.to_string().contains("never written"),
+        "Error should report variable never written: {}",
+        error
+    );
+}
+
+#[test]
+fn branch_expressions_reject_invalid_assignments_and_script_injection() {
+    use super::store::{extract_effect_variable, is_safe_branch_expression};
+    for invalid in [
+        "trust",
+        "trust == 1",
+        "信任=1",
+        "trust=1;end",
+        "trust=1\nend",
+        "trust=1 -next",
+        "trust=",
+    ] {
+        assert!(extract_effect_variable(invalid).is_none(), "{invalid}");
+    }
+    for valid in ["trust=1", "trust += 1", "trust-=1", "trust*=2", "trust/=2"] {
+        assert_eq!(extract_effect_variable(valid).as_deref(), Some("trust"));
+    }
+    for invalid in ["信任>=1", "trust>1;end", "trust>1\nend", "trust>1 -next"] {
+        assert!(!is_safe_branch_expression(invalid), "{invalid}");
+    }
 }

@@ -46,6 +46,14 @@ async fn set_runtime_project(
 }
 
 #[tauri::command]
+async fn set_runtime_preview_entry(
+    _server: tauri::State<'_, RuntimeServer>,
+    _script: Option<String>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
 async fn set_runtime_template_dir(
     server: tauri::State<'_, RuntimeServer>,
     template_dir: String,
@@ -192,6 +200,7 @@ pub fn run() {
             // Runtime preview server
             get_runtime_url,
             set_runtime_project,
+            set_runtime_preview_entry,
             set_runtime_template_dir,
             runtime_broadcast,
             open_in_browser,
@@ -256,6 +265,10 @@ pub fn run() {
             characters::commands::save_characters,
             // V2 Pipeline (Agent Flow)
             pipeline::commands::pipeline_start,
+            pipeline::commands::pipeline_run_setup,
+            pipeline::commands::pipeline_run_scene,
+            pipeline::commands::pipeline_approve_scene,
+            pipeline::commands::pipeline_unlock_scene,
             pipeline::commands::pipeline_get_capabilities,
             pipeline::commands::pipeline_pause,
             pipeline::commands::pipeline_resume,

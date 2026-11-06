@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::binder::BindingTransaction;
+use super::binder::{BindingScope, BindingTransaction};
 use super::store::{load_queue, queue_path, save_queue};
 use super::types::{AssetAttempt, AssetQueue, AssetTask, AssetTaskStatus};
 
@@ -47,21 +47,29 @@ pub(crate) fn recover_pending(project_path: &Path) -> Result<(), String> {
     })
 }
 
-pub(crate) fn commit_generated_binding(
+pub(crate) fn commit_generated_binding_scoped(
     project_path: &Path,
     queue: &AssetQueue,
     task_index: usize,
+    scope: BindingScope<'_>,
 ) -> Result<AssetQueue, String> {
     crate::project_lock::with_project_lock_unrecovered(project_path, || {
         crate::project_lock::recover_project_locked(project_path)?;
-        commit_generated_binding_locked_with(project_path, queue, task_index, save_queue)
+        commit_generated_binding_locked_scoped_with(
+            project_path,
+            queue,
+            task_index,
+            scope,
+            save_queue,
+        )
     })
 }
 
-fn commit_generated_binding_locked_with(
+fn commit_generated_binding_locked_scoped_with(
     project_path: &Path,
     queue: &AssetQueue,
     task_index: usize,
+    scope: BindingScope<'_>,
     writer: impl FnOnce(&Path, &AssetQueue) -> Result<(), String>,
 ) -> Result<AssetQueue, String> {
     let task = queue
@@ -69,7 +77,7 @@ fn commit_generated_binding_locked_with(
         .get(task_index)
         .ok_or_else(|| format!("asset task index out of range: {task_index}"))?;
     let pending = begin_binding_transaction_locked(project_path, queue)?;
-    match persist_binding_locked_with(project_path, queue, task_index, task, writer) {
+    match persist_binding_locked_scoped_with(project_path, queue, task_index, task, scope, writer) {
         Ok(queue) => {
             commit_pending_locked(project_path, pending)?;
             Ok(queue)
@@ -141,6 +149,25 @@ pub(crate) fn bind_imported_audio(
     task_id: &str,
     filename: &str,
 ) -> Result<AssetQueue, String> {
+    bind_imported_asset(project_path, task_id, filename)
+}
+
+/// Bind an asset file the user already imported into the project's asset
+/// directory (or preexisting file in game/figure, game/background, game/bgm).
+pub(crate) fn bind_imported_asset(
+    project_path: &Path,
+    task_id: &str,
+    filename: &str,
+) -> Result<AssetQueue, String> {
+    bind_imported_asset_scoped(project_path, task_id, filename, BindingScope::Project)
+}
+
+pub(crate) fn bind_imported_asset_scoped(
+    project_path: &Path,
+    task_id: &str,
+    filename: &str,
+    scope: BindingScope<'_>,
+) -> Result<AssetQueue, String> {
     crate::project_lock::with_project_lock_unrecovered(project_path, || {
         crate::project_lock::recover_project_locked(project_path)?;
         let queue = load_queue(project_path)?;
@@ -150,11 +177,6 @@ pub(crate) fn bind_imported_audio(
             .position(|task| task.id == task_id)
             .ok_or_else(|| format!("asset task not found: {task_id}"))?;
         let task = queue.tasks[task_index].clone();
-        if !task.kind.requires_manual_import() {
-            return Err(format!(
-                "task {task_id} is not a manual audio task; use artifact promotion instead"
-            ));
-        }
         // Input the user controls is rejected outright: it is not a generation
         // failure, so it must not burn an attempt or flip the task to Failed.
         crate::asset_queue::binder::validate_imported_filename(filename)?;
@@ -172,7 +194,7 @@ pub(crate) fn bind_imported_audio(
         // a repeated import stays idempotent instead of piling up attempts.
         if task.status == AssetTaskStatus::Succeeded && task.asset_file.as_deref() == Some(filename)
         {
-            return rebind_imported_audio_locked(project_path, queue, task_index);
+            return rebind_imported_audio_locked(project_path, queue, task_index, scope);
         }
         // Keep the full attempt history so numbers stay monotonic; repeating a
         // bind is already handled by the Succeeded short-circuit above.
@@ -180,34 +202,38 @@ pub(crate) fn bind_imported_audio(
         let attempt_number = candidate.attempts.len() as u32 + 1;
         let started_at = now_ms();
         let pending = begin_binding_transaction_locked(project_path, &queue)?;
-        let transaction =
-            match BindingTransaction::apply_imported_locked(project_path, &candidate, filename) {
-                Ok(transaction) => transaction,
-                Err(error) => {
-                    recover_pending_locked(project_path)
-                        .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
-                    let mut failed = queue.clone();
-                    let mut failed_task = failed.tasks[task_index].clone();
-                    // The failure is recorded on the untouched task, so its
-                    // attempt number has to follow that task's own history.
-                    let failed_attempt = failed_task.attempts.len() as u32 + 1;
-                    failed_task.attempts.push(AssetAttempt {
-                        attempt: failed_attempt,
-                        started_at,
-                        finished_at: now_ms(),
-                        artifact: None,
-                        imported_file: Some(filename.to_string()),
-                        error: Some(error.clone()),
-                        used_local_fallback: false,
-                    });
-                    failed_task.status = AssetTaskStatus::Failed;
-                    failed_task.error = Some(format!("imported binding failed: {error}"));
-                    failed.tasks[task_index] = failed_task;
-                    failed.updated_at = now_ms();
-                    save_queue(project_path, &failed)?;
-                    return Ok(failed);
-                }
-            };
+        let transaction = match BindingTransaction::apply_imported_locked_scoped(
+            project_path,
+            &candidate,
+            filename,
+            scope,
+        ) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                recover_pending_locked(project_path)
+                    .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
+                let mut failed = queue.clone();
+                let mut failed_task = failed.tasks[task_index].clone();
+                // The failure is recorded on the untouched task, so its
+                // attempt number has to follow that task's own history.
+                let failed_attempt = failed_task.attempts.len() as u32 + 1;
+                failed_task.attempts.push(AssetAttempt {
+                    attempt: failed_attempt,
+                    started_at,
+                    finished_at: now_ms(),
+                    artifact: None,
+                    imported_file: Some(filename.to_string()),
+                    error: Some(error.clone()),
+                    used_local_fallback: false,
+                });
+                failed_task.status = AssetTaskStatus::Failed;
+                failed_task.error = Some(format!("imported binding failed: {error}"));
+                failed.tasks[task_index] = failed_task;
+                failed.updated_at = now_ms();
+                save_queue(project_path, &failed)?;
+                return Ok(failed);
+            }
+        };
         let bound_filename = transaction.filename().to_string();
         candidate.status = AssetTaskStatus::Succeeded;
         candidate.asset_file = Some(bound_filename);
@@ -246,6 +272,7 @@ fn rebind_imported_audio_locked(
     project_path: &Path,
     queue: AssetQueue,
     task_index: usize,
+    scope: BindingScope<'_>,
 ) -> Result<AssetQueue, String> {
     let task = queue.tasks[task_index].clone();
     let filename = task
@@ -253,15 +280,19 @@ fn rebind_imported_audio_locked(
         .clone()
         .ok_or_else(|| format!("task {} has no bound audio file", task.id))?;
     let pending = begin_binding_transaction_locked(project_path, &queue)?;
-    let transaction =
-        match BindingTransaction::apply_imported_locked(project_path, &task, &filename) {
-            Ok(transaction) => transaction,
-            Err(error) => {
-                recover_pending_locked(project_path)
-                    .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
-                return Err(format!("rebinding imported audio failed: {error}"));
-            }
-        };
+    let transaction = match BindingTransaction::apply_imported_locked_scoped(
+        project_path,
+        &task,
+        &filename,
+        scope,
+    ) {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            recover_pending_locked(project_path)
+                .map_err(|rollback| format!("{error}; rollback failed: {rollback}"))?;
+            return Err(format!("rebinding imported audio failed: {error}"));
+        }
+    };
     let mut updated = queue.clone();
     updated.updated_at = now_ms();
     if let Err(error) = save_queue(project_path, &updated) {
@@ -297,7 +328,25 @@ fn persist_binding_locked_with(
     binding_task: &AssetTask,
     writer: impl FnOnce(&Path, &AssetQueue) -> Result<(), String>,
 ) -> Result<AssetQueue, BindingCommitError> {
-    let transaction = BindingTransaction::apply_locked(project_path, binding_task)
+    persist_binding_locked_scoped_with(
+        project_path,
+        queue,
+        task_index,
+        binding_task,
+        BindingScope::Project,
+        writer,
+    )
+}
+
+fn persist_binding_locked_scoped_with(
+    project_path: &Path,
+    queue: &AssetQueue,
+    task_index: usize,
+    binding_task: &AssetTask,
+    scope: BindingScope<'_>,
+    writer: impl FnOnce(&Path, &AssetQueue) -> Result<(), String>,
+) -> Result<AssetQueue, BindingCommitError> {
+    let transaction = BindingTransaction::apply_locked_scoped(project_path, binding_task, scope)
         .map_err(BindingCommitError::Binding)?;
     let mut updated = queue.clone();
     let task = &mut updated.tasks[task_index];
@@ -672,6 +721,8 @@ mod tests {
                 scene_ref: Some("start.txt".into()),
                 character_ref: None,
                 emotion: None,
+                reference_image: None,
+                aspect_ratio: None,
                 dialogue_index: None,
                 text: None,
                 status: AssetTaskStatus::Running,
@@ -713,6 +764,8 @@ mod tests {
                 scene_ref: Some("start.txt".into()),
                 character_ref: None,
                 emotion: None,
+                reference_image: None,
+                aspect_ratio: None,
                 dialogue_index: None,
                 text: None,
                 status: AssetTaskStatus::Pending,

@@ -123,6 +123,9 @@ mod tests {
     async fn memory_agent_produces_worldbook_from_synopsis() {
         let agent = MemoryAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
             chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
@@ -133,6 +136,7 @@ mod tests {
             characters: &[],
             scene_plans: &[],
             branches: &Default::default(),
+            variables: &[],
             scene_drafts: &[],
             asset_plan: &[],
             allow_local_fallback: true,
@@ -153,6 +157,9 @@ mod tests {
     async fn memory_agent_rejects_empty_synopsis() {
         let agent = MemoryAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
             chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
@@ -163,6 +170,7 @@ mod tests {
             characters: &[],
             scene_plans: &[],
             branches: &Default::default(),
+            variables: &[],
             scene_drafts: &[],
             asset_plan: &[],
             allow_local_fallback: true,

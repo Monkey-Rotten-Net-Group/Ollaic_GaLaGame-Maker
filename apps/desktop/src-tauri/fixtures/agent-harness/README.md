@@ -57,7 +57,7 @@ prompt，如果你的项目上下文本身含有不该进仓库的内容，它�
 
 ## 现有 cassette
 
-真实录制，provider `deepseek` / 模型 `deepseek-flash`：
+真实录制，provider `deepseek` / 模型 `deepseek-v4-flash`：
 
 - `outline-deepseek` — 单 Agent 回归：一次 Plotter 调用，带 `plan.json` /
   `fixture.json` / `expected.json`。

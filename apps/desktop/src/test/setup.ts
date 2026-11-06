@@ -14,6 +14,40 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = ResizeObserverPolyfill as unknown as typeof ResizeObserver;
 }
 
+const createStorageMock = () => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => {
+      store[key] = String(value);
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      store = {};
+    },
+    get length() {
+      return Object.keys(store).length;
+    },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+  };
+};
+
+if (typeof window !== 'undefined') {
+  const mock = createStorageMock();
+  Object.defineProperty(window, 'localStorage', {
+    value: mock,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mock,
+    configurable: true,
+    writable: true,
+  });
+}
+
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
   save: vi.fn(),
