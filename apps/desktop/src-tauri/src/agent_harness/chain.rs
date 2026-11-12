@@ -250,6 +250,7 @@ fn summarize(output: &AgentOutput) -> String {
             chapters,
             scene_plans,
             branches,
+            ..
         } => format!(
             "{} 章, {} 场景, {} 条边, {} 个选择",
             chapters.len(),
@@ -337,11 +338,13 @@ mod tests {
                 title: "scene".into(),
                 summary: "summary".into(),
                 character_ids: vec![],
+                ..Default::default()
             }],
             branches: BranchGraph {
                 entry_scene: "opening".into(),
                 edges: vec![],
             },
+            variables: vec![],
         });
         let error = commit_output(&mut plan, &def, &output).unwrap_err();
         assert!(error.contains("unknown chapter"), "{error}");

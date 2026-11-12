@@ -115,6 +115,9 @@ pub(crate) fn matte_image(model_path: &Path, image_bytes: &[u8]) -> Result<Vec<u
         *pixel = image::Rgba([r, g, b, alpha]);
     }
 
+    if calculate_alpha_bounding_box(&out, 16).is_none() {
+        return Err("抠图结果为空，请更换图片或调整背景后重试".into());
+    }
     let mut png_bytes: Vec<u8> = Vec::new();
     out.write_to(
         &mut std::io::Cursor::new(&mut png_bytes),
@@ -122,6 +125,93 @@ pub(crate) fn matte_image(model_path: &Path, image_bytes: &[u8]) -> Result<Vec<u
     )
     .map_err(|e| format!("编码透明 PNG 失败: {e}"))?;
     Ok(png_bytes)
+}
+
+/// Find the visible silhouette bounds using a strict alpha threshold.
+pub fn calculate_alpha_bounding_box(
+    image: &RgbaImage,
+    threshold: u8,
+) -> Option<(u32, u32, u32, u32)> {
+    let mut min_x = u32::MAX;
+    let mut min_y = u32::MAX;
+    let mut max_x = 0;
+    let mut max_y = 0;
+    let mut found = false;
+
+    for (x, y, pixel) in image.enumerate_pixels() {
+        if pixel[3] > threshold {
+            found = true;
+            if x < min_x {
+                min_x = x;
+            }
+            if x > max_x {
+                max_x = x;
+            }
+            if y < min_y {
+                min_y = y;
+            }
+            if y > max_y {
+                max_y = y;
+            }
+        }
+    }
+
+    if found {
+        Some((min_x, min_y, max_x, max_y))
+    } else {
+        None
+    }
+}
+
+/// Fit the silhouette on a common canvas, centered and flush with the bottom.
+pub fn normalize_character_canvas(
+    image: &RgbaImage,
+    target_width: u32,
+    target_height: u32,
+) -> Result<RgbaImage, String> {
+    // A single disconnected alpha pixel must not determine the standing canvas.
+    let mut cleaned = image.clone();
+    for (x, y, pixel) in image
+        .enumerate_pixels()
+        .filter(|(_, _, pixel)| pixel[3] > 16)
+    {
+        let has_neighbor = (y.saturating_sub(1)..=(y + 1).min(image.height() - 1)).any(|ny| {
+            (x.saturating_sub(1)..=(x + 1).min(image.width() - 1))
+                .any(|nx| (nx != x || ny != y) && image.get_pixel(nx, ny)[3] > 16)
+        });
+        if !has_neighbor {
+            cleaned.put_pixel(x, y, image::Rgba([pixel[0], pixel[1], pixel[2], 0]));
+        }
+    }
+    let image = &cleaned;
+    let (min_x, min_y, max_x, max_y) = calculate_alpha_bounding_box(image, 16)
+        .ok_or_else(|| "figure silhouette is empty after matting".to_string())?;
+    let box_w = (max_x - min_x + 1) as f32;
+    let box_h = (max_y - min_y + 1) as f32;
+    if box_w <= 0.0 || box_h <= 0.0 || target_width == 0 || target_height == 0 {
+        return Err("figure canvas dimensions must be positive".into());
+    }
+
+    let cropped =
+        image::imageops::crop_imm(image, min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+            .to_image();
+
+    let top_margin = (target_height as f32 * 0.08).round() as u32;
+    let avail_h = (target_height.saturating_sub(top_margin)).max(1) as f32;
+    let avail_w = (target_width as f32).max(1.0);
+
+    let scale = (avail_h / box_h).min(avail_w / box_w);
+    let new_w = ((box_w * scale).round() as u32).max(1);
+    let new_h = ((box_h * scale).round() as u32).max(1);
+
+    let resized = image::imageops::resize(&cropped, new_w, new_h, FilterType::Lanczos3);
+
+    let mut output = RgbaImage::new(target_width, target_height);
+    let x_offset = target_width.saturating_sub(new_w) / 2;
+    let y_offset = target_height.saturating_sub(new_h);
+
+    image::imageops::overlay(&mut output, &resized, x_offset as i64, y_offset as i64);
+    Ok(output)
 }
 
 /// 从图像四角采样像素，取各通道中位数作为背景色。
@@ -330,9 +420,13 @@ mod tests {
         let out_png = matte_image(&model_path, &src_png).expect("抠图应成功");
         let out = image::load_from_memory(&out_png).expect("输出应为合法图像");
         let out = out.to_rgba8();
-        assert_eq!(out.dimensions(), (256, 256), "尺寸应保持不变");
+        assert_eq!(
+            out.dimensions(),
+            (256, 256),
+            "manual background removal preserves input dimensions"
+        );
 
-        let center_alpha = out.get_pixel(128, 128)[3] as u32;
+        let center_alpha = out.get_pixel(out.width() / 2, out.height() / 2)[3] as u32;
         let corner_alpha = out.get_pixel(2, 2)[3] as u32;
         assert!(
             center_alpha > corner_alpha,
@@ -402,5 +496,49 @@ mod tests {
         let p = g.clone();
         let out = guided_filter(&g, &p, 1, 0.01);
         assert_eq!(out.dimensions(), (4, 4));
+    }
+
+    #[test]
+    fn normalize_character_canvas_centers_and_bottom_aligns() {
+        let mut img = RgbaImage::new(100, 200);
+        // Draw a non-transparent box from (20, 50) to (40, 90)
+        for y in 50..=90 {
+            for x in 20..=40 {
+                img.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        let normalized = normalize_character_canvas(&img, 100, 200).unwrap();
+        let bbox = calculate_alpha_bounding_box(&normalized, 16).expect("should find bbox");
+        // max_y should be flush with bottom (199)
+        assert_eq!(bbox.3, 199, "should align with bottom edge");
+        // min_y should have ~8% top margin (around 16 pixels)
+        assert!(
+            bbox.1 >= 14 && bbox.1 <= 18,
+            "top margin should be ~8% (actual: {})",
+            bbox.1
+        );
+        // Center x should be roughly in the middle (~50)
+        let center_x = (bbox.0 + bbox.2) / 2;
+        assert!(
+            (center_x as i32 - 49).abs() <= 2,
+            "should be horizontally centered (actual: {})",
+            center_x
+        );
+    }
+    #[test]
+    fn normalization_rejects_empty_silhouettes_and_ignores_isolated_alpha_noise() {
+        let mut image = RgbaImage::new(100, 200);
+        assert!(normalize_character_canvas(&image, 100, 200).is_err());
+        for y in 50..100 {
+            for x in 30..70 {
+                image.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        let expected = normalize_character_canvas(&image, 100, 200).unwrap();
+        image.put_pixel(0, 0, image::Rgba([255, 255, 255, 255]));
+        assert_eq!(
+            normalize_character_canvas(&image, 100, 200).unwrap(),
+            expected
+        );
     }
 }

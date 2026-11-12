@@ -67,11 +67,18 @@ import {
 } from '../lib/project-memory';
 import {
   buildAssetContext,
+  buildEditScopeContext,
   buildNumberedScriptContext,
   buildConversationMessages,
+  formatUserTurnContent,
   hasAssetContextTruncation,
+  resolveEffectiveEditScope,
+  type AiEditScope,
+  type AiEditScopeContext,
   type MissingAssetIssue,
 } from '../lib/story-agent';
+
+export type { AiEditScope };
 import { getScenePath, listScenes, readFileText, sceneDisplayName, type SceneHeader } from '../lib/webgal-ipc';
 import type { WebGalNode } from '../lib/webgal-types';
 import {
@@ -135,6 +142,7 @@ interface AiAgentTrace {
   currentSceneName: string;
   assistantId: string;
   prompt: string;
+  editScope?: AiEditScope;
   mode: 'function_calling' | 'legacy';
   turns: AiAgentTraceTurn[];
   outcome?: string;
@@ -160,6 +168,7 @@ interface UseAiAgentParams {
   sceneHeaders: Record<string, SceneHeader>;
   nodes: WebGalNode[];
   selectedNode: WebGalNode | null;
+  defaultEditScope?: AiEditScope;
   scriptSource: string;
   dirty: boolean;
   characters: Character[];
@@ -250,19 +259,6 @@ function contextBudgetForCapability(capability: ProviderCapability): ContextBudg
   };
 }
 
-function formatUserTurnContent(
-  historyMessages: ChatMessage[],
-  currentSceneName: string,
-  text: string,
-): string {
-  const hasCrossSceneHistory = historyMessages.some(
-    (m) => m.id !== INITIAL_AI_MESSAGE.id && m.sceneName && m.sceneName !== currentSceneName,
-  );
-  return hasCrossSceneHistory
-    ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
-    : text;
-}
-
 export interface HistoryBudgetPartition {
   retainedCount: number;
   compactable: ChatMessage[];
@@ -283,6 +279,7 @@ export function partitionHistoryForBudget(
   budget: ContextBudgetConfig,
   maxRetainedCount = 24,
   digestOverride?: SessionDigest | null,
+  scopeContext?: AiEditScopeContext,
 ): HistoryBudgetPartition {
   const meaningful = allMessages.filter((message) => message.id !== INITIAL_AI_MESSAGE.id);
   const buildCandidateTrace = (
@@ -296,7 +293,7 @@ export function partitionHistoryForBudget(
     const requestMessages: AiChatMessage[] = [
       { role: 'system', content: system },
       ...buildConversationMessages(retainedMessages, candidateDigest),
-      { role: 'user', content: formatUserTurnContent(retainedMessages, currentSceneName, text) },
+      { role: 'user', content: formatUserTurnContent(retainedMessages, currentSceneName, text, scopeContext) },
     ];
     return {
       retainedMessages,
@@ -456,6 +453,8 @@ export function useAiAgent(params: UseAiAgentParams) {
     currentSceneName,
     sceneHeaders,
     nodes,
+    selectedNode,
+    defaultEditScope,
     scriptSource,
     characters,
     setSelectedNode,
@@ -537,6 +536,72 @@ export function useAiAgent(params: UseAiAgentParams) {
   projectPathRef.current = projectPath;
   activeSessionIdRef.current = activeId;
 
+  const initialEditScope: AiEditScope | undefined = selectedNode && defaultEditScope ? 'node' : defaultEditScope;
+  const [editScopeState, setEditScopeState] = useProjectAiState<AiEditScope | undefined>(
+    projectKey,
+    'editScope',
+    initialEditScope,
+  );
+  const rawEditScope = editScopeState ?? defaultEditScope;
+  const effectiveEditScope = resolveEffectiveEditScope(rawEditScope, selectedNode, defaultEditScope);
+  const rawEditScopeRef = projectAiRef<AiEditScope | undefined>(projectKey, 'rawEditScope', rawEditScope);
+  const selectedNodeRef = projectAiRef<WebGalNode | null>(projectKey, 'selectedNode', selectedNode);
+  const nodesRef = projectAiRef<WebGalNode[]>(projectKey, 'nodes', nodes);
+  const lastSyncedNodeIdRef = projectAiRef<string | undefined>(
+    projectKey,
+    'lastSyncedScopeNodeId',
+    selectedNode?.id,
+  );
+  const selectedNodeId = selectedNode?.id;
+
+  useLayoutEffect(() => {
+    rawEditScopeRef.current = rawEditScope;
+    selectedNodeRef.current = selectedNode;
+    nodesRef.current = nodes;
+  }, [nodes, nodesRef, rawEditScope, rawEditScopeRef, selectedNode, selectedNodeRef]);
+
+  useLayoutEffect(() => {
+    if (selectedNodeId === lastSyncedNodeIdRef.current) return;
+    lastSyncedNodeIdRef.current = selectedNodeId;
+    if (selectedNodeId !== undefined) {
+      if (defaultEditScope !== undefined || rawEditScopeRef.current !== undefined) {
+        rawEditScopeRef.current = 'node';
+        setEditScopeState('node');
+      }
+    } else if (rawEditScopeRef.current === 'node') {
+      const fallback = defaultEditScope ?? 'scene';
+      rawEditScopeRef.current = fallback;
+      setEditScopeState(fallback);
+    }
+  }, [defaultEditScope, lastSyncedNodeIdRef, rawEditScopeRef, selectedNodeId, setEditScopeState]);
+
+  const setEditScope = useCallback((next: AiEditScope) => {
+    const normalized = next === 'node' && !selectedNodeRef.current
+      ? (defaultEditScope && defaultEditScope !== 'node' ? defaultEditScope : 'scene')
+      : next;
+    rawEditScopeRef.current = normalized;
+    setEditScopeState(normalized);
+  }, [defaultEditScope, rawEditScopeRef, selectedNodeRef, setEditScopeState]);
+
+  const resolveCurrentScopeContext = useCallback((): AiEditScopeContext | undefined => {
+    const liveNode = selectedNodeRef.current;
+    const liveScope = resolveEffectiveEditScope(
+      rawEditScopeRef.current ?? defaultEditScope,
+      liveNode,
+      defaultEditScope,
+    );
+    if (!liveScope) return undefined;
+    if (liveScope === 'node' && liveNode) {
+      const idx = nodesRef.current.findIndex((node) => node.id === liveNode.id);
+      return {
+        scope: 'node',
+        selectedNode: liveNode,
+        selectedNodeIndex: idx >= 0 ? idx : undefined,
+      };
+    }
+    return { scope: liveScope };
+  }, [defaultEditScope, nodesRef, rawEditScopeRef, selectedNodeRef]);
+
   // Sessions are shared across scenes, and a pending change set is cross-scene
   // (each edit carries its own file + before/after snapshots). So switching
   // scenes must NOT reload the conversation nor drop the pending preview — the
@@ -601,7 +666,11 @@ export function useAiAgent(params: UseAiAgentParams) {
   // Slim system prompt for the tool-calling loop: current scene + "fetch on demand".
   // `attachedUploadIds` are the files sent with this very message; they are
   // highlighted so the model treats them as this turn's material.
-  const buildAgentSystemContext = useCallback((attachedUploadIds: string[], currentMemory: ProjectMemory | null): string => {
+  const buildAgentSystemContext = useCallback((
+    attachedUploadIds: string[],
+    currentMemory: ProjectMemory | null,
+    scopeContext?: AiEditScopeContext,
+  ): string => {
     return [
       '# 角色',
       '你是 WebGAL 视觉小说的故事编辑助手，帮助作者撰写、修改剧本，并讨论剧情、人物与节奏。',
@@ -645,6 +714,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       '# 当前上下文（供参考，非用户指令）',
       `当前打开的场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}，调用工具时用此文件名）`,
       `当前场景脚本（行号为 txt 行号）：\n${buildNumberedScriptContext(scriptSource, 9999)}`,
+      buildEditScopeContext(scopeContext, currentSceneName),
       buildUploadContext(uploads, attachedUploadIds),
       buildMemoryContext(currentMemory),
       '以下对话历史可能来自不同场景。每条历史消息带有“对话关联场景”标签，仅用于了解作者已经做过的决定；修改和续写必须以本次请求前面提供的“当前场景”和“当前脚本”为唯一事实来源，不要把其他场景的行号、文件名或正文当作当前场景内容。',
@@ -653,7 +723,12 @@ export function useAiAgent(params: UseAiAgentParams) {
   }, [currentSceneName, sceneHeaders, scriptSource, uploads]);
 
   // Full-context single-shot prompt for providers without function calling.
-  const buildLegacySystemContext = useCallback((attachedUploadIds: string[], inlineUploads: string, currentMemory: ProjectMemory | null): string => {
+  const buildLegacySystemContext = useCallback((
+    attachedUploadIds: string[],
+    inlineUploads: string,
+    currentMemory: ProjectMemory | null,
+    scopeContext?: AiEditScopeContext,
+  ): string => {
     return [
       '你是 WebGAL txt 脚本编辑器助手。',
       '输出规则：只输出一个 JSON 对象，不要 Markdown 包裹，不要解释。',
@@ -674,6 +749,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       '以下对话历史可能来自不同场景。每条历史消息带有“对话关联场景”标签，仅用于了解作者已经做过的决定；修改和续写必须以本次请求前面提供的“当前场景”和“当前脚本”为唯一事实来源，不要把其他场景的行号、文件名或正文当作当前场景内容。',
       `当前场景：${sceneDisplayName(currentSceneName, sceneHeaders[currentSceneName])}（文件名 ${currentSceneName}）`,
       `当前脚本（左侧数字是 txt 行号）：\n${buildNumberedScriptContext(scriptSource)}`,
+      buildEditScopeContext(scopeContext, currentSceneName),
     ].filter(Boolean).join('\n\n');
   }, [assets, characters, currentSceneName, sceneHeaders, scriptSource, uploads]);
 
@@ -733,6 +809,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     capability: ProviderCapability,
     digestOverride?: SessionDigest | null,
     historyOverride?: ChatMessage[],
+    scopeContext?: AiEditScopeContext,
   ) => {
     const trace: AiAgentTrace = {
       traceId: runId,
@@ -741,6 +818,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       currentSceneName,
       assistantId,
       prompt: text,
+      ...(scopeContext ? { editScope: scopeContext.scope } : {}),
       mode: 'function_calling',
       turns: [],
     };
@@ -837,14 +915,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
-    const system = buildAgentSystemContext(attachedUploadIds, latestMemory);
+    const system = buildAgentSystemContext(attachedUploadIds, latestMemory, scopeContext);
     const contextBudget = contextBudgetForCapability(capability);
     let historyMessages = historyOverride ?? messages;
     let activeDigest = digestOverride === undefined ? digest : digestOverride;
     let convo: AiChatMessage[] = [
       { role: 'system', content: system },
       ...buildConversationMessages(historyMessages, activeDigest),
-      { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+      { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text, scopeContext) },
     ];
     trace.context = buildContextTrace(convo, toolDefs(), contextBudget);
     const meaningfulHistory = historyMessages.filter((m) => m.id !== INITIAL_AI_MESSAGE.id);
@@ -858,6 +936,8 @@ export function useAiAgent(params: UseAiAgentParams) {
         toolDefs(),
         contextBudget,
         meaningfulHistory.length - 1,
+        undefined,
+        scopeContext,
       );
       if (fitted.trace.overBudget) {
         throw new Error(
@@ -871,7 +951,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       convo = [
         { role: 'system', content: system },
         ...buildConversationMessages(historyMessages, activeDigest),
-        { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+        { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text, scopeContext) },
       ];
       trace.context = fitted.trace;
     }
@@ -1112,6 +1192,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     capability: ProviderCapability,
     digestOverride?: SessionDigest | null,
     historyOverride?: ChatMessage[],
+    scopeContext?: AiEditScopeContext,
   ) => {
     const trace: AiAgentTrace = {
       traceId: runId,
@@ -1120,6 +1201,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       currentSceneName,
       assistantId,
       prompt: text,
+      ...(scopeContext ? { editScope: scopeContext.scope } : {}),
       mode: 'legacy',
       turns: [],
     };
@@ -1138,14 +1220,14 @@ export function useAiAgent(params: UseAiAgentParams) {
     const latestMemory = projectPath ? await readProjectMemory(projectPath) : null;
     if (!ownsRun(runId)) return;
     setMemory(latestMemory);
-    const system = buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory);
+    const system = buildLegacySystemContext(attachedUploadIds, inlineUploads, latestMemory, scopeContext);
     const contextBudget = contextBudgetForCapability(capability);
     let historyMessages = historyOverride ?? messages;
     let activeDigest = digestOverride === undefined ? digest : digestOverride;
     let convo: AiChatMessage[] = [
       { role: 'system', content: system },
       ...buildConversationMessages(historyMessages, activeDigest),
-      { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+      { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text, scopeContext) },
     ];
     trace.context = buildContextTrace(convo, [], contextBudget);
     const meaningfulHistory = historyMessages.filter((m) => m.id !== INITIAL_AI_MESSAGE.id);
@@ -1159,6 +1241,8 @@ export function useAiAgent(params: UseAiAgentParams) {
         [],
         contextBudget,
         meaningfulHistory.length - 1,
+        undefined,
+        scopeContext,
       );
       if (fitted.trace.overBudget) {
         throw new Error(
@@ -1172,7 +1256,7 @@ export function useAiAgent(params: UseAiAgentParams) {
       convo = [
         { role: 'system', content: system },
         ...buildConversationMessages(historyMessages, activeDigest),
-        { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text) },
+        { role: 'user', content: formatUserTurnContent(historyMessages, currentSceneName, text, scopeContext) },
       ];
       trace.context = fitted.trace;
     }
@@ -1289,6 +1373,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     text: string,
     attachedUploadIds: string[],
     capability: ProviderCapability,
+    scopeContext?: AiEditScopeContext,
   ): Promise<{ digest: SessionDigest; compactedIds: Set<string>; retainedMessages: ChatMessage[] } | null> => {
     const meaningful = messages.filter((message) => message.id !== INITIAL_AI_MESSAGE.id);
     if (meaningful.length === 0) return null;
@@ -1300,13 +1385,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       : '';
     if (!ownsRun(runId)) return null;
     const system = capability.chatTools
-      ? buildAgentSystemContext(attachedUploadIds, currentMemory)
-      : buildLegacySystemContext(attachedUploadIds, inlineUploads, currentMemory);
+      ? buildAgentSystemContext(attachedUploadIds, currentMemory, scopeContext)
+      : buildLegacySystemContext(attachedUploadIds, inlineUploads, currentMemory, scopeContext);
     const tools = capability.chatTools ? toolDefs() : [];
     const requestMessages: AiChatMessage[] = [
       { role: 'system', content: system },
       ...buildConversationMessages(messages, digest),
-      { role: 'user', content: formatUserTurnContent(messages, currentSceneName, text) },
+      { role: 'user', content: formatUserTurnContent(messages, currentSceneName, text, scopeContext) },
     ];
     const fullTrace = buildContextTrace(requestMessages, tools, budget);
     if (!fullTrace.shouldCompact && !fullTrace.overBudget && meaningful.length < 180) return null;
@@ -1320,6 +1405,8 @@ export function useAiAgent(params: UseAiAgentParams) {
       tools,
       budget,
       24,
+      undefined,
+      scopeContext,
     );
     const sourceMessageIds = initialPartition.compactable.map((message) => message.id);
     const summarizerSystem: AiChatMessage = {
@@ -1366,6 +1453,7 @@ export function useAiAgent(params: UseAiAgentParams) {
             budget,
             initialPartition.retainedCount,
             parsed,
+            scopeContext,
           );
           if (postPartition.trace.overBudget) {
             postPartition = partitionHistoryForBudget(
@@ -1377,6 +1465,8 @@ export function useAiAgent(params: UseAiAgentParams) {
               tools,
               budget,
               initialPartition.retainedCount,
+              undefined,
+              scopeContext,
             );
           }
           if (postPartition.trace.overBudget) return null;
@@ -1393,6 +1483,8 @@ export function useAiAgent(params: UseAiAgentParams) {
               tools,
               budget,
               initialPartition.retainedCount,
+              undefined,
+              scopeContext,
             );
           }
           if (postPartition.trace.overBudget) return null;
@@ -1449,6 +1541,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     // The files themselves stay in the project store and remain readable later.
     const requestedIds = retryAttachmentIds ?? attachedIds;
     const sentIds = requestedIds.filter((id) => uploads.some((upload) => upload.id === id));
+    const scopeContext = resolveCurrentScopeContext();
     setLastRequest({ prompt: text, attachmentIds: sentIds });
     const sentAttachments: ChatAttachment[] = sentIds.map((id) => {
       const upload = uploads.find((value) => value.id === id)!;
@@ -1473,13 +1566,13 @@ export function useAiAgent(params: UseAiAgentParams) {
       const capability = await getAiProviderCapability();
       if (!ownsRun(myRunId)) return;
       if (cancelledRef.current) return;
-      const summarized = await summarizeSessionIfNeeded(myRunId, text, sentIds, capability);
+      const summarized = await summarizeSessionIfNeeded(myRunId, text, sentIds, capability, scopeContext);
       if (!ownsRun(myRunId) || cancelledRef.current) return;
       if (summarized) compactMessages(summarized.compactedIds);
       const sessionDigest = summarized ? summarized.digest : digest;
       const historyForTurn = summarized ? summarized.retainedMessages : messages;
-      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
-      else await runLegacyTurn(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn);
+      if (capability.chatTools) await runAgentLoop(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn, scopeContext);
+      else await runLegacyTurn(myRunId, text, assistantId, sentIds, capability, sessionDigest, historyForTurn, scopeContext);
       setRetryCount(0);
     } catch (e) {
       if (!ownsRun(myRunId)) return;
@@ -1507,7 +1600,7 @@ export function useAiAgent(params: UseAiAgentParams) {
         if (currentRunIdRef.current === myRunId) currentRunIdRef.current = null;
       }
     }
-  }, [attachedIds, busy, compactMessages, currentSceneName, digest, ensureTitleFromFirstMessage, messages, ownsRun, pendingChangeSet, replaceAssistantMessage, runAgentLoop, runLegacyTurn, setMessages, summarizeSessionIfNeeded, uploads]);
+  }, [attachedIds, busy, compactMessages, currentSceneName, digest, ensureTitleFromFirstMessage, messages, ownsRun, pendingChangeSet, replaceAssistantMessage, resolveCurrentScopeContext, runAgentLoop, runLegacyTurn, setMessages, summarizeSessionIfNeeded, uploads]);
 
   const retry = useCallback(() => {
     if (!lastRequest || busy || cooldown > 0) return;
@@ -1823,10 +1916,30 @@ export function useAiAgent(params: UseAiAgentParams) {
     setStepLabel('');
   }, [setMessages]);
 
+  const recordWorkflowTurn = useCallback(
+    (userText: string, assistantReply: string) => {
+      const ts = Date.now();
+      const userMsg: ChatMessage = {
+        id: `user-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'user',
+        content: userText,
+      };
+      const assistantMsg: ChatMessage = {
+        id: `assistant-${ts + 1}-${Math.random().toString(36).slice(2, 6)}`,
+        role: 'assistant',
+        content: assistantReply,
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    },
+    [setMessages],
+  );
+
   return {
     messages,
     input,
     setInput,
+    editScope: effectiveEditScope,
+    setEditScope,
     busy,
     committing,
     status,
@@ -1865,6 +1978,7 @@ export function useAiAgent(params: UseAiAgentParams) {
     retryWithExistingAssets,
     retry,
     saveMemory,
+    recordWorkflowTurn,
     stop,
   };
 }

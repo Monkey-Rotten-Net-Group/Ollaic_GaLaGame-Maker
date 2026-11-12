@@ -121,7 +121,7 @@ export function ProjectMetadataDialog({
                 value={metadata.description}
                 onChange={(e) => update({ description: e.target.value })}
                 rows={4}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-relaxed"
                 placeholder="填写作品简介，用于项目卡片与导出交付说明。"
               />
             </Field>
@@ -131,7 +131,7 @@ export function ProjectMetadataDialog({
                 value={metadata.synopsis}
                 onChange={(e) => update({ synopsis: e.target.value })}
                 rows={6}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-relaxed"
                 placeholder="记录创作设定、剧情概览或对 AI 很重要的世界观摘要。"
               />
             </Field>
@@ -141,7 +141,7 @@ export function ProjectMetadataDialog({
                 type="text"
                 value={metadata.coverPath}
                 onChange={(e) => update({ coverPath: e.target.value })}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                 placeholder="可选，留空表示暂不指定"
               />
             </Field>
@@ -153,7 +153,7 @@ export function ProjectMetadataDialog({
                 type="text"
                 value={metadata.version}
                 onChange={(e) => update({ version: e.target.value })}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                 placeholder="0.1.0"
               />
             </Field>
@@ -163,7 +163,7 @@ export function ProjectMetadataDialog({
                 type="text"
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                 placeholder="悬疑, 校园, 多分支"
               />
               <div className="mt-1 text-xs text-muted-foreground">使用英文逗号分隔。</div>
@@ -174,7 +174,7 @@ export function ProjectMetadataDialog({
                 value={metadata.releaseNotes}
                 onChange={(e) => update({ releaseNotes: e.target.value })}
                 rows={6}
-                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm leading-relaxed"
                 placeholder="记录本次导出交付的改动摘要。"
               />
             </Field>
@@ -185,7 +185,7 @@ export function ProjectMetadataDialog({
                   type="text"
                   value={outputDir}
                   onChange={(e) => setOutputDir(e.target.value)}
-                  className="flex-1 rounded-md border border-border bg-input-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  className="flex-1 rounded-md border border-border bg-input-background px-3 py-2 text-sm"
                   placeholder="请选择导出目录"
                 />
                 <button

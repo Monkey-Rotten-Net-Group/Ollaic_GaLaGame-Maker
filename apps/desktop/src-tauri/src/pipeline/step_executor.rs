@@ -19,6 +19,8 @@ pub(crate) struct ExecutorContext<'a> {
     pub(crate) asset_generators: &'a dyn AssetGeneratorFactory,
     pub(crate) project_path: &'a Path,
     pub(crate) run_id: &'a str,
+    pub(crate) retry_placeholders: bool,
+    pub(crate) scope: &'a crate::pipeline::dsl::FlowScope,
     pub(crate) plan: &'a StoryPlan,
     pub(crate) cancelled: &'a Arc<AtomicBool>,
     pub(crate) asset_binding_gate: &'a Arc<Mutex<()>>,
@@ -52,9 +54,28 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
     }
 
     let generator = context.asset_generators.create(
+        Some(context.project_path),
         context.agent_context.allow_local_fallback,
         context.cancelled.clone(),
     );
+    let task_ids = context
+        .plan
+        .asset_plan
+        .iter()
+        .map(|task| task.id.clone())
+        .collect();
+    let scope = crate::asset_queue::QueueScope {
+        task_ids,
+        scene_file: match context.scope {
+            crate::pipeline::dsl::FlowScope::Scene { scene_id } => context
+                .plan
+                .scene_plans
+                .iter()
+                .find(|scene| &scene.id == scene_id)
+                .map(|scene| scene.file.clone()),
+            _ => None,
+        },
+    };
     let queue = crate::asset_queue::run_queue_cancellable(
         context.project_path,
         context.run_id,
@@ -62,11 +83,31 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
         generator,
         context.cancelled.clone(),
         context.asset_binding_gate.clone(),
+        crate::asset_queue::QueueRunOptions {
+            scope: (*context.scope != crate::pipeline::dsl::FlowScope::Project).then_some(&scope),
+            retry_placeholders: context.retry_placeholders,
+        },
     )
     .await
     .map_err(AgentError)?;
-    let failed = queue
+    let active_tasks: Vec<_> = queue
         .tasks
+        .iter()
+        .filter(|task| {
+            *context.scope == crate::pipeline::dsl::FlowScope::Project
+                || scope.task_ids.contains(&task.id)
+        })
+        .collect();
+    if *context.scope == crate::pipeline::dsl::FlowScope::Setup
+        && active_tasks
+            .iter()
+            .any(|task| task.status != AssetTaskStatus::Succeeded)
+    {
+        return Err(AgentError(
+            "视觉定锚尚未完成，请导入角色基础立绘或配置图片与抠图能力后重试。".into(),
+        ));
+    }
+    let failed = active_tasks
         .iter()
         .filter(|task| task.status == AssetTaskStatus::Failed)
         .count();
@@ -76,12 +117,10 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
         )));
     }
 
-    let downgraded = queue
-        .tasks
+    let downgraded = active_tasks
         .iter()
         .any(|task| task.status == AssetTaskStatus::Succeeded && task.used_local_fallback);
-    let pending_configuration = queue
-        .tasks
+    let pending_configuration = active_tasks
         .iter()
         .filter(|task| {
             task.status == AssetTaskStatus::Pending
@@ -90,8 +129,7 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
         .count();
     // BGM/SFX have no AI route and no music provider setting to fix, so they
     // are reported separately with an actionable "import audio" hint.
-    let pending_manual_import = queue
-        .tasks
+    let pending_manual_import = active_tasks
         .iter()
         .filter(|task| {
             task.status == AssetTaskStatus::Pending
@@ -99,7 +137,7 @@ async fn execute_asset_queue(context: ExecutorContext<'_>) -> Result<AgentOutput
         })
         .count();
     let mut warnings = downgraded
-        .then(|| "部分媒体供应商不可用，已生成本地占位素材".to_string())
+        .then(|| "部分素材尚待补充，已保留素材需求；音乐和音效可使用本地音频".to_string())
         .into_iter()
         .collect::<Vec<_>>();
     if pending_configuration > 0 {

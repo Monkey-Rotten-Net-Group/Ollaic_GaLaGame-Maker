@@ -83,7 +83,7 @@ export function NewSceneDialog({
             <span className="font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
               场景文件名
             </span>
-            <div className="flex items-center rounded border border-border bg-surface-container-low focus-within:border-secondary">
+            <div className="focus-ring-within flex items-center rounded border border-border bg-surface-container-low focus-within:border-secondary">
               <input
                 autoFocus
                 value={name}

@@ -18,7 +18,7 @@ pub struct GeneratedMedia {
 }
 
 /// An input image for image-to-image generation. Only some providers accept
-/// one; the rest ignore it rather than failing.
+/// one; unsupported conditioning is rejected before provider dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageReference {
     pub mime: String,
@@ -38,6 +38,7 @@ pub struct ImageRequest<'a> {
     pub model: &'a str,
     pub prompt: &'a str,
     pub reference: Option<&'a ImageReference>,
+    pub aspect_ratio: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -189,6 +189,9 @@ function safeRemoveItem(key: string): void {
 
 /** Best-effort one-time migration of the old per-scene `ai-chat-*` storage. */
 function migrateLegacy(projectId: string | undefined): SessionIndex | null {
+  if (typeof localStorage === 'undefined' || !localStorage || typeof localStorage.length !== 'number') {
+    return null;
+  }
   const prefix = legacyKeyPrefix(projectId);
   let legacyMessages: ChatMessage[] | null = null;
   for (let i = 0; i < localStorage.length; i += 1) {

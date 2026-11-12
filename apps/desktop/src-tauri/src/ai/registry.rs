@@ -160,6 +160,24 @@ const VOLCENGINE_IMAGE_MODELS: &[&str] = &[
     "doubao-seedream-4-0-250828",
 ];
 
+const MINIMAX_IMAGE_MODELS: &[&str] = &["image-01", "image-01-live"];
+
+#[allow(dead_code)]
+const ZHIPU_IMAGE_MODELS: &[&str] = &["cogview-3-flash", "cogview-3-plus", "cogview-4"];
+
+#[allow(dead_code)]
+const SILICONFLOW_IMAGE_MODELS: &[&str] = &[
+    "Kwai-Kolors/Kolors",
+    "black-forest-labs/FLUX.1-schnell",
+    "black-forest-labs/FLUX.1-dev",
+    "stabilityai/stable-diffusion-3-5-large",
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    "Qwen/Qwen-Image",
+    "Qwen/Qwen-Image-Edit",
+];
+
+#[allow(dead_code)]
+const MIDJOURNEY_IMAGE_MODELS: &[&str] = &["midjourney", "niji"];
 const SD_WEBUI_IMAGE_MODELS: &[&str] = &["local", "sdxl", "sd1.5", "sd3.5-large", "flux", "kolors"];
 
 const OPENAI_TTS_MODELS: &[&str] = &["gpt-4o-mini-tts", "tts-1-hd", "tts-1"];
@@ -364,6 +382,21 @@ pub const PROVIDERS: &[ProviderSpec] = &[
             default_base_url: "",
             base_url_placeholder: "必填，OpenAI 兼容的语音接口端点",
         }),
+    },
+    ProviderSpec {
+        id: "minimax",
+        requires_api_key: true,
+        capability: HOSTED_MEDIA,
+        chat: None,
+        image: Some(ModalitySpec {
+            label: "MiniMax 图片",
+            default_model: "image-01",
+            models: MINIMAX_IMAGE_MODELS,
+            default_base_url: "https://api.minimax.io/v1",
+            base_url_placeholder:
+                "国际站默认 https://api.minimax.io/v1；国内站填写 https://api.minimax.cn/v1",
+        }),
+        tts: None,
     },
     // Retired from every picker, kept resolvable so an older saved config
     // still loads and reports a useful error instead of "未知 AI 供应商".
@@ -606,6 +639,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn minimax_image_catalog_exposes_the_native_models_and_region_hint() {
+        let option = catalog()
+            .image
+            .into_iter()
+            .find(|option| option.value == "minimax")
+            .unwrap();
+        assert_eq!(option.default_model, "image-01");
+        assert_eq!(option.models, ["image-01", "image-01-live"]);
+        assert!(option.requires_api_key);
+        assert!(!option.needs_base_url);
+        assert_eq!(option.default_base_url, "https://api.minimax.io/v1");
+        assert!(option
+            .base_url_placeholder
+            .contains("https://api.minimax.cn/v1"));
     }
 
     #[test]

@@ -73,13 +73,13 @@ async function openConfiguredEditor(page: Page) {
       return originalInvoke(command, args);
     };
   });
-  const navigation = page.getByRole('navigation', { name: '核心视图' });
+  const navigation = page.getByRole('navigation', { name: '工作区视图切换' });
   await navigation.getByRole('button', { name: '资源库', exact: true }).click();
   await expect(page).toHaveURL(/\/editor\/alpha\/assets$/);
-  await navigation.getByRole('button', { name: '编辑', exact: true }).click();
+  await navigation.getByRole('button', { name: '剧本编辑', exact: true }).click();
   await expect(page).toHaveURL(/\/editor\/alpha$/);
-  await expect(page.getByLabel('当前场景')).toBeVisible();
-  await page.getByRole('tab', { name: '编辑 Agent', exact: true }).click();
+  await expect(page.getByLabel('当前场景文件')).toBeVisible();
+  await expect(page.getByLabel('AI 创作输入')).toBeVisible();
   await expect(page.getByRole('button', { name: '切换对话模型' })).toContainText('model-a');
 }
 
@@ -97,10 +97,10 @@ test('model switching preserves credentials saved through its settings entry', a
   await openConfiguredEditor(page);
   await page.getByRole('button', { name: '切换对话模型' }).click();
   await page.getByRole('menuitem', { name: '配置更多服务商与模型…' }).click();
-  const settings = settingsPanel(page, '编辑器设置');
+  const settings = settingsPanel(page, 'AI 设置');
   await settings.getByPlaceholder('sk-...').fill('new-test-key');
   await settings.getByPlaceholder('https://test.invalid/v1').fill('https://new.test.invalid/v1');
-  await settings.getByRole('button', { name: '保存', exact: true }).click();
+  await settings.getByRole('button', { name: '保存 AI 配置', exact: true }).click();
   await page.getByRole('button', { name: '切换对话模型' }).click();
   await page.getByRole('menuitem', { name: 'model-b', exact: true }).click();
   await expect(page.getByRole('button', { name: '切换对话模型' })).toContainText('model-b');
@@ -188,7 +188,7 @@ test('editor restores saved appearance on reload', async ({ page }) => {
   await settings.getByRole('button', { name: '绯樱酒红主题' }).click();
   await settings.getByRole('button', { name: '保存', exact: true }).click();
   await page.reload();
-  await expect(page.getByLabel('当前场景')).toBeVisible();
+  await expect(page.getByLabel('当前场景文件')).toBeVisible();
   await expect(page.locator('html')).toHaveClass(/dark/);
   await expect(page.locator('html')).toHaveAttribute('data-seed', 'crimson');
 });

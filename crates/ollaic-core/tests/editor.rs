@@ -311,6 +311,12 @@ fn rejects_incomplete_or_multistatement_structured_edits() {
     edit.variable = "a=b".into();
     edit.value = "0".into();
     assert!(edit_command("", &edit).is_err());
+    for invalid_var in ["trust*", "trust/", "trust+", "trust-"] {
+        edit = new_command(EditKind::SetVar);
+        edit.variable = invalid_var.into();
+        edit.value = "2".into();
+        assert!(edit_command("", &edit).is_err(), "{invalid_var}");
+    }
     edit = new_command(EditKind::ChangeScene);
     edit.scene = "a.txt\nend:;".into();
     assert!(edit_command("", &edit).is_err());

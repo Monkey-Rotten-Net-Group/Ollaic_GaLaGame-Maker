@@ -269,6 +269,7 @@ impl RunHandle {
             ));
         }
         let mut recipe = FlowRecipe {
+            scope: state.scope.clone(),
             steps: state.steps.iter().map(|step| step.def.clone()).collect(),
         };
         recipe

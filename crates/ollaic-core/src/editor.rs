@@ -282,7 +282,10 @@ fn validate(edit: &CommandEdit) -> Result<()> {
         return Err(invalid("Command parameters must fit on one line"));
     }
     if matches!(edit.kind, SetVar | GetUserInput)
-        && (edit.variable.contains(['=', ' ', '\t']) || edit.variable.starts_with('-'))
+        && (edit
+            .variable
+            .contains(['=', ' ', '\t', '+', '-', '*', '/', '(', ')'])
+            || edit.variable.starts_with('-'))
     {
         return Err(invalid("Invalid variable name"));
     }

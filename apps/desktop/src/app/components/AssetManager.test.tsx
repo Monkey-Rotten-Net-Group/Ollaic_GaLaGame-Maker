@@ -100,7 +100,9 @@ describe('AssetManager inspector AI generation entry', () => {
 
   it('hides the AI generate button for imported BGM files', async () => {
     const user = userEvent.setup();
-    vi.mocked(listAssets).mockImplementation(async (_project, category) => (category === 'bgm' ? [bgmAsset] : []));
+    vi.mocked(listAssets).mockImplementation(async (_project, category) =>
+      category === 'bgm' ? [bgmAsset] : [],
+    );
     vi.mocked(listAllAssets).mockResolvedValue([bgmAsset]);
 
     renderManager();
@@ -115,7 +117,9 @@ describe('AssetManager inspector AI generation entry', () => {
 
   it('keeps the AI generate button for image assets', async () => {
     const user = userEvent.setup();
-    vi.mocked(listAssets).mockImplementation(async (_project, category) => (category === 'background' ? [backgroundAsset] : []));
+    vi.mocked(listAssets).mockImplementation(async (_project, category) =>
+      category === 'background' ? [backgroundAsset] : [],
+    );
     vi.mocked(listAllAssets).mockResolvedValue([backgroundAsset]);
 
     renderManager();
@@ -124,6 +128,50 @@ describe('AssetManager inspector AI generation entry', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'AI 生成' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: '素材描述' })).toBeInTheDocument();
     });
+  });
+  it('keeps category badges independent of the active files and search query', async () => {
+    const user = userEvent.setup();
+    const cgAsset = { ...backgroundAsset, name: 'ending_cg.png' };
+    vi.mocked(listAllAssets).mockResolvedValue([backgroundAsset, cgAsset, bgmAsset]);
+    vi.mocked(listAssets).mockImplementation(async (_project, category) =>
+      category === 'background' ? [backgroundAsset, cgAsset] : category === 'bgm' ? [bgmAsset] : [],
+    );
+    vi.mocked(loadAssetMetadata).mockResolvedValue({
+      aliases: {},
+      descriptions: {},
+      tags: {},
+      references: {},
+      sceneCards: {},
+      voiceCards: {},
+      deletedSceneCards: [],
+      deletedCgCards: [],
+      deletedVoiceCards: [],
+      cgCards: {
+        ending: {
+          id: 'ending',
+          title: 'Ending',
+          imageAsset: cgAsset.name,
+          targetStem: 'ending_cg',
+          prompt: '',
+          style: '',
+          negativePrompt: '',
+        },
+      },
+    });
+    renderManager();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^场景\s*\d/ })).toHaveTextContent('1'),
+    );
+    expect(screen.getByRole('button', { name: /^CG/ })).toHaveTextContent('1');
+    await user.click(screen.getByRole('button', { name: /^音频/ }));
+    await screen.findByText(bgmAsset.name);
+    expect(screen.getByRole('button', { name: /^场景\s*\d/ })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: /^CG/ })).toHaveTextContent('1');
+    const search = screen.getByRole('textbox', { name: '搜索素材' });
+    await user.type(search, 'no matching material');
+    expect(screen.getByRole('button', { name: /^场景\s*\d/ })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: /^CG/ })).toHaveTextContent('1');
   });
 });

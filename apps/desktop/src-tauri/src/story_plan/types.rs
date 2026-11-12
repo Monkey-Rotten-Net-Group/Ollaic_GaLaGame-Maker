@@ -4,6 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::characters::types::Character;
 
+/// Global visual style specification and negative constraints.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VisualStyleSpec {
+    #[serde(default)]
+    pub style_prompt: String,
+    #[serde(default)]
+    pub negative_prompt: String,
+    #[serde(default)]
+    pub palette_and_lighting: String,
+    #[serde(default)]
+    pub style_reference_image: Option<String>,
+}
+
 /// Project-owned planning record for an Agent Flow. Explains and resumes
 /// generation work; the playable story remains in the Project's WebGAL files.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,12 +31,18 @@ pub struct StoryPlan {
     /// One-paragraph synopsis produced by the Plan step.
     #[serde(default)]
     pub synopsis: String,
+    /// Global visual style specification and negative constraints.
+    #[serde(default)]
+    pub visual_style: VisualStyleSpec,
     /// Long-form worldbook + glossary produced by the Memory (Worldbuilder) step.
     #[serde(default)]
     pub memory: StoryMemory,
     /// Chapter outline produced by the Outline step.
     #[serde(default)]
     pub chapters: Vec<ChapterPlan>,
+    /// Global story variables for stateful branching and conditions.
+    #[serde(default)]
+    pub variables: Vec<VariableDef>,
     /// Editable characters shared with `game/config/characters.json`.
     #[serde(default)]
     pub characters: Vec<Character>,
@@ -59,8 +79,10 @@ impl StoryPlan {
             version: STORY_PLAN_VERSION,
             prompt: prompt.into(),
             synopsis: String::new(),
+            visual_style: VisualStyleSpec::default(),
             memory: StoryMemory::default(),
             chapters: Vec::new(),
+            variables: Vec::new(),
             characters: Vec::new(),
             scene_plans: Vec::new(),
             branches: BranchGraph::default(),
@@ -93,6 +115,31 @@ pub struct ChapterPlan {
     pub summary: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum VariableKind {
+    Integer,
+    Boolean,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableDef {
+    pub id: String,
+    pub kind: VariableKind,
+    pub initial_value: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+pub fn default_min_beats() -> usize {
+    24
+}
+
+pub fn fallback_min_beats() -> usize {
+    8
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScenePlan {
@@ -104,6 +151,73 @@ pub struct ScenePlan {
     pub summary: String,
     #[serde(default)]
     pub character_ids: Vec<String>,
+    #[serde(default)]
+    pub location_id: Option<String>,
+    #[serde(default)]
+    pub time_of_day: Option<String>,
+    #[serde(default)]
+    pub approval_status: SceneApprovalStatus,
+    #[serde(default)]
+    pub rolling_summary: Option<String>,
+    #[serde(default)]
+    pub pov_character_id: Option<String>,
+    #[serde(default)]
+    pub emotional_arc: String,
+    #[serde(default)]
+    pub required_beats: Vec<String>,
+    #[serde(default)]
+    pub forbidden_reveals: Vec<String>,
+    #[serde(default)]
+    pub entry_state: Vec<String>,
+    #[serde(default = "default_min_beats")]
+    pub min_beats: usize,
+}
+
+impl Default for ScenePlan {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            file: String::new(),
+            chapter_id: String::new(),
+            title: String::new(),
+            summary: String::new(),
+            character_ids: Vec::new(),
+            location_id: None,
+            time_of_day: None,
+            approval_status: SceneApprovalStatus::default(),
+            rolling_summary: None,
+            pov_character_id: None,
+            emotional_arc: String::new(),
+            required_beats: Vec::new(),
+            forbidden_reveals: Vec::new(),
+            entry_state: Vec::new(),
+            min_beats: default_min_beats(),
+        }
+    }
+}
+
+impl ScenePlan {
+    pub fn is_ending(&self) -> bool {
+        let id = self.id.to_lowercase();
+        let file = self.file.to_lowercase();
+        let title = self.title.to_lowercase();
+        id.contains("end")
+            || file.contains("end")
+            || title.contains("end")
+            || self.title.contains("结局")
+            || self.title.contains("终章")
+            || self.title.contains("终")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SceneApprovalStatus {
+    #[default]
+    Pending,
+    Drafted,
+    Approved,
+    Stale,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -115,13 +229,26 @@ pub struct BranchGraph {
     pub edges: Vec<BranchEdge>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchEdge {
     pub from: String,
     pub to: String,
     #[serde(default)]
     pub choice: Option<String>,
+    #[serde(default)]
+    pub condition: Option<String>,
+    #[serde(default)]
+    pub effects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum BeatKind {
+    #[default]
+    Dialogue,
+    Narration,
+    Monologue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -139,6 +266,8 @@ pub struct SceneDraft {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DialogueBeat {
+    #[serde(default)]
+    pub kind: BeatKind,
     #[serde(default)]
     pub speaker: Option<String>,
     pub text: String,
@@ -179,7 +308,7 @@ pub(crate) fn is_webgal_flag_value(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetTaskPlan {
     #[serde(default)]
@@ -193,6 +322,10 @@ pub struct AssetTaskPlan {
     pub character_ref: Option<String>,
     #[serde(default)]
     pub emotion: Option<String>,
+    #[serde(default)]
+    pub reference_image: Option<String>,
+    #[serde(default)]
+    pub aspect_ratio: Option<String>,
     #[serde(default = "pending_status")]
     pub status: String,
 }

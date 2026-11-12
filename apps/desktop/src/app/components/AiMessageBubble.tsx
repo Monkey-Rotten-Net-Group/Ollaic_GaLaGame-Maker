@@ -20,6 +20,10 @@ import {
   ImageIcon,
   Paperclip,
   Trash2,
+  Check,
+  Copy,
+  CornerDownLeft,
+  GitCompare,
   type LucideIcon,
 } from 'lucide-react';
 import type { AssistantStep, ChatAttachment, ChatDiffLine } from '../hooks/useChatSession';
@@ -59,6 +63,75 @@ interface AiMessageBubbleProps {
   diff?: ChatDiffLine[];
   /** Reference files that were sent along with this user message. */
   attachments?: ChatAttachment[];
+  onInsertSnippet?: (text: string) => void;
+  onDiffSnippet?: (text: string) => void;
+}
+
+function CodeBlock({
+  children,
+  className,
+  onInsertSnippet,
+  onDiffSnippet,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  onInsertSnippet?: (text: string) => void;
+  onDiffSnippet?: (text: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const rawText = String(children).replace(/\n$/, '');
+  const langMatch = /language-(\w+)/.exec(className || '');
+  const lang = langMatch ? langMatch[1] : '';
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(rawText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="group relative my-2 overflow-hidden rounded-md border border-border/60 bg-surface-container-low">
+      <div className="flex h-7 items-center justify-between border-b border-border/40 bg-surface-container-lowest/70 px-2.5 text-[10px] text-muted-foreground">
+        <span className="font-mono uppercase font-semibold">{lang || 'webgal'}</span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-surface-container hover:text-foreground transition-colors"
+            title="复制到剪贴板"
+          >
+            {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+          {onInsertSnippet && (
+            <button
+              type="button"
+              onClick={() => onInsertSnippet(rawText)}
+              className="flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/20 transition-colors"
+              title="插入当前剧本光标或选中位置后"
+            >
+              <CornerDownLeft className="h-3 w-3" />
+              <span>插入光标处</span>
+            </button>
+          )}
+          {onDiffSnippet && (
+            <button
+              type="button"
+              onClick={() => onDiffSnippet(rawText)}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-surface-container hover:text-foreground transition-colors"
+              title="与当前选中内容进行对比替换"
+            >
+              <GitCompare className="h-3 w-3" />
+              <span>对比替换</span>
+            </button>
+          )}
+        </div>
+      </div>
+      <pre className="max-w-full overflow-x-auto p-2.5 font-mono text-[11px] leading-relaxed">
+        <code className={className}>{children}</code>
+      </pre>
+    </div>
+  );
 }
 
 function DiffBlock({ diff }: { diff: ChatDiffLine[] }) {
@@ -127,7 +200,15 @@ function DiffBlock({ diff }: { diff: ChatDiffLine[] }) {
 }
 
 /** Full GFM markdown (tables, headings, quotes, code, lists, task lists). */
-function Markdown({ children }: { children: string }) {
+function Markdown({
+  children,
+  onInsertSnippet,
+  onDiffSnippet,
+}: {
+  children: string;
+  onInsertSnippet?: (text: string) => void;
+  onDiffSnippet?: (text: string) => void;
+}) {
   return (
     <div className="space-y-1.5 leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <ReactMarkdown
@@ -153,24 +234,25 @@ function Markdown({ children }: { children: string }) {
             </blockquote>
           ),
           hr: () => <hr className="my-2 border-border" />,
-          // Override `pre` itself (react-markdown wraps fenced code in pre>code):
-          // without this the default <pre> has no overflow handling and long
-          // lines paint outside the bubble. overflow-x-auto + max-w-full keeps a
-          // long code block scrolling inside the bubble instead of overflowing.
-          pre: ({ children }) => (
-            <pre className="my-1.5 max-w-full overflow-x-auto rounded-md border border-border/50 bg-background/50 p-2 text-[11px] leading-relaxed">
-              {children}
-            </pre>
-          ),
+          pre: ({ children }) => <>{children}</>,
           code: ({ className, children }) => {
-            const inline = !className;
-            if (inline)
+            const isInline = !className && typeof children === 'string' && !children.includes('\n');
+            if (isInline) {
               return (
                 <code className="rounded bg-background/70 px-1 py-0.5 text-[0.92em] break-words">
                   {children}
                 </code>
               );
-            return <code className={className}>{children}</code>;
+            }
+            return (
+              <CodeBlock
+                className={className}
+                onInsertSnippet={onInsertSnippet}
+                onDiffSnippet={onDiffSnippet}
+              >
+                {children}
+              </CodeBlock>
+            );
           },
           table: ({ children }) => (
             <div className="my-1.5 overflow-x-auto">
@@ -195,12 +277,24 @@ function Markdown({ children }: { children: string }) {
 }
 
 /** Renders a multi-step assistant reply: per-turn text blocks + tool-call rows. */
-function StepsView({ steps }: { steps: AssistantStep[] }) {
+function StepsView({
+  steps,
+  onInsertSnippet,
+  onDiffSnippet,
+}: {
+  steps: AssistantStep[];
+  onInsertSnippet?: (text: string) => void;
+  onDiffSnippet?: (text: string) => void;
+}) {
   return (
     <div className="space-y-2">
       {steps.map((step, si) => (
         <div key={si} className="space-y-1.5">
-          {step.text?.trim() && <Markdown>{step.text.trim()}</Markdown>}
+          {step.text?.trim() && (
+            <Markdown onInsertSnippet={onInsertSnippet} onDiffSnippet={onDiffSnippet}>
+              {step.text.trim()}
+            </Markdown>
+          )}
           {step.toolCalls?.map((call, ci) => {
             const ToolIcon = TOOL_ICONS[call.name] ?? Wrench;
             return (
@@ -237,6 +331,8 @@ export function AiMessageBubble({
   stopped = false,
   diff,
   attachments,
+  onInsertSnippet,
+  onDiffSnippet,
 }: AiMessageBubbleProps) {
   return (
     <div
@@ -248,9 +344,11 @@ export function AiMessageBubble({
       }`}
     >
       {steps && steps.length > 0 ? (
-        <StepsView steps={steps} />
+        <StepsView steps={steps} onInsertSnippet={onInsertSnippet} onDiffSnippet={onDiffSnippet} />
       ) : content && role === 'assistant' ? (
-        <Markdown>{content}</Markdown>
+        <Markdown onInsertSnippet={onInsertSnippet} onDiffSnippet={onDiffSnippet}>
+          {content}
+        </Markdown>
       ) : (
         <div className="whitespace-pre-wrap">{content}</div>
       )}

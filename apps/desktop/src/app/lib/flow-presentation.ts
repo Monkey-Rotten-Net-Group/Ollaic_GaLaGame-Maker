@@ -1,7 +1,7 @@
 import { DEFAULT_RECIPE_STEPS } from './flow-state';
 
 export const FLOW_PHASES = [
-  { title: '故事与角色', description: '确定故事骨架和人物', ids: ['plan', 'memory', 'outline', 'character'] },
+  { title: '故事与角色', description: '确定故事骨架和人物', ids: ['plan', 'memory', 'outline', 'character', 'anchorPlan'] },
   { title: '对白与场景', description: '把故事写成可编辑的场景', ids: ['dialogist', 'assetPlan', 'scene'] },
   { title: '素材制作', description: '生成图片和语音，绑定导入的音频', ids: ['assetQueue'] },
 ];
@@ -11,6 +11,7 @@ const STEP_INFO: Record<string, { title: string; description: string }> = {
   memory: { title: '世界观设定', description: '整理背景、规则与术语' },
   outline: { title: '章节大纲', description: '规划章节、场景和分支' },
   character: { title: '角色设计', description: '建立角色档案与关系' },
+  anchorPlan: { title: '角色立绘定锚', description: '规划角色默认基础立绘与参考图锚点' },
   dialogist: { title: '对白创作', description: '为各场景创作对白与表演提示' },
   assetPlan: { title: '素材规划', description: '整理图片、语音与音乐需求，无需素材接口' },
   asset: { title: '素材规划', description: '整理素材需求' },
