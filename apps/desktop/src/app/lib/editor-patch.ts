@@ -99,9 +99,29 @@ export function splitPatchText(text: string): string[] {
   return normalized.length > 0 ? normalized.split('\n') : [];
 }
 
+function normalizeSetVarLine(line: string): string {
+  const trimmed = line.trimEnd();
+  if (!trimmed.startsWith('setVar:')) return trimmed;
+  const semiIdx = trimmed.indexOf(';');
+  const commandPart = semiIdx >= 0 ? trimmed.slice(0, semiIdx) : trimmed;
+  const suffix = semiIdx >= 0 ? trimmed.slice(semiIdx) : '';
+  const rawRest = commandPart.slice('setVar:'.length).trim();
+  if (!rawRest) return trimmed;
+
+  const flagMatch = rawRest.match(/\s+-[a-zA-Z]/);
+  const flagIndex = flagMatch?.index ?? -1;
+  const exprPart = (flagIndex >= 0 ? rawRest.slice(0, flagIndex) : rawRest).trim();
+  const flagsPart = flagIndex >= 0 ? rawRest.slice(flagIndex) : '';
+
+  const compound = exprPart.match(/^([a-zA-Z_$][a-zA-Z0-9_.]*)\s*([+\-*/])=\s*(.+)$/);
+  if (!compound) return trimmed;
+  const [, variable, operator, rhs] = compound;
+  return `setVar:${variable}=${variable}${operator}(${rhs.trim()})${flagsPart}${suffix}`;
+}
+
 export function normalizePatchText(text: string): string {
   return splitPatchText(text).map((line) => {
-    const trimmed = line.trimEnd();
+    const trimmed = normalizeSetVarLine(line);
     if (!trimmed || trimmed.startsWith(';') || trimmed.endsWith(';')) return trimmed;
     return trimmed + ';';
   }).join('\n');
@@ -128,6 +148,25 @@ export function validatePatchText(text: string): string[] {
       return;
     }
     const prefix = body.slice(0, colonIndex);
+    if (prefix === 'setVar') {
+      const rest = body.slice(colonIndex + 1).trim();
+      const flagIndex = rest.search(/\s+-[a-zA-Z]/);
+      const exprPart = (flagIndex >= 0 ? rest.slice(0, flagIndex) : rest).trim();
+      const eqIndex = exprPart.indexOf('=');
+      const lhs = eqIndex >= 0 ? exprPart.slice(0, eqIndex).trim() : '';
+      const rhs = eqIndex >= 0 ? exprPart.slice(eqIndex + 1).trim() : '';
+      if (eqIndex <= 0 || !lhs || !rhs || rhs.startsWith('=')) {
+        errors.push(`第 ${lineNo} 行 setVar 语法无效：${line}。请写成 setVar:变量名=值或表达式;`);
+        return;
+      }
+      if (/[+\-*/]$/.test(lhs)) {
+        errors.push(
+          `第 ${lineNo} 行 setVar 变量名或赋值运算符无效：${line}。请写成 setVar:变量名=变量名*表达式;`,
+        );
+        return;
+      }
+      return;
+    }
     if (scriptCommands.has(prefix)) return;
     // Unknown prefixes are treated as dialogue speaker names. Asset references are validated separately.
   });

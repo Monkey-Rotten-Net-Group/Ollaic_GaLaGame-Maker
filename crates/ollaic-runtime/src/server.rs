@@ -28,6 +28,7 @@ use tower_http::services::ServeFile;
 pub struct RuntimeServer {
     template_dir: Arc<RwLock<PathBuf>>,
     project_dir: Arc<RwLock<Option<PathBuf>>>,
+    preview_entry: Arc<RwLock<Option<String>>>,
     broadcast_tx: broadcast::Sender<String>,
     shutdown_tx: watch::Sender<bool>,
     ready: Arc<AtomicBool>,
@@ -69,6 +70,7 @@ impl RuntimeServer {
         let server = Self {
             template_dir: Arc::new(RwLock::new(template_dir)),
             project_dir: Arc::new(RwLock::new(project)),
+            preview_entry: Arc::new(RwLock::new(None)),
             broadcast_tx,
             shutdown_tx,
             ready: Arc::new(AtomicBool::new(false)),
@@ -109,6 +111,12 @@ impl RuntimeServer {
     }
     pub async fn set_project(&self, dir: Option<PathBuf>) {
         *self.project_dir.write().await = dir;
+    }
+    pub async fn preview_entry(&self) -> Option<String> {
+        self.preview_entry.read().await.clone()
+    }
+    pub async fn set_preview_entry(&self, script: Option<String>) {
+        *self.preview_entry.write().await = script;
     }
     pub fn broadcast(&self, msg: String) {
         let _ = self.broadcast_tx.send(msg);
@@ -226,6 +234,24 @@ async fn static_handler(State(server): State<RuntimeServer>, request: Request<Bo
             .is_some_and(|query| query.split('&').any(|part| part == "ollaicPreview=1"));
     let template = server.template_dir().await;
     let (base, relative) = if let Some(relative) = decoded.strip_prefix("/game/") {
+        if relative == "scene/__ollaic_preview_entry__.txt" {
+            let Some(script) = server.preview_entry().await else {
+                return (StatusCode::NOT_FOUND, "Preview resource not found").into_response();
+            };
+            let mut response = (
+                [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                script,
+            )
+                .into_response();
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response.headers_mut().insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            );
+            return response;
+        }
         let Some(project) = server.project_dir.read().await.clone() else {
             return (StatusCode::NOT_FOUND, "No project selected").into_response();
         };

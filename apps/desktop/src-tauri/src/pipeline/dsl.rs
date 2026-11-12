@@ -121,9 +121,24 @@ impl StepDef {
     }
 }
 
+/// Durable production boundary; legacy recipes keep whole-project behavior.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum FlowScope {
+    #[default]
+    Project,
+    Setup,
+    Scene {
+        #[serde(rename = "sceneId")]
+        scene_id: String,
+    },
+}
+
 /// A declarative Flow Recipe: an ordered list of steps with dependencies.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct FlowRecipe {
+    #[serde(default)]
+    pub scope: FlowScope,
     #[serde(default)]
     pub steps: Vec<StepDef>,
 }
@@ -221,6 +236,35 @@ pub fn default_recipe() -> FlowRecipe {
         )
 }
 
+/// Global story setup and default character anchors, without scene production.
+pub fn setup_recipe() -> FlowRecipe {
+    let mut recipe = default_recipe();
+    recipe.scope = FlowScope::Setup;
+    recipe.steps.truncate(4);
+    recipe.steps.push(
+        StepDef::new("anchorPlan", StepKind::Asset)
+            .agent("anchorPlanner")
+            .depends_on("character"),
+    );
+    recipe.steps.push(
+        StepDef::new("assetQueue", StepKind::Asset)
+            .asset_queue()
+            .depends_on("anchorPlan"),
+    );
+    recipe
+}
+
+/// A single scene transaction retains the full story graph as read-only context.
+pub fn scene_recipe(scene_id: impl Into<String>) -> FlowRecipe {
+    let mut recipe = default_recipe();
+    recipe.scope = FlowScope::Scene {
+        scene_id: scene_id.into(),
+    };
+    recipe.steps.drain(..4);
+    recipe.steps[0].depends_on.clear();
+    recipe
+}
+
 /// Snapshot the user's production scope before creating any run or plan.
 /// Missing inputs are rejected rather than silently enabling an omitted step.
 pub fn selected_recipe(step_ids: Option<&[String]>) -> Result<FlowRecipe, String> {
@@ -281,7 +325,9 @@ impl std::error::Error for RecipeError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{selected_recipe, StepDef, StepExecutor};
+    use super::{
+        scene_recipe, selected_recipe, setup_recipe, FlowRecipe, FlowScope, StepDef, StepExecutor,
+    };
 
     #[test]
     fn selection_preserves_order_and_rejects_missing_inputs() {
@@ -326,5 +372,28 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(named).unwrap()["agent"], "dialogist");
         assert_eq!(serde_json::to_value(queue).unwrap()["agent"], "assetQueue");
+    }
+    #[test]
+    fn scene_scope_and_setup_are_persisted_without_changing_legacy_recipes() {
+        let legacy: FlowRecipe = serde_json::from_str(r#"{"steps":[]}"#).unwrap();
+        assert_eq!(legacy.scope, FlowScope::Project);
+        let scoped = scene_recipe("encounter");
+        scoped.validate().unwrap();
+        assert_eq!(
+            scoped
+                .steps
+                .iter()
+                .map(|step| step.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dialogist", "assetPlan", "scene", "assetQueue"]
+        );
+        let value = serde_json::to_value(&scoped).unwrap();
+        assert_eq!(value["scope"]["type"], "scene");
+        assert_eq!(value["scope"]["sceneId"], "encounter");
+        assert_eq!(serde_json::from_value::<FlowRecipe>(value).unwrap(), scoped);
+        let setup = setup_recipe();
+        setup.validate().unwrap();
+        assert!(setup.steps.iter().any(|step| step.id == "anchorPlan"));
+        assert!(!setup.steps.iter().any(|step| step.id == "dialogist"));
     }
 }

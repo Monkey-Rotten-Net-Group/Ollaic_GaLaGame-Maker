@@ -173,6 +173,12 @@ pub fn derive_queue(
                 .emotion
                 .clone()
                 .or_else(|| (kind == AssetKind::Figure).then(|| "default".to_string())),
+            reference_image: task_plan.reference_image.clone(),
+            aspect_ratio: task_plan.aspect_ratio.clone().or_else(|| match kind {
+                AssetKind::Figure => Some("3:4".to_string()),
+                AssetKind::Background => Some("16:9".to_string()),
+                _ => None,
+            }),
             dialogue_index: None,
             text: None,
             status: AssetTaskStatus::Pending,
@@ -214,6 +220,46 @@ pub fn rederive_queue(
     Ok(fresh)
 }
 
+/// Merge only selected task definitions, retaining every unrelated persisted task verbatim.
+pub(crate) fn merge_scoped_queue(
+    project_path: &Path,
+    run_id: &str,
+    plan: &StoryPlan,
+    existing: &AssetQueue,
+    active_ids: &HashSet<String>,
+) -> Result<AssetQueue, String> {
+    let mut fresh = derive_queue(project_path, run_id, plan)?;
+    for id in active_ids {
+        if !fresh.tasks.iter().any(|task| &task.id == id) {
+            return Err(format!("scoped queue task is absent from plan: {id}"));
+        }
+    }
+    let mut merged = existing.clone();
+    merged.run_id = run_id.into();
+    merged.updated_at = now_ms();
+    for mut task in fresh
+        .tasks
+        .drain(..)
+        .filter(|task| active_ids.contains(&task.id))
+    {
+        if let Some(index) = merged.tasks.iter().position(|old| old.id == task.id) {
+            let previous = &merged.tasks[index];
+            if same_task_semantics(&task, previous) {
+                task = previous.clone();
+            } else {
+                // Attempts remain inspectable, but a changed definition must produce a new binding.
+                task.attempts = previous.attempts.clone();
+                // Existing promoted files may belong to approved scenes; version changed outputs.
+                task.asset_file = None;
+            }
+            merged.tasks[index] = task;
+        } else {
+            merged.tasks.push(task);
+        }
+    }
+    Ok(merged)
+}
+
 fn same_task_semantics(left: &AssetTask, right: &AssetTask) -> bool {
     left.id == right.id
         && left.kind == right.kind
@@ -222,8 +268,18 @@ fn same_task_semantics(left: &AssetTask, right: &AssetTask) -> bool {
         && left.scene_ref == right.scene_ref
         && left.character_ref == right.character_ref
         && normalized_emotion(left) == normalized_emotion(right)
+        && left.reference_image == right.reference_image
+        && normalized_aspect_ratio(left) == normalized_aspect_ratio(right)
         && left.dialogue_index == right.dialogue_index
         && left.text == right.text
+}
+
+fn normalized_aspect_ratio(task: &AssetTask) -> Option<&str> {
+    task.aspect_ratio.as_deref().or(match task.kind {
+        AssetKind::Figure => Some("3:4"),
+        AssetKind::Background => Some("16:9"),
+        _ => None,
+    })
 }
 
 fn normalized_emotion(task: &AssetTask) -> Option<&str> {
@@ -352,6 +408,8 @@ mod tests {
                 scene_ref: Some("missing".into()),
                 character_ref: None,
                 emotion: None,
+                reference_image: None,
+                aspect_ratio: None,
                 status: "pending".into(),
             }],
             scenes: vec!["start.txt".into()],
@@ -444,6 +502,8 @@ mod tests {
                 scene_ref: None,
                 character_ref: character_ref.map(str::to_string),
                 emotion: (kind == "figure").then(|| "default".to_string()),
+                reference_image: None,
+                aspect_ratio: None,
                 status: "pending".into(),
             }
         }

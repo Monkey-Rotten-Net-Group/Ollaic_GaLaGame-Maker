@@ -85,6 +85,20 @@ struct CosyVoiceEventHeader {
     error_message: Option<String>,
 }
 
+fn image_request_body(request: &ImageRequest<'_>) -> serde_json::Value {
+    let size = match request.aspect_ratio {
+        Some("3:4") => "768*1024",
+        Some("16:9") => "1280*720",
+        _ => "1024*1024",
+    };
+    let body = serde_json::json!({
+        "model": request.model,
+        "input": { "prompt": request.prompt },
+        "parameters": { "size": size, "n": 1 }
+    });
+    body
+}
+
 pub async fn generate_image(
     ctx: &MediaCtx<'_>,
     request: &ImageRequest<'_>,
@@ -95,11 +109,7 @@ pub async fn generate_image(
         Modality::Image,
         "services/aigc/text2image/image-synthesis",
     );
-    let body = serde_json::json!({
-        "model": request.model,
-        "input": { "prompt": request.prompt },
-        "parameters": { "size": "1024*1024", "n": 1 }
-    });
+    let body = image_request_body(request);
     let body =
         serde_json::to_string(&body).map_err(|e| format!("序列化阿里云图片生成请求失败: {e}"))?;
     let client = http_client();
@@ -577,6 +587,27 @@ fn cosyvoice_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_body_preserves_requested_orientation() {
+        let request = ImageRequest {
+            model: "wanx2.1-t2i-turbo",
+            prompt: "background",
+            reference: None,
+            aspect_ratio: Some("16:9"),
+        };
+        assert_eq!(
+            image_request_body(&request)["parameters"]["size"],
+            "1280*720"
+        );
+        assert_eq!(
+            image_request_body(&ImageRequest {
+                aspect_ratio: Some("3:4"),
+                ..request
+            })["parameters"]["size"],
+            "768*1024"
+        );
+    }
 
     #[test]
     fn normalize_cosyvoice_voice_appends_v2_for_v2_model() {

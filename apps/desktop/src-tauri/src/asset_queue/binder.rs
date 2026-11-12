@@ -12,17 +12,68 @@ use super::types::{AssetKind, AssetTask};
 /// Metadata tag written when a user-imported file is bound instead of an AI
 /// generated artifact, so the asset library can tell manual picks apart.
 pub(crate) const IMPORTED_SOURCE_TAG: &str = "source:imported";
+pub(crate) const BUNDLED_MOOD_SOURCE_TAG: &str = "source:bundled_mood";
 
-/// Reject anything that is not a plain file name inside the task's asset
-/// directory, so a crafted path can never escape `game/<dir>/`.
+#[derive(Clone, Copy)]
+pub(crate) enum BindingScope<'a> {
+    Project,
+    Scene(&'a str),
+    AssetsOnly,
+}
+
+/// Allow nested imported assets while rejecting traversal and absolute paths.
 pub(crate) fn validate_imported_filename(filename: &str) -> Result<(), String> {
     if filename.is_empty()
         || filename.contains('\\')
-        || Path::new(filename).components().count() != 1
+        || Path::new(filename)
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
     {
         return Err(format!("invalid imported asset filename: {filename}"));
     }
     Ok(())
+}
+
+fn scoped_imported_asset(
+    project: &Path,
+    task: &AssetTask,
+    filename: &str,
+) -> Result<PathBuf, String> {
+    validate_imported_filename(filename)?;
+    let root = project
+        .join("game")
+        .join(task.kind.game_dir())
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve imported asset directory: {error}"))?;
+    let project_root = project
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve project: {error}"))?;
+    if !root.starts_with(&project_root) {
+        return Err("asset directory escapes project".into());
+    }
+    let target = root
+        .join(filename)
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve imported asset: {error}"))?;
+    if !target.starts_with(&root) || !target.is_file() {
+        return Err("imported asset escapes its asset directory".into());
+    }
+    Ok(target)
+}
+
+fn reusable_import(project: &Path, task: &AssetTask, filename: &str) -> bool {
+    if scoped_imported_asset(project, task, filename).is_err() {
+        return false;
+    }
+    let Ok(metadata) = crate::assets::commands::read_asset_metadata(&project.to_string_lossy())
+    else {
+        return false;
+    };
+    let key = format!("{}/{}", task.kind.game_dir(), filename);
+    metadata
+        .tags
+        .get(&key)
+        .is_none_or(|tags| tags.iter().any(|tag| tag == IMPORTED_SOURCE_TAG))
 }
 
 /// Promote the most recent generated artifact and bind it into playable project data.
@@ -41,7 +92,16 @@ pub(crate) struct BindingTransaction {
 }
 
 impl BindingTransaction {
+    #[cfg(test)]
     pub(crate) fn apply_locked(project_path: &Path, task: &AssetTask) -> Result<Self, String> {
+        Self::apply_locked_scoped(project_path, task, BindingScope::Project)
+    }
+
+    pub(crate) fn apply_locked_scoped(
+        project_path: &Path,
+        task: &AssetTask,
+        scope: BindingScope<'_>,
+    ) -> Result<Self, String> {
         let artifact_path = task
             .attempts
             .iter()
@@ -68,7 +128,7 @@ impl BindingTransaction {
             .filter(|value| value.chars().all(|ch| ch.is_ascii_alphanumeric()))
             .ok_or_else(|| format!("artifact has no safe extension: {}", artifact.display()))?;
         validate_stem(&task.target_stem)?;
-        let (filename, target) = available_target(project_path, task, extension)?;
+        let (filename, target) = available_target(project_path, task, extension, scope)?;
         let snapshots = snapshot_binding_files(project_path, &target)?;
         let binding = (|| {
             let bytes = fs::read(&artifact).map_err(|error| {
@@ -84,7 +144,20 @@ impl BindingTransaction {
             crate::json_store::write_crash_safe(&target, &bytes).map_err(|error| {
                 format!("failed to promote asset {}: {error}", target.display())
             })?;
-            apply_binding(project_path, task, &filename)
+            let used_fallback = task
+                .attempts
+                .iter()
+                .rev()
+                .find(|attempt| attempt.artifact.is_some())
+                .is_some_and(|attempt| attempt.used_local_fallback);
+            let tag = if used_fallback && matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx) {
+                BUNDLED_MOOD_SOURCE_TAG
+            } else if used_fallback {
+                "source:fallback"
+            } else {
+                "source:ai"
+            };
+            apply_binding_with_source_scoped(project_path, task, &filename, tag, scope)
         })();
         if let Err(error) = binding {
             return match restore_binding_files(snapshots) {
@@ -101,21 +174,16 @@ impl BindingTransaction {
     /// Bind an audio file the user already imported into `game/<kind dir>/`.
     /// Manual BGM/SFX tasks never produce a generated artifact, so the file is
     /// bound in place instead of being copied out of the artifact directory.
-    pub(crate) fn apply_imported_locked(
+    pub(crate) fn apply_imported_locked_scoped(
         project_path: &Path,
         task: &AssetTask,
         filename: &str,
+        scope: BindingScope<'_>,
     ) -> Result<Self, String> {
-        if !task.kind.requires_manual_import() {
-            return Err(format!("task {} is not a manual audio task", task.id));
-        }
         validate_stem(&task.id)?;
         validate_stem(&task.target_stem)?;
         validate_imported_filename(filename)?;
-        let target = project_path
-            .join("game")
-            .join(task.kind.game_dir())
-            .join(filename);
+        let target = scoped_imported_asset(project_path, task, filename)?;
         if !target.is_file() {
             return Err(format!(
                 "imported audio file is missing: {}",
@@ -123,9 +191,13 @@ impl BindingTransaction {
             ));
         }
         let snapshots = snapshot_binding_files(project_path, &target)?;
-        if let Err(error) =
-            apply_binding_with_source(project_path, task, filename, IMPORTED_SOURCE_TAG)
-        {
+        if let Err(error) = apply_binding_with_source_scoped(
+            project_path,
+            task,
+            filename,
+            IMPORTED_SOURCE_TAG,
+            scope,
+        ) {
             return match restore_binding_files(snapshots) {
                 Ok(()) => Err(error),
                 Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
@@ -152,26 +224,32 @@ impl BindingTransaction {
 }
 
 /// Restore scene/config references to an already-promoted successful asset.
-pub fn rebind_asset(project_path: &Path, task: &AssetTask) -> Result<String, String> {
-    crate::project_lock::with_project_lock(project_path, || rebind_asset_locked(project_path, task))
+pub(crate) fn rebind_asset_scoped(
+    project_path: &Path,
+    task: &AssetTask,
+    scope: BindingScope<'_>,
+) -> Result<String, String> {
+    crate::project_lock::with_project_lock(project_path, || {
+        rebind_asset_locked(project_path, task, scope)
+    })
 }
 
-fn rebind_asset_locked(project_path: &Path, task: &AssetTask) -> Result<String, String> {
+fn rebind_asset_locked(
+    project_path: &Path,
+    task: &AssetTask,
+    scope: BindingScope<'_>,
+) -> Result<String, String> {
     let filename = task
         .asset_file
         .as_deref()
         .ok_or_else(|| format!("task {} has no promoted asset", task.id))?;
-    if Path::new(filename).components().count() != 1 || filename.contains('\\') {
-        return Err(format!("invalid promoted asset filename: {filename}"));
-    }
-    let target = project_path
-        .join("game")
-        .join(task.kind.game_dir())
-        .join(filename);
-    if !target.is_file() {
-        return Err(format!("promoted asset is missing: {}", target.display()));
-    }
-    if task.kind == AssetKind::Figure {
+    let target = scoped_imported_asset(project_path, task, filename)?;
+    if task.kind == AssetKind::Figure
+        && !task
+            .attempts
+            .iter()
+            .any(|attempt| attempt.imported_file.is_some())
+    {
         let bytes = fs::read(&target)
             .map_err(|error| format!("failed to read promoted figure: {error}"))?;
         validate_transparent_figure(
@@ -183,16 +261,26 @@ fn rebind_asset_locked(project_path: &Path, task: &AssetTask) -> Result<String, 
         )?;
     }
     let snapshots = snapshot_binding_files(project_path, &target)?;
-    let source_tag = if task
+    let source_tag = if task.used_local_fallback {
+        if matches!(task.kind, AssetKind::Bgm | AssetKind::Sfx) {
+            BUNDLED_MOOD_SOURCE_TAG
+        } else {
+            "source:fallback"
+        }
+    } else if task
         .attempts
         .iter()
-        .any(|item| item.imported_file.is_some())
+        .rev()
+        .find(|item| item.artifact.is_some() || item.imported_file.is_some())
+        .is_some_and(|item| item.imported_file.is_some())
     {
         IMPORTED_SOURCE_TAG
     } else {
         "source:ai"
     };
-    if let Err(error) = apply_binding_with_source(project_path, task, filename, source_tag) {
+    if let Err(error) =
+        apply_binding_with_source_scoped(project_path, task, filename, source_tag, scope)
+    {
         return match restore_binding_files(snapshots) {
             Ok(()) => Err(error),
             Err(rollback) => Err(format!("{error}; rollback failed: {rollback}")),
@@ -240,6 +328,9 @@ pub(crate) fn find_imported_audio_file(
             .file_name()
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if !reusable_import(project_path, task, &filename) {
+            continue;
+        }
         let suffixed_stem = stem
             .strip_suffix(&task_suffix)
             .map(|prefix| format!("{prefix}-{task_suffix}"))
@@ -266,28 +357,192 @@ fn is_audio_extension(extension: &str) -> bool {
     )
 }
 
-fn apply_binding(project_path: &Path, task: &AssetTask, filename: &str) -> Result<(), String> {
-    apply_binding_with_source(project_path, task, filename, "source:ai")
+pub(crate) fn is_image_extension(extension: &str) -> bool {
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "webp"
+    )
 }
 
-fn apply_binding_with_source(
+/// Locate an already-imported or preexisting asset file that can satisfy the task without AI generation.
+pub(crate) fn find_imported_asset_file(
+    project_path: &Path,
+    task: &AssetTask,
+) -> Result<Option<String>, String> {
+    if task.kind.requires_manual_import() {
+        return find_imported_audio_file(project_path, task);
+    }
+    match task.kind {
+        AssetKind::Background => {
+            let dir = project_path.join("game/background");
+            if !dir.is_dir() {
+                return Ok(None);
+            }
+            let entries = fs::read_dir(&dir).map_err(|error| {
+                format!(
+                    "failed to read background directory {}: {error}",
+                    dir.display()
+                )
+            })?;
+            let mut exact = Vec::new();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let Some(extension) = path.extension().and_then(|v| v.to_str()) else {
+                    continue;
+                };
+                if !is_image_extension(extension) {
+                    continue;
+                }
+                let Some(stem) = path.file_stem().and_then(|v| v.to_str()) else {
+                    continue;
+                };
+                let filename = path
+                    .file_name()
+                    .map(|v| v.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if (stem == task.target_stem || stem == task.id)
+                    && reusable_import(project_path, task, &filename)
+                {
+                    exact.push(filename);
+                }
+            }
+            exact.sort();
+            Ok(exact.into_iter().next())
+        }
+        AssetKind::Figure => {
+            let dir = project_path.join("game/figure");
+            if dir.is_dir() {
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    let mut exact = Vec::new();
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_file() {
+                            continue;
+                        }
+                        let Some(extension) = path.extension().and_then(|v| v.to_str()) else {
+                            continue;
+                        };
+                        if !is_image_extension(extension) {
+                            continue;
+                        }
+                        let Some(stem) = path.file_stem().and_then(|v| v.to_str()) else {
+                            continue;
+                        };
+                        let filename = path
+                            .file_name()
+                            .map(|v| v.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if (stem == task.target_stem || stem == task.id)
+                            && reusable_import(project_path, task, &filename)
+                        {
+                            exact.push(filename);
+                        }
+                    }
+                    exact.sort();
+                    if let Some(first) = exact.into_iter().next() {
+                        return Ok(Some(first));
+                    }
+                }
+            }
+            if let Some(char_id) = &task.character_ref {
+                let char_json = project_path.join("game/config/characters.json");
+                if char_json.is_file() {
+                    if let Ok(src) = fs::read_to_string(&char_json) {
+                        if let Ok(doc) = serde_json::from_str::<CharactersDocument>(&src) {
+                            if let Some(c) = doc
+                                .characters
+                                .iter()
+                                .find(|c| c.id == *char_id || c.name == *char_id)
+                            {
+                                let wanted_emotion = task.emotion.as_deref().unwrap_or("default");
+                                if let Some(sp) =
+                                    c.sprites.iter().find(|sp| sp.emotion == wanted_emotion)
+                                {
+                                    let sprite_file =
+                                        project_path.join("game/figure").join(&sp.file);
+                                    if sprite_file.is_file()
+                                        && reusable_import(project_path, task, &sp.file)
+                                    {
+                                        return Ok(Some(sp.file.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
+}
+
+fn apply_binding_with_source_scoped(
     project_path: &Path,
     task: &AssetTask,
     filename: &str,
     source_tag: &str,
+    scope: BindingScope<'_>,
 ) -> Result<(), String> {
     match task.kind {
         AssetKind::Background => {
-            bind_scene_command(project_path, task, filename, CommandType::ChangeBg)?
+            bind_scene_command_scoped(project_path, task, filename, CommandType::ChangeBg, scope)?
         }
-        AssetKind::Figure => bind_figure(project_path, task, filename)?,
-        AssetKind::Bgm => bind_scene_command(project_path, task, filename, CommandType::Bgm)?,
+        AssetKind::Figure => bind_figure(project_path, task, filename, scope)?,
+        AssetKind::Bgm => {
+            bind_scene_command_scoped(project_path, task, filename, CommandType::Bgm, scope)?
+        }
         AssetKind::Sfx => {
-            bind_scene_command(project_path, task, filename, CommandType::PlayEffect)?
+            bind_scene_command_scoped(project_path, task, filename, CommandType::PlayEffect, scope)?
         }
-        AssetKind::Tts => bind_tts(project_path, task, filename)?,
+        AssetKind::Tts => match scope {
+            BindingScope::AssetsOnly => {}
+            BindingScope::Scene(file) => {
+                let mut task = task.clone();
+                task.scene_ref = Some(file.into());
+                bind_tts(project_path, &task, filename)?;
+            }
+            BindingScope::Project => bind_tts(project_path, task, filename)?,
+        },
     }
     update_asset_metadata(project_path, task, filename, source_tag)
+}
+
+fn bind_scene_command_scoped(
+    project: &Path,
+    task: &AssetTask,
+    filename: &str,
+    kind: CommandType,
+    scope: BindingScope<'_>,
+) -> Result<(), String> {
+    match scope {
+        BindingScope::Project => bind_scene_command(project, task, filename, kind),
+        BindingScope::Scene(file) => {
+            let path = selected_scene_path(project, file)?;
+            bind_scene_command_at(&path, task, filename, kind)
+        }
+        BindingScope::AssetsOnly => Ok(()),
+    }
+}
+
+fn selected_scene_path(project: &Path, file: &str) -> Result<PathBuf, String> {
+    if file.contains('\\') || Path::new(file).components().count() != 1 || !file.ends_with(".txt") {
+        return Err(format!("invalid binding scene: {file}"));
+    }
+    let root = project.join("game/scene");
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve binding scene directory: {error}"))?;
+    let project_root = project
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve binding project: {error}"))?;
+    if !canonical_root.starts_with(project_root) {
+        return Err("binding scene directory escapes project".into());
+    }
+    checked_scene_path(&root, root.join(file))
 }
 
 fn validate_stem(value: &str) -> Result<(), String> {
@@ -338,6 +593,9 @@ fn scene_path(project_path: &Path, scene_ref: Option<&str>) -> Result<PathBuf, S
 
 fn all_scene_paths(project_path: &Path) -> Result<Vec<PathBuf>, String> {
     let scene_dir = project_path.join("game/scene");
+    if !scene_dir.exists() {
+        return Ok(Vec::new());
+    }
     let root = scene_dir
         .canonicalize()
         .map_err(|error| format!("failed to resolve scene directory: {error}"))?;
@@ -460,6 +718,7 @@ fn available_target(
     project_path: &Path,
     task: &AssetTask,
     extension: &str,
+    scope: BindingScope<'_>,
 ) -> Result<(String, PathBuf), String> {
     let candidates = std::iter::once(format!("{}.{}", task.target_stem, extension))
         .chain(std::iter::once(format!(
@@ -476,8 +735,9 @@ fn available_target(
             .join(task.kind.game_dir())
             .join(&filename);
         if !target.exists()
-            || task.asset_file.as_deref() == Some(filename.as_str())
-            || scene_task_owns_filename(project_path, task, &filename)?
+            || (matches!(scope, BindingScope::Project)
+                && (task.asset_file.as_deref() == Some(filename.as_str())
+                    || scene_task_owns_filename(project_path, task, &filename)?))
         {
             return Ok((filename, target));
         }
@@ -520,20 +780,55 @@ fn bind_scene_command(
     filename: &str,
     kind: CommandType,
 ) -> Result<(), String> {
-    let path = scene_path(project_path, task.scene_ref.as_deref())?;
-    let mut nodes = read_scene(&path)?;
+    let primary = scene_path(project_path, task.scene_ref.as_deref())?;
+    let mut paths = vec![primary];
+    if kind == CommandType::ChangeBg {
+        for path in all_scene_paths(project_path)? {
+            if !paths.contains(&path)
+                && read_scene(&path)?.iter().any(|node| {
+                    node.cmd_type == CommandType::Comment && node.content == task_marker(&task.id)
+                })
+            {
+                paths.push(path);
+            }
+        }
+    }
+    for path in paths {
+        bind_scene_command_at(&path, task, filename, kind.clone())?;
+    }
+    Ok(())
+}
+
+fn bind_scene_command_at(
+    path: &Path,
+    task: &AssetTask,
+    filename: &str,
+    kind: CommandType,
+) -> Result<(), String> {
+    let mut nodes = read_scene(path)?;
     let marker = task_marker(&task.id);
     if let Some(marker_index) = nodes
         .iter()
         .position(|node| node.cmd_type == CommandType::Comment && node.content == marker)
     {
+        if kind == CommandType::ChangeBg {
+            if let Some(staged) = nodes.get(marker_index + 1).and_then(|node| {
+                (node.cmd_type == CommandType::Comment)
+                    .then(|| node.content.strip_prefix("ollaic-background-staging:"))
+                    .flatten()
+                    .and_then(|command| parser::parse_script(command).into_iter().next())
+                    .filter(|node| node.cmd_type == CommandType::ChangeBg)
+            }) {
+                nodes[marker_index + 1] = staged;
+            }
+        }
         if let Some(existing) = nodes
             .get_mut(marker_index + 1)
             .filter(|node| node.cmd_type == kind)
         {
             existing.content = filename.to_string();
             existing.asset = Some(filename.to_string());
-            return write_scene(&path, &nodes);
+            return write_scene(path, &nodes);
         }
     }
     if let Some(existing_index) = task.asset_file.as_deref().and_then(|previous| {
@@ -561,10 +856,15 @@ fn bind_scene_command(
             [marker_node(&task.id), asset_node(&task.id, kind, filename)],
         );
     }
-    write_scene(&path, &nodes)
+    write_scene(path, &nodes)
 }
 
-fn bind_figure(project_path: &Path, task: &AssetTask, filename: &str) -> Result<(), String> {
+fn bind_figure(
+    project_path: &Path,
+    task: &AssetTask,
+    filename: &str,
+    scope: BindingScope<'_>,
+) -> Result<(), String> {
     let character_ref = task
         .character_ref
         .as_deref()
@@ -599,11 +899,14 @@ fn bind_figure(project_path: &Path, task: &AssetTask, filename: &str) -> Result<
     crate::json_store::write_crash_safe(&characters_path, &bytes)
         .map_err(|error| format!("failed to write {}: {error}", characters_path.display()))?;
 
-    let explicit_scene = task.scene_ref.is_some();
-    let paths = if explicit_scene {
-        vec![scene_path(project_path, task.scene_ref.as_deref())?]
-    } else {
-        all_scene_paths(project_path)?
+    let explicit_scene = task.scene_ref.is_some() && matches!(scope, BindingScope::Project);
+    let paths = match scope {
+        BindingScope::AssetsOnly => Vec::new(),
+        BindingScope::Scene(file) => vec![selected_scene_path(project_path, file)?],
+        BindingScope::Project if explicit_scene => {
+            vec![scene_path(project_path, task.scene_ref.as_deref())?]
+        }
+        BindingScope::Project => all_scene_paths(project_path)?,
     };
     for path in paths {
         let mut nodes = read_scene(&path)?;
@@ -799,6 +1102,8 @@ mod tests {
             scene_ref: None,
             character_ref: Some("alice".into()),
             emotion: Some("default".into()),
+            reference_image: None,
+            aspect_ratio: None,
             dialogue_index: None,
             text: None,
             status: AssetTaskStatus::Running,
@@ -854,6 +1159,8 @@ mod tests {
             scene_ref: Some("../../outside".into()),
             character_ref: None,
             emotion: None,
+            reference_image: None,
+            aspect_ratio: None,
             dialogue_index: None,
             text: None,
             status: AssetTaskStatus::Running,
@@ -908,6 +1215,8 @@ mod tests {
                     scene_ref: Some("start.txt".into()),
                     character_ref: None,
                     emotion: None,
+                    reference_image: None,
+                    aspect_ratio: None,
                     dialogue_index: None,
                     text: None,
                     status: AssetTaskStatus::Running,
@@ -938,5 +1247,153 @@ mod tests {
             b"user audio"
         );
         let _ = fs::remove_dir_all(project);
+    }
+    #[test]
+    fn shared_background_binding_updates_every_marked_scene_only() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_shared_background_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        for file in ["one.txt", "two.txt"] {
+            fs::write(
+                project.join("game/scene").join(file),
+                "; ollaic-asset-task:bg_school\nchangeBg:bg_school.png -next;\n:Hello;\n",
+            )
+            .unwrap();
+        }
+        fs::write(
+            project.join("game/scene/one.txt"),
+            "; ollaic-asset-task:bg_school\n; ollaic-background-staging:changeBg:bg_school.png -next;\n:Hello;\n",
+        ).unwrap();
+        fs::write(project.join("game/scene/other.txt"), ":Unchanged;\n").unwrap();
+        let task = AssetTask {
+            id: "bg_school".into(),
+            kind: AssetKind::Background,
+            scene_ref: Some("one.txt".into()),
+            ..Default::default()
+        };
+        bind_scene_command(
+            &project,
+            &task,
+            "imported_school.jpg",
+            CommandType::ChangeBg,
+        )
+        .unwrap();
+        for file in ["one.txt", "two.txt"] {
+            let script = fs::read_to_string(project.join("game/scene").join(file)).unwrap();
+            assert!(script.contains("changeBg:imported_school.jpg -next;"));
+        }
+        assert_eq!(
+            fs::read_to_string(project.join("game/scene/other.txt")).unwrap(),
+            ":Unchanged;\n"
+        );
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn imported_sprite_subpaths_stay_scoped_and_ai_redraws_do_not_reuse_changed_prompts() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_import_scope_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(project.join("game/figure/alice")).unwrap();
+        fs::write(project.join("game/figure/alice/default.png"), png(255)).unwrap();
+        let task = AssetTask {
+            kind: AssetKind::Figure,
+            prompt: "new prompt".into(),
+            ..Default::default()
+        };
+        assert!(reusable_import(&project, &task, "alice/default.png"));
+        assert!(scoped_imported_asset(&project, &task, "../../outside.png").is_err());
+        let mut metadata =
+            crate::assets::commands::read_asset_metadata(&project.to_string_lossy()).unwrap();
+        metadata
+            .tags
+            .insert("figure/alice/default.png".into(), vec!["source:ai".into()]);
+        metadata
+            .descriptions
+            .insert("figure/alice/default.png".into(), "old prompt".into());
+        crate::assets::commands::write_asset_metadata(&project.to_string_lossy(), &metadata)
+            .unwrap();
+        assert!(!reusable_import(&project, &task, "alice/default.png"));
+        fs::remove_dir_all(project).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn imported_asset_directory_cannot_symlink_outside_project() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let project = std::env::temp_dir().join(format!("ollaic_import_symlink_{nonce}"));
+        let outside = std::env::temp_dir().join(format!("ollaic_import_outside_{nonce}"));
+        fs::create_dir_all(project.join("game")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("default.png"), png(255)).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("game/figure")).unwrap();
+        let task = AssetTask {
+            kind: AssetKind::Figure,
+            ..Default::default()
+        };
+        assert!(scoped_imported_asset(&project, &task, "default.png").is_err());
+        fs::remove_dir_all(project).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+    #[test]
+    fn generated_and_bundled_media_never_become_manual_imports() {
+        let project = std::env::temp_dir().join(format!(
+            "ollaic_import_provenance_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for (kind, filename) in [
+            (AssetKind::Background, "needed.png"),
+            (AssetKind::Bgm, "needed.wav"),
+        ] {
+            let folder = project.join("game").join(kind.game_dir());
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(filename), b"media").unwrap();
+            let task = AssetTask {
+                id: "needed".into(),
+                target_stem: "needed".into(),
+                kind,
+                ..Default::default()
+            };
+            assert!(find_imported_asset_file(&project, &task).unwrap().is_some());
+            for source in [
+                "source:ai",
+                "source:fallback",
+                "source:bundled_mood",
+                IMPORTED_SOURCE_TAG,
+            ] {
+                let mut metadata =
+                    crate::assets::commands::read_asset_metadata(&project.to_string_lossy())
+                        .unwrap();
+                metadata.tags.insert(
+                    format!("{}/{filename}", kind.game_dir()),
+                    vec![source.into()],
+                );
+                crate::assets::commands::write_asset_metadata(
+                    &project.to_string_lossy(),
+                    &metadata,
+                )
+                .unwrap();
+                assert_eq!(
+                    find_imported_asset_file(&project, &task).unwrap().is_some(),
+                    source == IMPORTED_SOURCE_TAG,
+                    "{source}"
+                );
+            }
+        }
+        fs::remove_dir_all(project).unwrap();
     }
 }

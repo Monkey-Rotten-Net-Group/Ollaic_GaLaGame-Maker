@@ -286,12 +286,15 @@ mod tests {
             .build(),
         ];
         let scenes = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
             title: "开场".into(),
             summary: "相遇".into(),
             character_ids: vec!["missing_role".into()],
+            ..Default::default()
         }];
         let error = validate_characters(&characters, &scenes).unwrap_err();
         assert!(error.0.contains("$.scenePlans[0].characterIds[0]"));
@@ -300,15 +303,21 @@ mod tests {
     #[tokio::test]
     async fn local_character_agent_produces_editable_character_cards() {
         let scenes = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
             title: "开场".into(),
             summary: "相遇".into(),
             character_ids: vec!["protagonist".into()],
+            ..Default::default()
         }];
         let agent = CharacterAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
             chat: &crate::agents::router::NoChatGateway,
             prompt: "校园悬疑恋爱",
             instruction: "",
@@ -319,6 +328,7 @@ mod tests {
             characters: &[],
             scene_plans: &scenes,
             branches: &BranchGraph::default(),
+            variables: &[],
             scene_drafts: &[],
             asset_plan: &[],
             allow_local_fallback: true,

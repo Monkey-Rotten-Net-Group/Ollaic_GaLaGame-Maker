@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 
 use crate::agents::{AgentError, AgentOutput, AgentOutputPayload};
@@ -6,6 +6,7 @@ use crate::asset_queue::AssetTaskStatus;
 use crate::pipeline::dsl::{StepExecutor, StepKind};
 use crate::pipeline::recovery::PipelineError;
 use crate::pipeline::state::{Clock, RunState, StepStatus};
+use crate::story_plan::types::{AssetTaskPlan, SceneApprovalStatus};
 use crate::story_plan::StoryPlan;
 
 pub(crate) fn validate_output_contract(
@@ -53,10 +54,63 @@ fn output_kind(payload: &AgentOutputPayload) -> &'static str {
     }
 }
 
+pub(crate) fn apply_scoped_output(
+    plan: &mut StoryPlan,
+    out: &AgentOutput,
+    scope: &crate::pipeline::dsl::FlowScope,
+) {
+    let crate::pipeline::dsl::FlowScope::Scene { scene_id } = scope else {
+        apply_output(plan, out);
+        return;
+    };
+    let mut affected = HashSet::from([scene_id.clone()]);
+    let mut pending = vec![scene_id.clone()];
+    while let Some(id) = pending.pop() {
+        for edge in plan.branches.edges.iter().filter(|edge| edge.from == id) {
+            if affected.insert(edge.to.clone()) {
+                pending.push(edge.to.clone());
+            }
+        }
+    }
+    let preserved: Vec<_> = plan
+        .scene_plans
+        .iter()
+        .filter(|scene| !affected.contains(&scene.id))
+        .map(|scene| {
+            (
+                scene.id.clone(),
+                scene.approval_status,
+                scene.rolling_summary.clone(),
+            )
+        })
+        .collect();
+    apply_output(plan, out);
+    for (id, status, summary) in preserved {
+        if let Some(scene) = plan.scene_plans.iter_mut().find(|scene| scene.id == id) {
+            scene.approval_status = status;
+            scene.rolling_summary = summary;
+        }
+    }
+}
+
 pub(crate) fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
     match &out.payload {
         AgentOutputPayload::Synopsis(synopsis) => {
             plan.synopsis = synopsis.clone();
+            if plan.visual_style.style_prompt.trim().is_empty() {
+                plan.visual_style.style_prompt =
+                    "日系二次元视觉小说赛璐璐与清透厚涂结合画风，线条干净利落，五官精致统一"
+                        .to_string();
+            }
+            if plan.visual_style.palette_and_lighting.trim().is_empty() {
+                plan.visual_style.palette_and_lighting =
+                    "电影感柔和冷暖对比光影，色调清澈且富有叙事氛围".to_string();
+            }
+            if plan.visual_style.negative_prompt.trim().is_empty() {
+                plan.visual_style.negative_prompt =
+                    "多人同框, 杂乱背景, 水印, 文字, 肢体畸形, 手指残缺, 头顶裁切, 画风突变"
+                        .to_string();
+            }
             plan.memory = Default::default();
             clear_after_memory(plan);
         }
@@ -72,10 +126,12 @@ pub(crate) fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
             chapters,
             scene_plans,
             branches,
+            variables,
         } => {
             plan.chapters = chapters.clone();
             plan.scene_plans = scene_plans.clone();
             plan.branches = branches.clone();
+            plan.variables = variables.clone();
             plan.characters.clear();
             plan.scene_drafts.clear();
             plan.asset_plan.clear();
@@ -89,21 +145,185 @@ pub(crate) fn apply_output(plan: &mut StoryPlan, out: &AgentOutput) {
             plan.scenes.clear();
         }
         AgentOutputPayload::SceneDrafts(drafts) => {
+            let changed: HashSet<String> = drafts
+                .iter()
+                .filter(|draft| {
+                    plan.scene_drafts
+                        .iter()
+                        .find(|existing| existing.scene_id == draft.scene_id)
+                        != Some(*draft)
+                })
+                .map(|draft| draft.scene_id.clone())
+                .collect();
+            invalidate_scene_dependents(plan, &changed);
             merge_scene_casts_from_drafts(&mut plan.scene_plans, drafts);
-            plan.scene_drafts = drafts.clone();
-            plan.asset_plan.clear();
-            plan.scenes.clear();
+            upsert_by_key(&mut plan.scene_drafts, drafts, |draft| &draft.scene_id);
+            for scene in &mut plan.scene_plans {
+                if changed.contains(&scene.id) && !plan.scenes.contains(&scene.file) {
+                    scene.approval_status = SceneApprovalStatus::Drafted;
+                }
+            }
         }
         AgentOutputPayload::AssetPlan(asset_plan) => {
-            plan.asset_plan = asset_plan.clone();
+            let mut changed = HashSet::new();
+            for task in asset_plan {
+                let previous = plan
+                    .asset_plan
+                    .iter()
+                    .find(|existing| existing.id == task.id);
+                if !previous
+                    .is_some_and(|previous| equivalent_asset_requirement(plan, previous, task))
+                {
+                    changed.extend(asset_scene_ids(plan, task));
+                    if let Some(previous) = previous {
+                        changed.extend(asset_scene_ids(plan, previous));
+                    }
+                }
+            }
+            invalidate_scene_dependents(plan, &changed);
+            for task in asset_plan {
+                if let Some(index) = plan.asset_plan.iter().position(|item| item.id == task.id) {
+                    if !equivalent_asset_requirement(plan, &plan.asset_plan[index], task) {
+                        plan.asset_plan[index] = task.clone();
+                    }
+                } else {
+                    plan.asset_plan.push(task.clone());
+                }
+            }
             plan_figure_sprites(&mut plan.characters, asset_plan);
-            plan.scenes.clear();
         }
         AgentOutputPayload::Scenes(scenes) => {
-            plan.scenes = scenes.iter().map(|scene| scene.name.clone()).collect();
+            let changed: HashSet<String> = plan
+                .scene_plans
+                .iter()
+                .filter(|scene| scenes.iter().any(|output| output.name == scene.file))
+                .map(|scene| scene.id.clone())
+                .collect();
+            invalidate_scene_dependents(plan, &changed);
+            for output in scenes {
+                if !plan.scenes.contains(&output.name) {
+                    plan.scenes.push(output.name.clone());
+                }
+                if let Some(scene) = plan
+                    .scene_plans
+                    .iter_mut()
+                    .find(|scene| scene.file == output.name)
+                {
+                    scene.approval_status = SceneApprovalStatus::Drafted;
+                    scene.rolling_summary = plan
+                        .scene_drafts
+                        .iter()
+                        .find(|draft| draft.scene_id == scene.id)
+                        .and_then(|draft| draft.beats.last())
+                        .map(|beat| beat.text.clone());
+                }
+            }
         }
         AgentOutputPayload::AssetQueue(_) => {}
     }
+}
+
+fn equivalent_asset_requirement(
+    plan: &StoryPlan,
+    left: &AssetTaskPlan,
+    right: &AssetTaskPlan,
+) -> bool {
+    fn ratio(task: &AssetTaskPlan) -> &str {
+        task.aspect_ratio
+            .as_deref()
+            .unwrap_or(match task.kind.as_str() {
+                "figure" => "3:4",
+                "background" => "16:9",
+                _ => "",
+            })
+    }
+    left.id == right.id
+        && left.kind == right.kind
+        && left.target_stem == right.target_stem
+        && left.prompt == right.prompt
+        && left.character_ref == right.character_ref
+        && left.emotion == right.emotion
+        && left.reference_image == right.reference_image
+        && ratio(left) == ratio(right)
+        && (left.kind == "figure"
+            || left.scene_ref == right.scene_ref
+            || (left.kind == "background"
+                && plan.scene_plans.iter().any(|source| {
+                    Some(&source.id) == left.scene_ref.as_ref()
+                        && plan.scene_plans.iter().any(|target| {
+                            Some(&target.id) == right.scene_ref.as_ref()
+                                && crate::agents::asset_planner::shares_background(source, target)
+                        })
+                })))
+}
+
+fn upsert_by_key<T: Clone, F: Fn(&T) -> &String>(existing: &mut Vec<T>, updates: &[T], key: F) {
+    for update in updates {
+        if let Some(slot) = existing.iter_mut().find(|item| key(item) == key(update)) {
+            *slot = update.clone();
+        } else {
+            existing.push(update.clone());
+        }
+    }
+}
+
+/// Keep authored content intact while invalidating only reachable production artifacts.
+fn invalidate_scene_dependents(plan: &mut StoryPlan, changed: &HashSet<String>) {
+    let mut affected = changed.clone();
+    let mut pending: VecDeque<String> = changed.iter().cloned().collect();
+    while let Some(scene) = pending.pop_front() {
+        for edge in plan.branches.edges.iter().filter(|edge| edge.from == scene) {
+            if affected.insert(edge.to.clone()) {
+                pending.push_back(edge.to.clone());
+            }
+        }
+    }
+    for scene in &mut plan.scene_plans {
+        if affected.contains(&scene.id)
+            && (scene.approval_status != SceneApprovalStatus::Pending
+                || plan.scenes.contains(&scene.file)
+                || plan
+                    .scene_drafts
+                    .iter()
+                    .any(|draft| draft.scene_id == scene.id))
+        {
+            scene.approval_status = SceneApprovalStatus::Stale;
+            scene.rolling_summary = None;
+        }
+    }
+}
+
+fn asset_scene_ids(plan: &StoryPlan, task: &AssetTaskPlan) -> HashSet<String> {
+    plan.scene_plans
+        .iter()
+        .filter(|scene| {
+            if task.scene_ref.as_deref() == Some(scene.id.as_str()) {
+                return true;
+            }
+            match task.kind.as_str() {
+                "background" => task.scene_ref.as_ref().is_some_and(|source_id| {
+                    plan.scene_plans.iter().any(|source| {
+                        &source.id == source_id
+                            && crate::agents::asset_planner::shares_background(scene, source)
+                    })
+                }),
+                "figure" => plan
+                    .scene_drafts
+                    .iter()
+                    .filter(|draft| draft.scene_id == scene.id)
+                    .flat_map(|draft| &draft.beats)
+                    .flat_map(|beat| &beat.figure_cues)
+                    .any(|cue| {
+                        cue.action == crate::story_plan::FigureCueAction::Show
+                            && task.character_ref.as_deref() == Some(cue.character_id.as_str())
+                            && task.emotion.as_deref() == Some(cue.emotion.as_str())
+                    }),
+                "bgm" | "sfx" => task.scene_ref.is_none(),
+                _ => false,
+            }
+        })
+        .map(|scene| scene.id.clone())
+        .collect()
 }
 
 fn clear_after_memory(plan: &mut StoryPlan) {
@@ -500,8 +720,9 @@ pub(crate) fn serialize_output(out: &AgentOutput) -> String {
             chapters,
             scene_plans,
             branches,
+            variables,
         } => serde_json::json!({
-            "chapters": chapters, "scenePlans": scene_plans, "branches": branches
+            "chapters": chapters, "scenePlans": scene_plans, "branches": branches, "variables": variables
         }),
         AgentOutputPayload::Characters(values) => serde_json::json!({
             "characters": values.iter().map(|value| serde_json::json!({"id": value.id, "name": value.name})).collect::<Vec<_>>()

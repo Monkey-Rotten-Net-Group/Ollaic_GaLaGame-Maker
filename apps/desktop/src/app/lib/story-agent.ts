@@ -1,6 +1,15 @@
 import type { AssetInfo } from './assets-ipc';
 import type { AiChatMessage } from './ai-ipc';
 import type { SessionDigest } from '../hooks/useChatSession';
+import type { WebGalNode } from './webgal-types';
+
+export type AiEditScope = 'node' | 'scene' | 'full';
+
+export interface AiEditScopeContext {
+  scope: AiEditScope;
+  selectedNode?: WebGalNode | null;
+  selectedNodeIndex?: number;
+}
 
 export interface MissingAssetIssue {
   command: string;
@@ -215,4 +224,86 @@ function formatConversationMessage(content: string, sceneName?: string): string 
 function summarizeAssistantHistory(content: string): string {
   const trimmed = content.trim();
   return trimmed.length > 500 ? `${trimmed.slice(0, 500)}...` : trimmed;
+}
+
+export function resolveEffectiveEditScope(
+  scope: AiEditScope | undefined,
+  selectedNode: WebGalNode | null | undefined,
+  fallbackScope?: AiEditScope,
+): AiEditScope | undefined {
+  const effective = scope ?? fallbackScope;
+  if (!effective) return undefined;
+  if (effective === 'node' && !selectedNode) {
+    return fallbackScope && fallbackScope !== 'node' ? fallbackScope : 'scene';
+  }
+  return effective;
+}
+
+function summarizeNodeForScope(node: WebGalNode): string {
+  const summary: Record<string, unknown> = {
+    id: node.id,
+    type: node.type,
+  };
+  if (node.character) summary.character = node.character;
+  if (node.content) summary.content = node.content;
+  if (node.asset) summary.asset = node.asset;
+  if (node.figurePosition) summary.figurePosition = node.figurePosition;
+  if (node.figureCharacter) summary.figureCharacter = node.figureCharacter;
+  if (node.figureEmotion) summary.figureEmotion = node.figureEmotion;
+  if (node.choices?.length) summary.choices = node.choices;
+  if (node.targetScene) summary.targetScene = node.targetScene;
+  if (node.labelName) summary.labelName = node.labelName;
+  if (node.varName) summary.varName = node.varName;
+  if (node.varValue !== undefined) summary.varValue = node.varValue;
+  if (node.introLines?.length) summary.introLines = node.introLines;
+  return JSON.stringify(summary);
+}
+
+export function buildEditScopeContext(
+  scopeContext: AiEditScopeContext | undefined,
+  currentSceneName: string,
+): string {
+  if (!scopeContext) return '';
+  if (scopeContext.scope === 'node' && scopeContext.selectedNode) {
+    const indexLabel =
+      scopeContext.selectedNodeIndex !== undefined && scopeContext.selectedNodeIndex >= 0
+        ? `第 ${scopeContext.selectedNodeIndex + 1} 条指令`
+        : '当前选中指令';
+    return `当前编辑范围：行级聚焦（场景 ${currentSceneName}，${indexLabel}，节点 ${summarizeNodeForScope(scopeContext.selectedNode)}）。请优先围绕该选中行及相邻上下文修改或讨论；调用编辑工具时，请以上方「当前场景脚本」中的实际 txt 行号为准。`;
+  }
+  if (scopeContext.scope === 'full') {
+    return '当前编辑范围：全剧范围（项目全部场景）。你可以通过 list_scenes / read_scene 读取项目中的其他场景，并按需跨场景、角色或素材提出修改。';
+  }
+  return `当前编辑范围：仅当前场景（${currentSceneName}）。请仅针对当前场景 ${currentSceneName} 提出剧本修改，不要跨场景修改其他场景文件；如需上下文可按需使用只读工具查阅。`;
+}
+
+export function formatUserTurnContent(
+  historyMessages: Array<{ id: string; sceneName?: string }>,
+  currentSceneName: string,
+  text: string,
+  scopeContext?: AiEditScopeContext,
+): string {
+  const hasCrossSceneHistory = historyMessages.some(
+    (m) => m.id !== '1' && m.sceneName && m.sceneName !== currentSceneName,
+  );
+  if (!scopeContext) {
+    return hasCrossSceneHistory
+      ? `[当前打开场景: ${currentSceneName} — 请针对本场景直接操作，勿沿用历史消息中的旧场景]\n${text}`
+      : text;
+  }
+  const scopeTag =
+    scopeContext.scope === 'node' && scopeContext.selectedNode
+      ? `行级聚焦（${
+          scopeContext.selectedNodeIndex !== undefined && scopeContext.selectedNodeIndex >= 0
+            ? `第 ${scopeContext.selectedNodeIndex + 1} 条指令`
+            : `节点 ${scopeContext.selectedNode.id}`
+        }）`
+      : scopeContext.scope === 'full'
+        ? '全剧范围（可跨场景读取与修改）'
+        : `仅编辑当前场景 ${currentSceneName}`;
+  const sceneRule =
+    hasCrossSceneHistory && scopeContext.scope !== 'full'
+      ? ' — 请针对本场景直接操作，勿沿用历史消息中的旧场景'
+      : '';
+  return `[当前打开场景: ${currentSceneName}${sceneRule} | 编辑范围: ${scopeTag}]\n${text}`;
 }

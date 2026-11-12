@@ -78,12 +78,22 @@ describe('live runtime preview', () => {
     expect(PreviewSocket.instances[0].close).toHaveBeenCalledOnce();
   });
 
-  it('keeps preview closed until requested and reports a missing engine', async () => {
-    const { result, rerender } = renderHook(({ enabled }) => useRuntimePreview('/project', '场景;', enabled), { initialProps: { enabled: false } });
-    expect(setRuntimeProject).not.toHaveBeenCalled();
-    vi.mocked(getRuntimeInfo).mockResolvedValue({ installed: false, path: '/runtime', version: null });
-    rerender({ enabled: true });
-    await waitFor(() => expect(result.current.error).toContain('安装或选择 WebGAL 引擎'));
-    expect(PreviewSocket.instances).toHaveLength(0);
+  it('wraps the preview script with simulated entry variables when provided', async () => {
+    const { result } = renderHook(() =>
+      useRuntimePreview('/project', '林夏:重要决断。;', true, {
+        entryVariables: { linxia_trust: '3' },
+      }),
+    );
+    await waitFor(() => expect(PreviewSocket.instances).toHaveLength(1));
+    const socket = PreviewSocket.instances[0];
+    act(() => socket.onopen?.());
+    act(() => result.current.onFrameLoad());
+    vi.useFakeTimers();
+    act(() => socket.heartbeat());
+    act(() => vi.advanceTimersByTime(450));
+    const lastCall = JSON.parse(socket.send.mock.calls[socket.send.mock.calls.length - 1][0]);
+    expect(lastCall.data.command).toBe(6);
+    expect(lastCall.data.message).toContain('setVar:linxia_trust=3;');
+    expect(lastCall.data.message).toContain('林夏:重要决断。;');
   });
 });

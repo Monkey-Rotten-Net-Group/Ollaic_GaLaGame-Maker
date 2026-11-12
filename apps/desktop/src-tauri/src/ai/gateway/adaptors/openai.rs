@@ -25,16 +25,12 @@ struct OpenAiImageItem {
     url: Option<String>,
 }
 
-pub async fn generate_image(
-    cfg: &AiProviderConfig,
-    request: &ImageRequest<'_>,
-) -> Result<GeneratedMedia, String> {
-    let endpoint = media_endpoint(cfg, Modality::Image, "images/generations");
-    let body = if is_seedream_model(request.model) {
+fn image_request_body(request: &ImageRequest<'_>) -> serde_json::Value {
+    if is_seedream_model(request.model) {
         let mut body = serde_json::json!({
             "model": request.model,
             "prompt": request.prompt,
-            "size": "2K",
+            "size": seedream_size(request.aspect_ratio),
             "response_format": "url",
             "stream": false,
             "watermark": false,
@@ -48,16 +44,44 @@ pub async fn generate_image(
         }
         body
     } else {
-        // Non-Seedream OpenAI-compatible image APIs (DALL·E / gpt-image) use a
-        // different protocol for references, so the reference is ignored here.
+        // References are rejected by dispatch when this generation protocol
+        // cannot represent them; never silently discard identity conditioning.
         serde_json::json!({
             "model": request.model,
             "prompt": request.prompt,
             "n": 1,
-            "size": "1024x1024",
+            "size": compatible_size(request.model, request.aspect_ratio),
             "response_format": "b64_json"
         })
-    };
+    }
+}
+
+fn seedream_size(aspect_ratio: Option<&str>) -> &'static str {
+    match aspect_ratio {
+        Some("3:4") => "1728x2304",
+        Some("16:9") => "2560x1440",
+        _ => "2K",
+    }
+}
+
+fn compatible_size(model: &str, aspect_ratio: Option<&str>) -> &'static str {
+    let model = model.to_ascii_lowercase();
+    match (model.as_str(), aspect_ratio) {
+        ("dall-e-2", _) => "1024x1024",
+        ("dall-e-3", Some("3:4")) => "1024x1792",
+        ("dall-e-3", Some("16:9")) => "1792x1024",
+        (_, Some("3:4")) => "1024x1536",
+        (_, Some("16:9")) => "1536x1024",
+        _ => "1024x1024",
+    }
+}
+
+pub async fn generate_image(
+    cfg: &AiProviderConfig,
+    request: &ImageRequest<'_>,
+) -> Result<GeneratedMedia, String> {
+    let endpoint = media_endpoint(cfg, Modality::Image, "images/generations");
+    let body = image_request_body(request);
     let text = post_json_text(cfg, &endpoint, body, "图片生成").await?;
     parse_image_response(cfg, request.model, &endpoint, &text).await
 }
@@ -136,6 +160,39 @@ fn is_seedream_model(model: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seedream_request_keeps_reference_and_explicit_canvas() {
+        let reference = crate::ai::gateway::types::ImageReference {
+            mime: "image/png".into(),
+            base64: "QUJD".into(),
+        };
+        let request = ImageRequest {
+            model: "doubao-seedream-4-5-251128",
+            prompt: "portrait",
+            reference: Some(&reference),
+            aspect_ratio: Some("3:4"),
+        };
+        let body = image_request_body(&request);
+        assert_eq!(body["image"], "data:image/png;base64,QUJD");
+        assert_eq!(body["size"], "1728x2304");
+        let body = image_request_body(&ImageRequest {
+            reference: None,
+            aspect_ratio: Some("16:9"),
+            ..request
+        });
+        assert_eq!(body["size"], "2560x1440");
+        assert!(body.get("image").is_none());
+    }
+
+    #[test]
+    fn compatible_models_use_their_supported_portrait_and_landscape_sizes() {
+        assert_eq!(compatible_size("gpt-image-1", Some("3:4")), "1024x1536");
+        assert_eq!(compatible_size("gpt-image-1", Some("16:9")), "1536x1024");
+        assert_eq!(compatible_size("dall-e-3", Some("3:4")), "1024x1792");
+        assert_eq!(compatible_size("dall-e-3", Some("16:9")), "1792x1024");
+        assert_eq!(compatible_size("dall-e-2", Some("16:9")), "1024x1024");
+    }
 
     #[test]
     fn seedream_detection_is_case_insensitive() {

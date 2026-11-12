@@ -3,8 +3,8 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::story_plan::types::{
-    AssetTaskPlan, BranchGraph, DialogueBeat, FigureCue, FigureCueAction, FigureStagePosition,
-    SceneDraft, ScenePlan,
+    AssetTaskPlan, BeatKind, BranchGraph, DialogueBeat, FigureCue, FigureCueAction,
+    FigureStagePosition, SceneDraft, ScenePlan,
 };
 
 use super::router::contract_error;
@@ -19,12 +19,13 @@ impl Agent for SceneAgent {
         ctx: &'a AgentContext<'a>,
     ) -> Pin<Box<dyn Future<Output = Result<AgentOutput, AgentError>> + Send + 'a>> {
         Box::pin(async move {
-            validate_scene_inputs(
+            validate_scene_inputs_for_target(
                 ctx.scene_plans,
                 ctx.scene_drafts,
                 ctx.branches,
                 ctx.characters,
                 ctx.asset_plan,
+                ctx.target_scene_id,
             )?;
             let by_draft: HashMap<&str, &SceneDraft> = ctx
                 .scene_drafts
@@ -48,7 +49,11 @@ impl Agent for SceneAgent {
                 })
                 .collect();
             let mut scripts = Vec::with_capacity(ctx.scene_plans.len());
-            for scene in ctx.scene_plans {
+            for scene in ctx
+                .scene_plans
+                .iter()
+                .filter(|scene| ctx.target_scene_id.is_none_or(|target| scene.id == target))
+            {
                 let draft = by_draft.get(scene.id.as_str()).ok_or_else(|| {
                     AgentError(format!(
                         "SceneScript is missing draft for scene {}",
@@ -63,8 +68,30 @@ impl Agent for SceneAgent {
                     ),
                     format!("intro:{};", clean(&scene.title)),
                 ];
+                if scene.id == ctx.branches.entry_scene || scene.file == "start.txt" {
+                    for var in ctx.variables {
+                        lines.push(format!("setVar:{}={};", var.id, var.initial_value));
+                    }
+                }
                 if draft.stage_managed {
                     lines.push("; Ollaic Scene Staging".to_string());
+                }
+                if let Some(background) = ctx.asset_plan.iter().find(|task| {
+                    task.kind == "background"
+                        && ctx.scene_plans.iter().any(|source| {
+                            Some(&source.id) == task.scene_ref.as_ref()
+                                && super::asset_planner::shares_background(scene, source)
+                        })
+                }) {
+                    lines.push(format!(
+                        "; {}",
+                        crate::asset_queue::binder::task_marker(&background.id)
+                    ));
+                    // Bind the staged command only after a real background is available.
+                    lines.push(format!(
+                        "; ollaic-background-staging:changeBg:{}.png -next;",
+                        background.target_stem
+                    ));
                 }
                 for beat in &draft.beats {
                     for cue in &beat.figure_cues {
@@ -78,31 +105,7 @@ impl Agent for SceneAgent {
                     .iter()
                     .filter(|edge| edge.from == scene.id)
                     .collect();
-                if outgoing.len() > 1 || outgoing.iter().any(|edge| edge.choice.is_some()) {
-                    let choices = outgoing
-                        .iter()
-                        .map(|edge| {
-                            let label = clean_choice(edge.choice.as_deref().unwrap_or("继续"));
-                            let file = by_file
-                                .get(edge.to.as_str())
-                                .copied()
-                                .expect("validated branch target");
-                            format!("{}:{}", label, file)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("|");
-                    lines.push(format!("choose:{};", choices));
-                } else if let Some(edge) = outgoing.first() {
-                    let file = by_file.get(edge.to.as_str()).copied().ok_or_else(|| {
-                        AgentError(format!(
-                            "SceneScript branch targets unknown scene {}",
-                            edge.to
-                        ))
-                    })?;
-                    lines.push(format!("changeScene:{};", file));
-                } else {
-                    lines.push("end;".to_string());
-                }
+                lines.extend(compile_routes(&outgoing, &by_file)?);
                 let content = lines.join("\n") + "\n";
                 validate_script(&scene.file, &content)?;
                 scripts.push(SceneScript {
@@ -115,12 +118,24 @@ impl Agent for SceneAgent {
     }
 }
 
+#[cfg(test)]
 fn validate_scene_inputs(
     scene_plans: &[ScenePlan],
     drafts: &[SceneDraft],
     branches: &BranchGraph,
     characters: &[crate::characters::types::Character],
     asset_plan: &[AssetTaskPlan],
+) -> Result<(), AgentError> {
+    validate_scene_inputs_for_target(scene_plans, drafts, branches, characters, asset_plan, None)
+}
+
+fn validate_scene_inputs_for_target(
+    scene_plans: &[ScenePlan],
+    drafts: &[SceneDraft],
+    branches: &BranchGraph,
+    characters: &[crate::characters::types::Character],
+    asset_plan: &[AssetTaskPlan],
+    target_scene_id: Option<&str>,
 ) -> Result<(), AgentError> {
     if scene_plans.is_empty() {
         return Err(contract_error("$.scenePlans", "must not be empty"));
@@ -208,7 +223,10 @@ fn validate_scene_inputs(
             }
         }
     }
-    for scene in scene_plans {
+    for scene in scene_plans
+        .iter()
+        .filter(|scene| target_scene_id.is_none_or(|target| scene.id == target))
+    {
         if !draft_ids.contains(scene.id.as_str()) {
             return Err(contract_error(
                 "$.sceneDrafts",
@@ -240,7 +258,7 @@ fn compile_figure_cue(
     }
     let character = &cue.character_id;
     if cue.action == FigureCueAction::Hide {
-        return Ok(vec![format!("changeFigure:none -id={character};")]);
+        return Ok(vec![format!("changeFigure:none -id={character} -next;")]);
     }
     if !crate::story_plan::types::is_webgal_flag_value(&cue.emotion) {
         return Err(AgentError("figure cue has an invalid emotion".to_string()));
@@ -269,7 +287,7 @@ fn compile_figure_cue(
         format!(
             "; {}",
             crate::asset_queue::binder::staged_figure_command(&format!(
-                "changeFigure:none -id={character} -figureCharacter={character} -figureEmotion={} -{position};",
+                "changeFigure:none -id={character} -figureCharacter={character} -figureEmotion={} -{position} -next;",
                 cue.emotion
             ))
         ),
@@ -278,14 +296,132 @@ fn compile_figure_cue(
 
 fn compile_beat(beat: &DialogueBeat) -> String {
     let text = clean(&beat.text);
-    match beat
-        .speaker
-        .as_deref()
-        .map(str::trim)
-        .filter(|speaker| !speaker.is_empty())
-    {
-        Some(speaker) => format!("{}:{};", clean(speaker).replace(':', "："), text),
-        None => format!(":{};", text),
+    match beat.kind {
+        BeatKind::Monologue => {
+            let inner_text = if (text.starts_with('（') && text.ends_with('）'))
+                || (text.starts_with('(') && text.ends_with(')'))
+            {
+                text
+            } else {
+                format!("（{}）", text)
+            };
+            match beat
+                .speaker
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(speaker) => format!("{}:{};", clean(speaker).replace(':', "："), inner_text),
+                None => format!(":{};", inner_text),
+            }
+        }
+        BeatKind::Narration => {
+            format!(":{};", text)
+        }
+        BeatKind::Dialogue => {
+            match beat
+                .speaker
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(speaker) => format!("{}:{};", clean(speaker).replace(':', "："), text),
+                None => format!(":{};", text),
+            }
+        }
+    }
+}
+
+fn compile_routes(
+    outgoing: &[&crate::story_plan::BranchEdge],
+    files: &HashMap<&str, &str>,
+) -> Result<Vec<String>, AgentError> {
+    let mut lines = Vec::new();
+    let target = |edge: &crate::story_plan::BranchEdge| {
+        files.get(edge.to.as_str()).copied().ok_or_else(|| {
+            AgentError(format!(
+                "SceneScript branch targets unknown scene {}",
+                edge.to
+            ))
+        })
+    };
+    let body = |edge: &crate::story_plan::BranchEdge| -> Result<Vec<String>, AgentError> {
+        let mut result: Vec<_> = edge
+            .effects
+            .iter()
+            .map(|effect| format_set_var(effect))
+            .collect();
+        result.push(format!("changeScene:{};", target(edge)?));
+        Ok(result)
+    };
+    let fallback = outgoing
+        .iter()
+        .find(|edge| edge.condition.is_none())
+        .copied();
+    let fallback_body = || -> Result<Vec<String>, AgentError> {
+        fallback.map_or_else(|| Ok(vec!["end;".into()]), &body)
+    };
+    if outgoing.iter().any(|edge| edge.choice.is_some()) {
+        let choices: Vec<_> = outgoing
+            .iter()
+            .enumerate()
+            .map(|(i, edge)| {
+                format!(
+                    "{}:lbl_edge_{i}",
+                    clean_choice(edge.choice.as_deref().unwrap_or("继续"))
+                )
+            })
+            .collect();
+        lines.push(format!("choose:{};", choices.join("|")));
+        for (i, edge) in outgoing.iter().enumerate() {
+            lines.push(format!("label:lbl_edge_{i};"));
+            if let Some(condition) = &edge.condition {
+                lines.push(format!("jumpLabel:lbl_taken_{i} -when={condition};"));
+                lines.extend(fallback_body()?);
+                lines.push(format!("label:lbl_taken_{i};"));
+            }
+            lines.extend(body(edge)?);
+        }
+    } else {
+        for (i, edge) in outgoing
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.condition.is_some())
+        {
+            lines.push(format!(
+                "jumpLabel:lbl_taken_{i} -when={};",
+                edge.condition.as_deref().unwrap()
+            ));
+        }
+        lines.extend(fallback_body()?);
+        for (i, edge) in outgoing
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.condition.is_some())
+        {
+            lines.push(format!("label:lbl_taken_{i};"));
+            lines.extend(body(edge)?);
+        }
+    }
+    Ok(lines)
+}
+
+fn format_set_var(effect: &str) -> String {
+    let trimmed = effect.trim().trim_end_matches(';').trim();
+    if let Some((k, v)) = trimmed.split_once('=') {
+        let lhs = k.trim();
+        if let Some(operator) = lhs
+            .chars()
+            .last()
+            .filter(|op| matches!(op, '+' | '-' | '*' | '/'))
+        {
+            let variable = lhs[..lhs.len() - 1].trim();
+            format!("setVar:{variable}={variable}{operator}({});", v.trim())
+        } else {
+            format!("setVar:{}={};", lhs, v.trim())
+        }
+    } else {
+        format!("setVar:{};", trimmed)
     }
 }
 
@@ -327,28 +463,34 @@ fn validate_script(name: &str, content: &str) -> Result<(), AgentError> {
 mod tests {
     use super::*;
     use crate::story_plan::types::{
-        AssetTaskPlan, BranchEdge, BranchGraph, FigureCue, FigureCueAction, FigureStagePosition,
-        ScenePlan,
+        AssetTaskPlan, BeatKind, BranchEdge, BranchGraph, FigureCue, FigureCueAction,
+        FigureStagePosition, ScenePlan, VariableDef, VariableKind,
     };
 
     #[tokio::test]
     async fn scene_agent_compiles_multiple_linked_webgal_files() {
         let plans = vec![
             ScenePlan {
+                location_id: None,
+                time_of_day: None,
                 id: "opening".into(),
                 file: "start.txt".into(),
                 chapter_id: "ch1".into(),
                 title: "开场".into(),
                 summary: "相遇".into(),
                 character_ids: vec!["heroine".into(), "friend".into()],
+                ..Default::default()
             },
             ScenePlan {
+                location_id: None,
+                time_of_day: None,
                 id: "end".into(),
                 file: "ending.txt".into(),
                 chapter_id: "ch1".into(),
                 title: "结尾".into(),
                 summary: "告别".into(),
                 character_ids: Vec::new(),
+                ..Default::default()
             },
         ];
         let drafts = vec![
@@ -358,6 +500,7 @@ mod tests {
                 stage_managed: true,
                 beats: vec![
                     DialogueBeat {
+                        kind: BeatKind::Dialogue,
                         speaker: Some("林夏".into()),
                         text: "你终于来了。".into(),
                         figure_cues: vec![
@@ -376,6 +519,7 @@ mod tests {
                         ],
                     },
                     DialogueBeat {
+                        kind: BeatKind::Dialogue,
                         speaker: None,
                         text: "她离开了教室。".into(),
                         figure_cues: vec![FigureCue {
@@ -392,6 +536,7 @@ mod tests {
                 title: "结尾".into(),
                 stage_managed: false,
                 beats: vec![DialogueBeat {
+                    kind: BeatKind::Dialogue,
                     speaker: None,
                     text: "天亮了。".into(),
                     figure_cues: Vec::new(),
@@ -404,6 +549,7 @@ mod tests {
                 from: "opening".into(),
                 to: "end".into(),
                 choice: None,
+                ..Default::default()
             }],
         };
         let characters = vec![
@@ -412,6 +558,9 @@ mod tests {
         ];
         let agent = SceneAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
             chat: &crate::agents::router::NoChatGateway,
             prompt: "",
             instruction: "",
@@ -422,9 +571,12 @@ mod tests {
             characters: &characters,
             scene_plans: &plans,
             branches: &branches,
+            variables: &[],
             scene_drafts: &drafts,
             asset_plan: &[
                 AssetTaskPlan {
+                    aspect_ratio: None,
+                    reference_image: None,
                     id: "figure_heroine_default".into(),
                     kind: "figure".into(),
                     target_stem: "heroine_default".into(),
@@ -435,6 +587,8 @@ mod tests {
                     status: "pending".into(),
                 },
                 AssetTaskPlan {
+                    aspect_ratio: None,
+                    reference_image: None,
                     id: "figure_friend_surprised".into(),
                     kind: "figure".into(),
                     target_stem: "friend_surprised".into(),
@@ -456,7 +610,7 @@ mod tests {
             .content
             .contains("; ollaic-asset-task:figure_heroine_default"));
         assert!(scripts[0].content.contains(
-            "; ollaic-figure-staging:changeFigure:none -id=heroine -figureCharacter=heroine -figureEmotion=default -right;"
+            "; ollaic-figure-staging:changeFigure:none -id=heroine -figureCharacter=heroine -figureEmotion=default -right -next;"
         ));
         assert!(
             !scripts[0]
@@ -466,11 +620,11 @@ mod tests {
                     .starts_with("changeFigure:none -id=heroine -figureCharacter=heroine"))
         );
         assert!(scripts[0].content.contains(
-            "; ollaic-figure-staging:changeFigure:none -id=friend -figureCharacter=friend -figureEmotion=surprised -left;"
+            "; ollaic-figure-staging:changeFigure:none -id=friend -figureCharacter=friend -figureEmotion=surprised -left -next;"
         ));
         assert!(scripts[0]
             .content
-            .contains("changeFigure:none -id=heroine;"));
+            .contains("changeFigure:none -id=heroine -next;"));
         assert!(scripts[0].content.contains("changeScene:ending.txt;"));
         assert!(scripts[1].content.contains("end;"));
     }
@@ -478,12 +632,15 @@ mod tests {
     #[test]
     fn scene_input_errors_report_cross_node_paths() {
         let plans = vec![ScenePlan {
+            location_id: None,
+            time_of_day: None,
             id: "opening".into(),
             file: "start.txt".into(),
             chapter_id: "ch1".into(),
             title: "Opening".into(),
             summary: "Summary".into(),
             character_ids: Vec::new(),
+            ..Default::default()
         }];
         let error =
             validate_scene_inputs(&plans, &[], &BranchGraph::default(), &[], &[]).unwrap_err();
@@ -494,6 +651,7 @@ mod tests {
             title: "Opening".into(),
             stage_managed: false,
             beats: vec![DialogueBeat {
+                kind: BeatKind::Dialogue,
                 speaker: None,
                 text: "Text".into(),
                 figure_cues: Vec::new(),
@@ -505,9 +663,389 @@ mod tests {
                 from: "opening".into(),
                 to: "missing".into(),
                 choice: Some("Go".into()),
+                ..Default::default()
             }],
         };
         let error = validate_scene_inputs(&plans, &drafts, &branches, &[], &[]).unwrap_err();
         assert!(error.0.contains("$.branches.edges[0].to"));
+    }
+
+    #[tokio::test]
+    async fn scene_agent_compiles_stateful_trampolines_and_initializes_variables() {
+        let agent = SceneAgent;
+        let variables = vec![
+            VariableDef {
+                id: "linxia_trust".into(),
+                kind: VariableKind::Integer,
+                initial_value: "0".into(),
+                description: "林夏信任度".into(),
+            },
+            VariableDef {
+                id: "protocol_obeyed".into(),
+                kind: VariableKind::Boolean,
+                initial_value: "false".into(),
+                description: "是否遵从协议".into(),
+            },
+        ];
+        let plans = vec![
+            ScenePlan {
+                location_id: Some("lab".into()),
+                time_of_day: Some("night".into()),
+                id: "scene_decision".into(),
+                file: "start.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "抉择".into(),
+                summary: "在暴雨夜做出选择".into(),
+                character_ids: vec!["heroine".into()],
+                ..Default::default()
+            },
+            ScenePlan {
+                location_id: Some("rooftop".into()),
+                time_of_day: Some("dawn".into()),
+                id: "scene_trust_ending".into(),
+                file: "ending_trust.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "信任结局".into(),
+                summary: "共同面对".into(),
+                character_ids: vec!["heroine".into()],
+                ..Default::default()
+            },
+            ScenePlan {
+                location_id: Some("office".into()),
+                time_of_day: Some("morning".into()),
+                id: "scene_depart_ending".into(),
+                file: "ending_depart.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "离别结局".into(),
+                summary: "各自回归".into(),
+                character_ids: vec![],
+                ..Default::default()
+            },
+        ];
+        let drafts = vec![
+            SceneDraft {
+                scene_id: "scene_decision".into(),
+                title: "抉择".into(),
+                stage_managed: false,
+                beats: vec![
+                    DialogueBeat {
+                        kind: BeatKind::Monologue,
+                        speaker: None,
+                        text: "心跳声在胸腔里剧烈震颤。".into(),
+                        figure_cues: vec![],
+                    },
+                    DialogueBeat {
+                        kind: BeatKind::Narration,
+                        speaker: None,
+                        text: "窗外的雷雨撕裂了夜空。".into(),
+                        figure_cues: vec![],
+                    },
+                    DialogueBeat {
+                        kind: BeatKind::Dialogue,
+                        speaker: Some("林夏".into()),
+                        text: "做出你的决定吧。".into(),
+                        figure_cues: vec![],
+                    },
+                ],
+            },
+            SceneDraft {
+                scene_id: "scene_trust_ending".into(),
+                title: "信任结局".into(),
+                stage_managed: false,
+                beats: vec![DialogueBeat {
+                    kind: BeatKind::Dialogue,
+                    speaker: Some("林夏".into()),
+                    text: "谢谢你相信我。".into(),
+                    figure_cues: vec![],
+                }],
+            },
+            SceneDraft {
+                scene_id: "scene_depart_ending".into(),
+                title: "离别结局".into(),
+                stage_managed: false,
+                beats: vec![DialogueBeat {
+                    kind: BeatKind::Dialogue,
+                    speaker: None,
+                    text: "一切回归日常。".into(),
+                    figure_cues: vec![],
+                }],
+            },
+        ];
+        let branches = BranchGraph {
+            entry_scene: "scene_decision".into(),
+            edges: vec![
+                BranchEdge {
+                    from: "scene_decision".into(),
+                    to: "scene_trust_ending".into(),
+                    choice: Some("握紧她的手".into()),
+                    condition: None,
+                    effects: vec!["linxia_trust=linxia_trust+1".into()],
+                },
+                BranchEdge {
+                    from: "scene_decision".into(),
+                    to: "scene_depart_ending".into(),
+                    choice: Some("遵守安全协议".into()),
+                    condition: None,
+                    effects: vec!["protocol_obeyed=true".into()],
+                },
+            ],
+        };
+        let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
+            chat: &crate::agents::router::NoChatGateway,
+            prompt: "抉择时刻",
+            instruction: "",
+            synopsis: "",
+            chapters: &[],
+            worldbook: "",
+            glossary: &Default::default(),
+            characters: &[],
+            scene_plans: &plans,
+            branches: &branches,
+            variables: &variables,
+            scene_drafts: &drafts,
+            asset_plan: &[],
+            allow_local_fallback: true,
+        };
+
+        let AgentOutputPayload::Scenes(scripts) = agent.run(&ctx).await.unwrap().payload else {
+            panic!("Scene Agent must return scene files")
+        };
+
+        let start_script = &scripts[0];
+        assert_eq!(start_script.name, "start.txt");
+
+        // 1. Variable initialization at top of entry scene
+        assert!(start_script.content.contains("setVar:linxia_trust=0;"));
+        assert!(start_script
+            .content
+            .contains("setVar:protocol_obeyed=false;"));
+
+        // 2. Monologue with full-width parentheses
+        assert!(start_script
+            .content
+            .contains("（心跳声在胸腔里剧烈震颤。）;"));
+
+        // 3. Narration formatting
+        assert!(start_script.content.contains(":窗外的雷雨撕裂了夜空。;"));
+
+        // 4. Trampoline choose syntax
+        assert!(start_script
+            .content
+            .contains("choose:握紧她的手:lbl_edge_0|遵守安全协议:lbl_edge_1;"));
+
+        // 5. Trampoline target definitions
+        assert!(start_script.content.contains("label:lbl_edge_0;"));
+        assert!(start_script
+            .content
+            .contains("setVar:linxia_trust=linxia_trust+1;"));
+        assert!(start_script
+            .content
+            .contains("changeScene:ending_trust.txt;"));
+
+        assert!(start_script.content.contains("label:lbl_edge_1;"));
+        assert!(start_script
+            .content
+            .contains("setVar:protocol_obeyed=true;"));
+        assert!(start_script
+            .content
+            .contains("changeScene:ending_depart.txt;"));
+
+        // 6. Roundtrip verify through WebGAL parser
+        let parsed = crate::webgal::parser::parse_script(&start_script.content);
+        assert!(!parsed.is_empty(), "Parsed script nodes must not be empty");
+        assert!(parsed
+            .iter()
+            .any(|n| matches!(n.cmd_type, crate::webgal::types::CommandType::SetVar)));
+        assert!(parsed
+            .iter()
+            .any(|n| matches!(n.cmd_type, crate::webgal::types::CommandType::Choose)));
+        assert!(parsed
+            .iter()
+            .any(|n| matches!(n.cmd_type, crate::webgal::types::CommandType::Label)));
+        assert!(parsed
+            .iter()
+            .any(|n| matches!(n.cmd_type, crate::webgal::types::CommandType::ChangeScene)));
+    }
+
+    #[tokio::test]
+    async fn conditional_choice_without_effects_uses_trampoline_and_emits_fallback_jump() {
+        let agent = SceneAgent;
+        let plans = vec![
+            ScenePlan {
+                id: "decision".into(),
+                file: "start.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "抉择".into(),
+                summary: "分岔".into(),
+                ..Default::default()
+            },
+            ScenePlan {
+                id: "true_end".into(),
+                file: "true_end.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "真结局".into(),
+                summary: "信任".into(),
+                ..Default::default()
+            },
+            ScenePlan {
+                id: "normal_end".into(),
+                file: "normal_end.txt".into(),
+                chapter_id: "ch1".into(),
+                title: "普通结局".into(),
+                summary: "离别".into(),
+                ..Default::default()
+            },
+        ];
+        let drafts = vec![SceneDraft {
+            scene_id: "decision".into(),
+            title: "抉择".into(),
+            stage_managed: false,
+            beats: vec![DialogueBeat {
+                kind: BeatKind::Dialogue,
+                speaker: None,
+                text: "现在必须选了。".into(),
+                figure_cues: vec![],
+            }],
+        }];
+        let branches = BranchGraph {
+            entry_scene: "decision".into(),
+            edges: vec![
+                BranchEdge {
+                    from: "decision".into(),
+                    to: "true_end".into(),
+                    choice: Some("相信她".into()),
+                    condition: Some("linxia_trust>=1".into()),
+                    effects: vec![],
+                },
+                BranchEdge {
+                    from: "decision".into(),
+                    to: "normal_end".into(),
+                    choice: Some("转身离开".into()),
+                    condition: None,
+                    effects: vec![],
+                },
+            ],
+        };
+        let ctx = AgentContext {
+            target_scene_id: Some("decision"),
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
+            chat: &crate::agents::router::NoChatGateway,
+            prompt: "",
+            instruction: "",
+            synopsis: "",
+            chapters: &[],
+            worldbook: "",
+            glossary: &Default::default(),
+            characters: &[],
+            scene_plans: &plans,
+            branches: &branches,
+            variables: &[],
+            scene_drafts: &drafts,
+            asset_plan: &[],
+            allow_local_fallback: true,
+        };
+        let AgentOutputPayload::Scenes(scripts) = agent.run(&ctx).await.unwrap().payload else {
+            panic!("expected scene scripts")
+        };
+        let content = &scripts[0].content;
+        assert!(content.contains("choose:相信她:lbl_edge_0|转身离开:lbl_edge_1;"));
+        assert!(content.contains("label:lbl_edge_0;\njumpLabel:lbl_taken_0 -when=linxia_trust>=1;\nchangeScene:normal_end.txt;\nlabel:lbl_taken_0;\nchangeScene:true_end.txt;"));
+    }
+}
+
+#[cfg(test)]
+mod routing_regressions {
+    use super::*;
+    use crate::story_plan::BranchEdge;
+
+    #[test]
+    fn condition_only_routes_check_before_effects_and_terminate_without_a_fallback() {
+        let edges = [
+            BranchEdge {
+                from: "playground_final".into(),
+                to: "ending_confront".into(),
+                condition: Some("confront_route==true".into()),
+                effects: vec!["trust += 1".into()],
+                ..Default::default()
+            },
+            BranchEdge {
+                from: "playground_final".into(),
+                to: "ending_archive".into(),
+                condition: Some("archive_evidence>=2".into()),
+                ..Default::default()
+            },
+        ];
+        let files = HashMap::from([
+            ("ending_confront", "confront.txt"),
+            ("ending_archive", "archive.txt"),
+        ]);
+        let script = compile_routes(&edges.iter().collect::<Vec<_>>(), &files).unwrap();
+        assert_eq!(
+            script,
+            vec![
+                "jumpLabel:lbl_taken_0 -when=confront_route==true;",
+                "jumpLabel:lbl_taken_1 -when=archive_evidence>=2;",
+                "end;",
+                "label:lbl_taken_0;",
+                "setVar:trust=trust+(1);",
+                "changeScene:confront.txt;",
+                "label:lbl_taken_1;",
+                "changeScene:archive.txt;",
+            ]
+        );
+        let single = compile_routes(&[&edges[0]], &files).unwrap();
+        assert_eq!(single[1], "end;");
+    }
+
+    #[test]
+    fn choice_conditions_precede_both_selected_and_fallback_effects() {
+        let edges = [
+            BranchEdge {
+                to: "yes".into(),
+                choice: Some("Yes".into()),
+                condition: Some("trust>=2".into()),
+                effects: vec!["trust+=1".into()],
+                ..Default::default()
+            },
+            BranchEdge {
+                to: "no".into(),
+                choice: Some("No".into()),
+                effects: vec!["trust=0".into()],
+                ..Default::default()
+            },
+        ];
+        let script = compile_routes(
+            &edges.iter().collect::<Vec<_>>(),
+            &HashMap::from([("yes", "yes.txt"), ("no", "no.txt")]),
+        )
+        .unwrap()
+        .join("\n");
+        assert!(script.contains("label:lbl_edge_0;\njumpLabel:lbl_taken_0 -when=trust>=2;\nsetVar:trust=0;\nchangeScene:no.txt;\nlabel:lbl_taken_0;\nsetVar:trust=trust+(1);"));
+    }
+
+    #[test]
+    fn multiplicative_and_divisive_effects_compile_to_valid_webgal_set_var() {
+        assert_eq!(format_set_var("trust *= 2"), "setVar:trust=trust*(2);");
+        assert_eq!(format_set_var("trust /= 2;"), "setVar:trust=trust/(2);");
+        assert_eq!(
+            format_set_var("trust = trust * 2"),
+            "setVar:trust=trust * 2;"
+        );
+        assert_eq!(
+            format_set_var("trust = trust / 2"),
+            "setVar:trust=trust / 2;"
+        );
+
+        let joined = [format_set_var("trust *= 2"), format_set_var("trust /= 2")].join("\n");
+        let parsed = ollaic_core::webgal::parser::parse_script(&joined);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].var_name.as_deref(), Some("trust"));
+        assert_eq!(parsed[0].var_value.as_deref(), Some("trust*(2)"));
+        assert_eq!(parsed[1].var_name.as_deref(), Some("trust"));
+        assert_eq!(parsed[1].var_value.as_deref(), Some("trust/(2)"));
     }
 }

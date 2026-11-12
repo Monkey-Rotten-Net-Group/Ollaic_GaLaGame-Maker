@@ -10,6 +10,30 @@ update `StoryPlan`.
 Contract errors use JSONPath, for example
 `contract violation at $.sceneDrafts[0].beats[2].speaker: references unknown character`.
 
+## Production Scopes
+
+A run snapshots its scope alongside its recipe. Historical runs without a scope
+retain whole-project behavior. Setup runs build the global plan, cast, and default
+character anchors without drafting scene dialogue. Scene runs identify one existing
+scene ID and execute Dialogist, AssetPlanner, SceneScript, and the asset queue for
+that scene. A populated project is valid for scene production; unknown or approved
+locked scenes are rejected before creating run state.
+
+Scene agents retain the complete branch graph for target resolution. The scheduler
+limits writable output to the selected scene and reads predecessor scripts from
+`game/scene/` immediately before dialogue generation. This context includes saved
+manual edits. An expected compiled predecessor that cannot be read is an error.
+Shared asset definitions are reused, while scene queue execution preserves other
+queue tasks and restricts bindings to the selected scene.
+
+Drafts, tasks, and compiled scene records are upserted by scene ID, task ID, and
+scene filename respectively. Editing a scene retains authored downstream content
+and invalidates the affected scene and reachable dependents. Review status is
+`pending`, `drafted`, `approved`, or `stale`. Approval requires generated dialogue
+and a readable playable script; explicit unlock permits revision. Review state is
+persisted in the StoryPlan and does not replace the actual script as the source
+for continuation.
+
 ## Step Contracts
 
 | Flow Step | Input source | Typed output | Persisted handoff |
@@ -57,7 +81,7 @@ or `-`; scene files are single safe path components ending in `.txt`.
 
 ### Dialogist
 
-- Exactly one unique draft is required for every scene plan; `sceneId` is the
+- Exactly one unique draft is required for every scene plan in the active scope; `sceneId` is the
   reference and a missing historical `title` is filled from the scene plan.
 - Each draft contains at least eight non-empty beats. `speaker` is null or an
   existing character name/alias.
@@ -83,6 +107,27 @@ or `-`; scene files are single safe path components ending in `.txt`.
   to `$.branches.edges[index].to`.
 - Each output has a safe scene filename and terminated WebGAL commands.
 
+### Visual Production
+
+- Optional `visualStyle` fields carry style, negative constraints, palette/lighting,
+  and a project-owned style reference. Historical plans default to an empty style.
+- Figure and background tasks carry `referenceImage` and `aspectRatio`. Character
+  references prefer user uploads (including the historical `game/reference/`
+  location), then the successful raw anchor, then a registered default sprite.
+  Resolved reference files must remain inside the project.
+- Default figures bind before expression variants. Failed defaults block variants
+  even when an older raw anchor exists. Existing user sprites/backgrounds bind
+  without an AI request; generated assets retain task history on resume.
+- Backgrounds share a task only for the same explicit location and time tuple.
+  One shared task can bind each matching scene without duplicating generation.
+- SD WebUI uses img2img with denoising strength 0.45 when conditioning is requested.
+  Seedream and Gemini route supported reference requests explicitly. Unsupported
+  conditioning fails before transport and is reported in Flow preflight.
+- Figure/background requests use portrait/landscape ratios, constrained to each
+  model's supported dimensions. Successful raw anchors are persisted as PNG, and
+  matted figures use a transparent 900 × 1400 canvas with centered, bottom-aligned
+  silhouettes and approximately 8% headroom when the silhouette width permits it.
+
 ### AssetQueue
 
 - Queue schema version is `1`; absent legacy `version`, `limits`, and task
@@ -92,7 +137,7 @@ or `-`; scene files are single safe path components ending in `.txt`.
 - IDs are unique and safe. Figure and TTS fields are validated before save and
   after load. TTS requires `sceneRef`, `dialogueIndex`, and `text`.
 - On same-run recovery, the queue is rederived from the latest plan and scenes.
-  Semantically identical succeeded tasks are rebound, while `running`,
+  Semantically identical succeeded tasks are rebound within the active scope, while `running`,
   `retrying`, and other unfinished tasks return to `pending` with their attempt
   history retained. Changed or missing promoted assets regenerate.
 

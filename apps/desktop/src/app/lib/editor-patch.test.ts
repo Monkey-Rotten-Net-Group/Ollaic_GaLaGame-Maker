@@ -65,6 +65,15 @@ describe('normalizePatchText', () => {
   it('normalizes CRLF and trims trailing whitespace lines', () => {
     expect(normalizePatchText('a;\r\nb;\r\n')).toBe('a;\nb;');
   });
+
+  it('expands compound setVar arithmetic into valid WebGAL expressions', () => {
+    expect(normalizePatchText('setVar:trust *= 2')).toBe('setVar:trust=trust*(2);');
+    expect(normalizePatchText('setVar:trust /= 2 -when=trust>0;')).toBe(
+      'setVar:trust=trust/(2) -when=trust>0;',
+    );
+    expect(normalizePatchText('setVar:trust+=1;')).toBe('setVar:trust=trust+(1);');
+    expect(normalizePatchText('setVar:trust=trust*2;')).toBe('setVar:trust=trust*2;');
+  });
 });
 
 describe('validatePatchText', () => {
@@ -85,6 +94,14 @@ describe('validatePatchText', () => {
   it('accepts bare WebGAL asset commands', () => {
     expect(validatePatchText('changeBg:room.webp -next;')).toEqual([]);
     expect(validatePatchText('changeFigure:hero.webp -figureCharacter=静香 -figureEmotion=默认 -left -next;')).toEqual([]);
+  });
+
+  it('accepts arithmetic setVar expressions and rejects malformed setVar lines', () => {
+    expect(validatePatchText('setVar:score=score*2;')).toEqual([]);
+    expect(validatePatchText('setVar:score=score/2;')).toEqual([]);
+    expect(validatePatchText('setVar:score*=2;')).toEqual([]);
+    expect(validatePatchText('setVar:score;')).toHaveLength(1);
+    expect(validatePatchText('setVar:分数*=2;')).toHaveLength(1);
   });
 });
 

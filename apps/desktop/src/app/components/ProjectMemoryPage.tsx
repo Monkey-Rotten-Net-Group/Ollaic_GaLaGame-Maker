@@ -127,12 +127,12 @@ export function ProjectMemoryPage() {
   };
 
   const canEdit = !!projectPath && loaded && !loading && !busy;
-  const controlClass = 'min-w-0 rounded-md border border-border bg-surface-container-lowest px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
+  const controlClass = 'min-w-0 rounded-md border border-border bg-surface-container-lowest px-3 py-2 text-sm';
 
   return (
-    <div className="min-h-screen bg-surface-container-lowest text-foreground">
+    <div className="story-shell min-h-screen bg-surface-container-lowest text-foreground">
       <OllaicTopBar projectId={projectId} activeSection="edit" title="项目记忆" />
-      <main className="min-w-0 pt-16">
+      <main className="min-w-0 pt-[var(--workspace-topbar-height)]">
         <div className="mx-auto max-w-5xl px-4 py-6 sm:px-8 sm:py-8">
           <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
             <div className="flex min-w-0 items-center gap-3">
@@ -157,7 +157,7 @@ export function ProjectMemoryPage() {
           ) : (
             <>
               <div className="flex flex-wrap gap-2 py-4">
-                <label className={`flex basis-full items-center gap-2 sm:flex-1 ${controlClass}`}>
+                <label className={`focus-ring-within flex basis-full items-center gap-2 sm:flex-1 ${controlClass}`}>
                   <Search className="size-4 shrink-0 text-muted-foreground" />
                   <input className="min-w-0 flex-1 bg-transparent outline-none" aria-label="搜索记忆" placeholder="搜索记忆..." value={query} onChange={(event) => setQuery(event.target.value)} />
                 </label>

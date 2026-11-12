@@ -181,6 +181,36 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
             format!("references unknown scene: {}", plan.branches.entry_scene),
         );
     }
+    let mut variable_ids: HashSet<&str> = HashSet::new();
+    for (index, var) in plan.variables.iter().enumerate() {
+        let path = format!("$.variables[{index}]");
+        if !is_safe_variable_id(&var.id) {
+            return invalid(format!("{path}.id"), "must be a safe variable identifier");
+        }
+        if !variable_ids.insert(var.id.as_str()) {
+            return invalid(format!("{path}.id"), "must be unique");
+        }
+        match var.kind {
+            crate::story_plan::types::VariableKind::Integer => {
+                if var.initial_value.trim().parse::<i64>().is_err() {
+                    return invalid(
+                        format!("{path}.initialValue"),
+                        format!("invalid integer initial value: {}", var.initial_value),
+                    );
+                }
+            }
+            crate::story_plan::types::VariableKind::Boolean => {
+                if !matches!(var.initial_value.trim(), "true" | "false") {
+                    return invalid(
+                        format!("{path}.initialValue"),
+                        format!("invalid boolean initial value: {}", var.initial_value),
+                    );
+                }
+            }
+        }
+    }
+    let mut written_variables: HashSet<String> = HashSet::new();
+    let mut read_variables: HashSet<String> = HashSet::new();
     for (index, edge) in plan.branches.edges.iter().enumerate() {
         for (field, id) in [("from", &edge.from), ("to", &edge.to)] {
             if !scene_ids.contains(id.as_str()) {
@@ -190,7 +220,54 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
                 );
             }
         }
+        if let Some(condition) = &edge.condition {
+            if !is_safe_branch_expression(condition) {
+                return invalid(
+                    format!("$.branches.edges[{index}].condition"),
+                    "must not be empty",
+                );
+            }
+            let condition_vars = extract_condition_variables(condition);
+            for var in condition_vars {
+                if !variable_ids.contains(var.as_str()) {
+                    return invalid(
+                        format!("$.branches.edges[{index}].condition"),
+                        format!("references undefined variable: {var}"),
+                    );
+                }
+                read_variables.insert(var);
+            }
+        }
+        for (effect_index, effect) in edge.effects.iter().enumerate() {
+            let effect_path = format!("$.branches.edges[{index}].effects[{effect_index}]");
+            if effect.trim().is_empty() {
+                return invalid(effect_path, "must not be empty");
+            }
+            let Some(target_var) = extract_effect_variable(effect) else {
+                return invalid(
+                    effect_path,
+                    "must be an assignment to a valid variable (e.g. var=expr)",
+                );
+            };
+            if !variable_ids.contains(target_var.as_str()) {
+                return invalid(
+                    effect_path,
+                    format!("writes to undefined variable: {target_var}"),
+                );
+            }
+            written_variables.insert(target_var);
+        }
     }
+    for var in &read_variables {
+        if !written_variables.contains(var) {
+            return invalid(
+                "$.branches",
+                format!("variable '{var}' is read in a condition but never written in any branch effect"),
+            );
+        }
+    }
+    // In-progress and legacy plans may contain disconnected or unnamed terminal scenes.
+    // Complete graph lint belongs to the Outline output contract.
     let mut character_ids: HashSet<&str> = HashSet::new();
     for (index, character) in plan.characters.iter().enumerate() {
         let path = format!("$.characters[{index}]");
@@ -351,6 +428,16 @@ pub fn validate(plan: &StoryPlan) -> Result<(), PlanError> {
             );
         }
     }
+    for (index, scene) in plan.scene_plans.iter().enumerate() {
+        if scene.approval_status == crate::story_plan::types::SceneApprovalStatus::Approved
+            && (!plan.scenes.contains(&scene.file) || !draft_ids.contains(scene.id.as_str()))
+        {
+            return invalid(
+                format!("$.scenePlans[{index}].approvalStatus"),
+                "approved scenes require a compiled scene and dialogue draft",
+            );
+        }
+    }
     Ok(())
 }
 
@@ -387,6 +474,94 @@ fn is_safe_scene_file(file: &str) -> bool {
             .file_name()
             .and_then(|name| name.to_str())
             == Some(file)
+}
+
+pub(crate) fn is_safe_variable_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {
+            chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn extract_condition_variables(condition: &str) -> Vec<String> {
+    let mut vars = Vec::new();
+    let mut current = String::new();
+    for ch in condition.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch);
+        } else if !current.is_empty() {
+            if !current.chars().next().unwrap().is_ascii_digit()
+                && current != "true"
+                && current != "false"
+            {
+                vars.push(current.clone());
+            }
+            current.clear();
+        }
+    }
+    if !current.is_empty()
+        && !current.chars().next().unwrap().is_ascii_digit()
+        && current != "true"
+        && current != "false"
+    {
+        vars.push(current);
+    }
+    vars.sort();
+    vars.dedup();
+    vars
+}
+
+pub(crate) fn is_safe_branch_expression(expression: &str) -> bool {
+    if expression.trim().is_empty()
+        || expression.contains([';', '\r', '\n'])
+        || expression.split(" -").skip(1).any(|rest| {
+            rest.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        })
+    {
+        return false;
+    }
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in expression.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if ch == '\\' {
+                escaped = true;
+            } else if ch == delimiter {
+                quote = None;
+            }
+        } else if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+        } else if !ch.is_ascii()
+            || !(ch.is_ascii_alphanumeric()
+                || ch.is_ascii_whitespace()
+                || "_+-*/%().<>=!&|".contains(ch))
+        {
+            return false;
+        }
+    }
+    quote.is_none() && !escaped
+}
+
+pub(crate) fn extract_effect_variable(effect: &str) -> Option<String> {
+    if !is_safe_branch_expression(effect) {
+        return None;
+    }
+    let (lhs, rhs) = effect.split_once('=')?;
+    if rhs.trim().is_empty() || rhs.trim_start().starts_with('=') {
+        return None;
+    }
+    let lhs = lhs.trim();
+    let var = lhs.strip_suffix(['+', '-', '*', '/']).unwrap_or(lhs).trim();
+    is_safe_variable_id(var).then(|| var.to_string())
 }
 
 #[derive(Debug, Clone, PartialEq)]

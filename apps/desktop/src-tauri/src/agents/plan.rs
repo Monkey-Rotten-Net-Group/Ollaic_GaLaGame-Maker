@@ -79,6 +79,9 @@ mod tests {
     async fn plan_agent_produces_synopsis_from_prompt() {
         let agent = PlanAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
             chat: &crate::agents::router::NoChatGateway,
             prompt: "赛博朋克校园恋爱",
             instruction: "",
@@ -89,6 +92,7 @@ mod tests {
             characters: &[],
             scene_plans: &[],
             branches: &Default::default(),
+            variables: &[],
             scene_drafts: &[],
             asset_plan: &[],
             allow_local_fallback: true,
@@ -104,6 +108,9 @@ mod tests {
     async fn plan_agent_rejects_empty_prompt() {
         let agent = PlanAgent;
         let ctx = AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
+            visual_style: &Default::default(),
             chat: &crate::agents::router::NoChatGateway,
             prompt: "   ",
             instruction: "",
@@ -114,6 +121,7 @@ mod tests {
             characters: &[],
             scene_plans: &[],
             branches: &Default::default(),
+            variables: &[],
             scene_drafts: &[],
             asset_plan: &[],
             allow_local_fallback: true,

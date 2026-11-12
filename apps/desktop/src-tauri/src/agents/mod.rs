@@ -3,6 +3,7 @@
 //! without an LLM (ADR 0056). P1 agents use the configured `genai` provider
 //! and expose an explicit local fallback when no chat model is configured.
 
+mod anchor_planner;
 pub mod asset_planner;
 pub mod character;
 pub mod dialogist;
@@ -34,6 +35,8 @@ pub use scene::SceneAgent;
 /// The slice of StoryPlan context an Agent may read. Grows per slice as new
 /// agents need more context (worldbook, characters, branches, ...).
 pub struct AgentContext<'a> {
+    pub target_scene_id: Option<&'a str>,
+    pub preceding_scene_tail: &'a str,
     pub chat: &'a dyn router::ChatGateway,
     /// The immutable Production Brief that owns the run.
     pub prompt: &'a str,
@@ -46,8 +49,10 @@ pub struct AgentContext<'a> {
     pub characters: &'a [Character],
     pub scene_plans: &'a [ScenePlan],
     pub branches: &'a BranchGraph,
+    pub variables: &'a [crate::story_plan::types::VariableDef],
     pub scene_drafts: &'a [SceneDraft],
     pub asset_plan: &'a [AssetTaskPlan],
+    pub visual_style: &'a crate::story_plan::types::VisualStyleSpec,
     pub allow_local_fallback: bool,
 }
 
@@ -66,6 +71,8 @@ pub enum AgentOutputPayload {
         chapters: Vec<ChapterPlan>,
         scene_plans: Vec<ScenePlan>,
         branches: BranchGraph,
+        #[serde(default)]
+        variables: Vec<crate::story_plan::types::VariableDef>,
     },
     Characters(Vec<Character>),
     SceneDrafts(Vec<SceneDraft>),
@@ -199,6 +206,10 @@ impl AgentRegistry {
         registry.register(StepKind::Scene, Box::new(SceneAgent));
         registry.register_named("dialogist", Box::new(DialogistAgent));
         registry.register_named("assetPlanner", Box::new(AssetPlannerAgent));
+        registry.register_named(
+            "anchorPlanner",
+            Box::new(anchor_planner::AnchorPlannerAgent),
+        );
         registry.register_named("sceneScript", Box::new(SceneAgent));
         registry
     }

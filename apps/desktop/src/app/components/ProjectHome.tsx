@@ -33,7 +33,9 @@ import {
   type ProjectStorage,
 } from '../lib/webgal-ipc';
 import { AppSettingsDialog, loadAppSettings } from './AppSettingsDialog';
+import { saveAppTheme, type AppSettings } from '../lib/app-settings';
 import { saveProjectMemory } from '../lib/project-memory';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
 import './ProjectHome.css';
 
 export interface Project {
@@ -54,8 +56,6 @@ type SeedColor = 'violet' | 'crimson' | 'teal' | 'amber';
 
 const PROJECTS_STORAGE_KEY = 'webgal-projects';
 const SEED_STORAGE_KEY = 'ollaic:ph-seed-color-v3';
-
-const HOME_THEME_STORAGE_KEY = 'ollaic-home-theme';
 
 function loadProjectsFromStorage(): Project[] {
   try {
@@ -249,6 +249,7 @@ export function ProjectHome() {
   const navigate = useNavigate();
 
   const [projects, setProjects] = useState<Project[]>(() => loadProjectsFromStorage());
+  const { confirm, confirmDialog } = useConfirmDialog();
   const projectsRef = useRef<Project[]>(projects);
 
   const updateProjects = (updater: (prev: Project[]) => Project[]) => {
@@ -268,21 +269,19 @@ export function ProjectHome() {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [isDark, setIsDark] = useState(() => {
+  // The home page follows the app-wide theme; its toggle writes the app setting.
+  const [theme, setTheme] = useState<AppSettings['theme']>(() => loadAppSettings().theme);
+  const isDark = theme === 'dark';
+  const toggleTheme = () => {
+    const next = isDark ? 'light' : 'dark';
     try {
-      return window.localStorage.getItem(HOME_THEME_STORAGE_KEY) === 'dark';
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(HOME_THEME_STORAGE_KEY, isDark ? 'dark' : 'light');
+      setTheme(saveAppTheme(next).theme);
     } catch {
       // Keep theme switching available when browser storage is unavailable.
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      setTheme(next);
     }
-  }, [isDark]);
+  };
 
   // Default seed is soft violet (matching the airy screenshot), with crimson/teal/amber one click away
   const [seedColor, setSeedColor] = useState<SeedColor>(() => {
@@ -566,7 +565,14 @@ export function ProjectHome() {
     updateProjects((prev) => prev.map((p) => (p.id === project.id ? { ...p, deleted: false } : p)));
   };
 
-  const handlePermanentDelete = (project: Project) => {
+  const handlePermanentDelete = async (project: Project) => {
+    const confirmed = await confirm({
+      title: '彻底移除项目？',
+      description: `「${project.name}」将从项目列表中永久移除，无法从回收站还原。磁盘上的项目文件夹不会被删除。`,
+      confirmLabel: '彻底移除',
+      destructive: true,
+    });
+    if (!confirmed) return;
     updateProjects((prev) => prev.filter((p) => p.id !== project.id));
     window.localStorage.removeItem(`project-path-${project.id}`);
   };
@@ -673,7 +679,7 @@ export function ProjectHome() {
         );
         return;
       }
-      navigate(`/editor/${id}?agent=workflow`);
+      navigate(`/editor/${id}?view=workflow`);
     } catch (error) {
       setCreateError(`无法创建项目：${String(error)}`);
     } finally {
@@ -843,7 +849,7 @@ export function ProjectHome() {
           <button
             type="button"
             className="ph-theme-btn"
-            onClick={() => setIsDark((d) => !d)}
+            onClick={toggleTheme}
             aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
             title={isDark ? '切换到浅色模式' : '切换到深色模式'}
           >
@@ -1127,7 +1133,7 @@ export function ProjectHome() {
                             aria-label={`永久移除 ${project.name}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              handlePermanentDelete(project);
+                              void handlePermanentDelete(project);
                             }}
                           >
                             <Trash2 size={12} />
@@ -1376,9 +1382,10 @@ export function ProjectHome() {
         onClose={() => setAppSettingsOpen(false)}
         onSaved={(settings) => {
           setSeedColor(settings.seedColor);
-          setIsDark(settings.theme === 'dark');
+          setTheme(settings.theme);
         }}
       />
+      {confirmDialog}
     </div>
   );
 }

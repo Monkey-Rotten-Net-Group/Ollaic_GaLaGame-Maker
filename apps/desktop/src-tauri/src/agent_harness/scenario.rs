@@ -46,6 +46,8 @@ impl Scenario {
     /// Borrow this scenario as the context the Flow would hand the agent.
     pub fn context<'a>(&'a self, chat: &'a dyn ChatGateway) -> AgentContext<'a> {
         AgentContext {
+            target_scene_id: None,
+            preceding_scene_tail: "",
             chat,
             prompt: &self.brief,
             instruction: &self.instruction,
@@ -56,8 +58,10 @@ impl Scenario {
             characters: &self.plan.characters,
             scene_plans: &self.plan.scene_plans,
             branches: &self.plan.branches,
+            variables: &self.plan.variables,
             scene_drafts: &self.plan.scene_drafts,
             asset_plan: &self.plan.asset_plan,
+            visual_style: &self.plan.visual_style,
             allow_local_fallback: self.allow_local_fallback,
         }
     }

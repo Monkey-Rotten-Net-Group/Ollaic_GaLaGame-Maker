@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Image, Search, Loader2, Music, Volume2 } from 'lucide-react';
+import { Image, Search, Loader2, Music, Volume2, FolderOpen, Video } from 'lucide-react';
 import { listAssets, type AssetInfo } from '../lib/assets-ipc';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -104,6 +104,8 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
   };
 
   const imageLike = ['background', 'figure'].includes(category);
+  const isAudioCategory = ['bgm', 'vocal'].includes(category);
+  const CategoryIcon = isAudioCategory ? Music : category === 'video' ? Video : imageLike ? Image : FolderOpen;
 
   return (
     <>
@@ -114,7 +116,7 @@ export function AssetPickerButton({ projectPath, category, currentValue, onSelec
         title="浏览素材库"
         aria-label="浏览素材库"
       >
-        <Image className="w-3 h-3" />
+        <CategoryIcon className="w-3 h-3 text-muted-foreground" />
         浏览
       </button>
 

@@ -115,10 +115,9 @@ describe('FullScreenWorldline', () => {
 });
 
 describe('OllaicTopBar navigation integration', () => {
-  it('unifies production, scripts and scenes under editing', () => {
-    render(<MemoryRouter><OllaicTopBar activeSection="edit" projectId="test-proj" /></MemoryRouter>);
-    expect(screen.getByRole('button', { name: '编辑' })).toHaveAttribute('aria-current', 'page');
+  it('keeps the topbar focused on global application identity', () => {
+    render(<MemoryRouter><OllaicTopBar projectId="test-proj" /></MemoryRouter>);
+    expect(screen.getByRole('button', { name: /Ollaic GalGame Studio/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /生产流|脚本流|^场景$/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /资源库/ })).toBeInTheDocument();
   });
 });

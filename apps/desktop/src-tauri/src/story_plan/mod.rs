@@ -11,8 +11,9 @@ pub mod types;
 pub use store::{load_plan, plan_path, remove_plan, save_plan, validate, PlanError};
 #[allow(unused_imports)]
 pub use types::{
-    AssetTaskPlan, BranchEdge, BranchGraph, ChapterPlan, DialogueBeat, FigureCue, FigureCueAction,
-    FigureStagePosition, PipelineRunSummary, SceneDraft, ScenePlan, StoryPlan,
+    AssetTaskPlan, BeatKind, BranchEdge, BranchGraph, ChapterPlan, DialogueBeat, FigureCue,
+    FigureCueAction, FigureStagePosition, PipelineRunSummary, SceneDraft, ScenePlan, StoryPlan,
+    VariableDef, VariableKind,
 };
 
 #[cfg(test)]

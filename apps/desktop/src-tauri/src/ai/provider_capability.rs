@@ -54,13 +54,16 @@ pub enum RequiredCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaCapability {
     ImageGeneration,
+    ReferenceImageConditioning,
     TtsGeneration,
 }
 
 impl MediaCapability {
     fn modality(self) -> Modality {
         match self {
-            MediaCapability::ImageGeneration => Modality::Image,
+            MediaCapability::ImageGeneration | MediaCapability::ReferenceImageConditioning => {
+                Modality::Image
+            }
             MediaCapability::TtsGeneration => Modality::Tts,
         }
     }
@@ -68,6 +71,7 @@ impl MediaCapability {
     fn label(self) -> &'static str {
         match self {
             MediaCapability::ImageGeneration => "图片生成",
+            MediaCapability::ReferenceImageConditioning => "参考图垫图",
             MediaCapability::TtsGeneration => "语音生成",
         }
     }
@@ -93,7 +97,40 @@ pub fn require_media_capability(
             config.provider.trim()
         ));
     }
+    if required == MediaCapability::ReferenceImageConditioning {
+        require_reference_image_capability(config, &config.model)?;
+    }
     Ok(())
+}
+
+/// Only advertise conditioning protocols actually implemented by the adaptors.
+/// A generic OpenAI-compatible endpoint is not evidence of image-edit support.
+pub fn supports_reference_image(provider: &str, model: &str) -> bool {
+    let provider = provider.trim().to_ascii_lowercase();
+    let model = model.trim().to_ascii_lowercase();
+    if registry::modality_spec(&provider, Modality::Image).is_none() {
+        return false;
+    }
+    match provider.as_str() {
+        "sd-webui" => true,
+        "minimax" => matches!(model.as_str(), "image-01" | "image-01-live"),
+        "gemini" => model.starts_with("gemini-") && model.contains("image"),
+        "openai" | "custom" | "zhipu" | "siliconflow" | "midjourney" | "volcengine" => {
+            model.contains("seedream-4") || model.contains("seedream-5")
+        }
+        _ => false,
+    }
+}
+
+pub fn require_reference_image_capability(
+    config: &AiProviderConfig,
+    model: &str,
+) -> Result<(), String> {
+    if supports_reference_image(&config.provider, model) {
+        Ok(())
+    } else {
+        Err("当前图片模型不支持参考图垫图，角色不同表情可能出现长相漂移；建议切换至 Gemini、Seedream 或 SD WebUI。".to_string())
+    }
 }
 
 impl ProviderCapability {
@@ -238,6 +275,50 @@ mod tests {
             base_url: String::new(),
             capabilities: None,
         }
+    }
+
+    #[test]
+    fn conditioning_is_limited_to_implemented_provider_model_protocols() {
+        for (provider, model, expected) in [
+            ("sd-webui", "checkpoint", true),
+            ("gemini", "gemini-3-pro-image-preview", true),
+            ("gemini", "imagen-4.0-generate-001", false),
+            ("volcengine", "doubao-seedream-4-5-251128", true),
+            ("volcengine", "doubao-seedream-3-0-t2i-250415", false),
+            ("custom", "doubao-seedream-5-0-lite", true),
+            ("custom", "image-model", false),
+            ("openai", "dall-e-3", false),
+            ("minimax", "image-01", true),
+            ("minimax", "image-01-live", true),
+            ("minimax", "MiniMax-M3", false),
+            ("unknown", "doubao-seedream-4-5", false),
+        ] {
+            assert_eq!(
+                supports_reference_image(provider, model),
+                expected,
+                "{provider}/{model}"
+            );
+        }
+        assert!(supports_reference_image("  SD-WEBUI ", "checkpoint"));
+    }
+
+    #[test]
+    fn reference_capability_uses_the_effective_request_model() {
+        let mut cfg = AiProviderConfig {
+            provider: "gemini".into(),
+            model: "imagen-4.0-generate-001".into(),
+            models: vec![],
+            api_key: "key".into(),
+            base_url: String::new(),
+        };
+        assert!(
+            require_media_capability(&cfg, MediaCapability::ReferenceImageConditioning).is_err()
+        );
+        assert!(require_reference_image_capability(&cfg, "gemini-3-pro-image-preview").is_ok());
+        cfg.model = "gemini-3-pro-image-preview".into();
+        assert!(
+            require_media_capability(&cfg, MediaCapability::ReferenceImageConditioning).is_ok()
+        );
     }
 
     /// The settings pickers are generated from the registry, so anything a

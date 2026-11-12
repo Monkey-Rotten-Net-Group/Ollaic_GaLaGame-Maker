@@ -1,37 +1,62 @@
 {
-  "completionTokens": 2508,
+  "completionTokens": 13432,
   "data": {
     "branches": {
       "edges": [
         {
           "choice": null,
+          "condition": null,
+          "effects": [
+            "heard_echo=true"
+          ],
           "from": "opening",
-          "to": "corridor_echo"
+          "to": "corridor"
         },
         {
-          "choice": "向少女追问回声的来历",
-          "from": "corridor_echo",
-          "to": "rooftop_girl"
+          "choice": "跟苏晚去广播室找录音",
+          "condition": null,
+          "effects": [
+            "linxia_trust+=1"
+          ],
+          "from": "corridor",
+          "to": "broadcast_room"
         },
         {
-          "choice": "独自去档案室查旧校舍记录",
-          "from": "corridor_echo",
+          "choice": null,
+          "condition": null,
+          "effects": [
+            "has_recording=true"
+          ],
+          "from": "broadcast_room",
           "to": "archive_room"
         },
         {
           "choice": null,
-          "from": "rooftop_girl",
-          "to": "demolition_eve"
-        },
-        {
-          "choice": null,
+          "condition": null,
+          "effects": [
+            "silence_pact_aware=true"
+          ],
           "from": "archive_room",
-          "to": "demolition_eve"
+          "to": "rooftop_decision"
         },
         {
-          "choice": null,
-          "from": "demolition_eve",
-          "to": "echo_answer"
+          "choice": "公开录音，让回声成为证词",
+          "condition": "has_recording == true",
+          "effects": [
+            "knew_truth=true",
+            "linxia_trust+=1"
+          ],
+          "from": "rooftop_decision",
+          "to": "reveal_ending"
+        },
+        {
+          "choice": "删掉录音，把秘密留在夏天",
+          "condition": "linxia_trust >= 1",
+          "effects": [
+            "linxia_trust-=1"
+          ],
+          "from": "rooftop_decision",
+          "to": "silence_ending"
         }
       ],
       "entryScene": "opening"
@@ -39,88 +64,296 @@
     "chapters": [
       {
         "id": "ch1",
-        "summary": "转学生江遇在夏末转入沿海高中，听见旧校舍传来只有自己能捕捉的回声，并被学生会长警告远离那里。",
-        "title": "蝉鸣与封条"
+        "summary": "转学生林夏在旧校舍拆除前误入封锁走廊，听见不属于当下的广播回声，并遇见似乎早有准备的苏晚。两人从试探走向第一次合作，但苏晚仍在隐瞒关键事实。",
+        "title": "蝉鸣与回声"
       },
       {
         "id": "ch2",
-        "summary": "江遇结识在旧校舍天台独处的少女林默，发现她似乎知道十年前事故的隐情，而校方正在用静默协议掩盖真相。",
+        "summary": "林夏与苏晚潜入广播室和档案室，找到旧磁带与校方封口文件；林夏发现苏晚与旧校舍事故有私人牵连，信任开始动摇。",
         "title": "静默协议"
       },
       {
         "id": "ch3",
-        "summary": "旧校舍拆除前夜，两人必须决定是否公开回声的来历，让被掩埋的夏天得到答案。",
-        "title": "拆毁之前"
+        "summary": "台风逼近，拆除倒计时归零前，两人在天台面对最后一卷录音。林夏必须在公开真相、保护苏晚与让回声消失之间做出选择。",
+        "title": "夏末删除键"
       }
     ],
     "scene_plans": [
       {
+        "approvalStatus": "pending",
         "chapterId": "ch1",
         "characterIds": [
-          "protagonist"
+          "linxia",
+          "suwan"
+        ],
+        "emotionalArc": "闷热午后的好奇到听见回声的毛骨悚然，再到被陌生人搭救的戒备。",
+        "entryState": [
+          "林夏刚转入沿海高中第三天",
+          "尚未进入旧校舍内部",
+          "has_recording == false",
+          "linxia_trust == 0"
         ],
         "file": "start.txt",
+        "forbiddenReveals": [
+          "不得揭示回声是录音残留",
+          "不得点明苏晚与事故死者的关系",
+          "不得揭露静默协议存在"
+        ],
         "id": "opening",
-        "summary": "江遇第一天转学，在午休时听见旧校舍方向传来不该存在的呼唤，循声走向被封十年的入口。",
-        "title": "旧校舍的回声"
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "林夏为躲雨抄近路靠近旧校舍",
+          "广播回声念出林夏名字与旧日期",
+          "苏晚突然出现将她拉离",
+          "林夏追问时苏晚只承认“你不该听见”"
+        ],
+        "rollingSummary": null,
+        "summary": "林夏在放学后绕近路穿过旧校舍外廊，拆除告示被海风吹得翻卷；她听见广播里有人用十年前的日期叫她名字，随后被苏晚拉离险处。",
+        "timeOfDay": null,
+        "title": "封锁线内的回声"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch1",
         "characterIds": [
-          "protagonist"
+          "linxia",
+          "suwan",
+          "teacher_zhou"
+        ],
+        "emotionalArc": "戒备到试探，再因共同秘密产生微弱信任。",
+        "entryState": [
+          "heard_echo == true",
+          "林夏已听见广播回声",
+          "苏晚对林夏保持距离"
         ],
         "file": "corridor.txt",
-        "id": "corridor_echo",
-        "summary": "江遇穿过警戒线，在旧校舍走廊听见回声重复一个名字，并在墙缝里发现半张旧照片。",
-        "title": "走廊尽头"
+        "forbiddenReveals": [
+          "不得解释回声为何只有林夏能听见",
+          "不得展示静默协议文件",
+          "不得说出十年前事故的结论"
+        ],
+        "id": "corridor",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "苏晚带林夏穿过封条走廊",
+          "周老师巡查逼近，两人躲进器材间",
+          "林夏发现苏晚知道广播时间表",
+          "苏晚提出去广播室找录音"
+        ],
+        "rollingSummary": null,
+        "summary": "苏晚带林夏绕开巡查老师，解释旧校舍即将拆除；林夏发现苏晚对广播时间表异常熟悉，并提出一起找声源。",
+        "timeOfDay": null,
+        "title": "走廊尽头的苏晚"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch2",
         "characterIds": [
-          "protagonist",
-          "girl"
+          "linxia",
+          "suwan"
         ],
-        "file": "rooftop.txt",
-        "id": "rooftop_girl",
-        "summary": "江遇遇到独来独往的林默，她承认自己也能听见回声，并警告他静默协议仍在生效。",
-        "title": "天台上的少女"
+        "emotionalArc": "期待到确认回声存在的兴奋，再因苏晚崩溃产生怀疑。",
+        "entryState": [
+          "linxia_trust >= 1",
+          "林夏与苏晚暂时合作",
+          "has_recording == false"
+        ],
+        "file": "broadcast_room.txt",
+        "forbiddenReveals": [
+          "不得说明磁带女声的身份",
+          "不得揭示事故当晚发生了什么",
+          "不得揭露静默协议的签署者"
+        ],
+        "id": "broadcast_room",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "进入积灰的广播室",
+          "找到待销毁磁带并播放",
+          "女声与回声重叠，林夏确认关联",
+          "苏晚情绪失控却拒绝解释"
+        ],
+        "rollingSummary": null,
+        "summary": "两人撬开广播室，找到一盒标注“待销毁”的旧磁带；林夏播放磁带，回声与磁带中的女声重叠，苏晚情绪失控后否认知道更多。",
+        "timeOfDay": null,
+        "title": "广播室的旧磁带"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch2",
         "characterIds": [
-          "protagonist",
-          "friend"
+          "linxia",
+          "suwan"
         ],
-        "file": "archive.txt",
+        "emotionalArc": "发现线索的紧张，到读到协议的愤怒，再到对苏晚隐瞒的失望。",
+        "entryState": [
+          "has_recording == true",
+          "林夏已取得旧磁带",
+          "silence_pact_aware == false"
+        ],
+        "file": "archive_room.txt",
+        "forbiddenReveals": [
+          "不得展示协议中事故责任人的姓名",
+          "不得说明死者人数与具体经过",
+          "不得揭示苏晚就是回声源之一"
+        ],
         "id": "archive_room",
-        "summary": "江遇潜入档案室，查到十年前事故记录被抽走，只留下“静默协议”印章和一张社团合照。",
-        "title": "档案室的静默"
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "用磁带编号找到档案柜",
+          "发现静默协议与拆除倒计时",
+          "苏晚承认等待听见回声的人",
+          "林夏要求天台坦白"
+        ],
+        "rollingSummary": null,
+        "summary": "林夏用磁带编号查到档案室，发现校方十年前签署的静默协议与旧校舍拆除时间表；苏晚承认自己一直在等有人听见回声，但仍不肯说出事故全貌。",
+        "timeOfDay": null,
+        "title": "档案室里的静默协议"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch3",
         "characterIds": [
-          "protagonist",
-          "girl"
+          "linxia",
+          "suwan"
         ],
-        "file": "eve.txt",
-        "id": "demolition_eve",
-        "summary": "拆除前夜，江遇与林默在旧校舍碰面，整理出回声来自一名被遗忘学生的线索，必须决定公开或继续沉默。",
-        "title": "拆毁前夜"
+        "emotionalArc": "被欺骗的愤怒，到听到坦白后的动摇，再到面对倒计时的紧迫。",
+        "entryState": [
+          "silence_pact_aware == true",
+          "has_recording == true",
+          "林夏与苏晚信任紧绷"
+        ],
+        "file": "rooftop_decision.txt",
+        "forbiddenReveals": [
+          "不得说出录音中全部证词",
+          "不得提前判断公开后果",
+          "不得揭示事故完整真相"
+        ],
+        "id": "rooftop_decision",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "苏晚交出最后一卷录音",
+          "苏晚坦白自己与旧校舍的私人牵连",
+          "拆除倒计时与台风逼近",
+          "林夏握有删除或公开的决定权"
+        ],
+        "rollingSummary": null,
+        "summary": "台风前夜，苏晚把最后一卷录音交给林夏，承认自己隐瞒了关键身份；拆除队将在清晨进场，林夏必须决定公开录音还是删除它。",
+        "timeOfDay": null,
+        "title": "台风前的天台交换"
       },
       {
+        "approvalStatus": "pending",
         "chapterId": "ch3",
         "characterIds": [
-          "protagonist",
-          "girl"
+          "linxia",
+          "suwan"
         ],
-        "file": "reveal.txt",
-        "id": "echo_answer",
-        "summary": "两人在拆除前进入广播室，用回声留下的录音还原事故真相，让静默协议在夏天结束前失效。",
-        "title": "回声的答案"
+        "emotionalArc": "决绝到公开后的震荡，再到带痛的释然。",
+        "entryState": [
+          "has_recording == true",
+          "knew_truth == true",
+          "林夏决定不再替校方保守秘密"
+        ],
+        "file": "reveal_ending.txt",
+        "forbiddenReveals": [
+          "不得给出事故责任的法律结论",
+          "不得说明所有当事人的后续",
+          "不得把真相写成完整胜利"
+        ],
+        "id": "reveal_ending",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "林夏选择公开录音",
+          "校园广播放出旧磁带片段",
+          "拆除队与校方被迫停下",
+          "苏晚与林夏面对余波"
+        ],
+        "rollingSummary": null,
+        "summary": "林夏把录音接入校园广播，静默协议在夏末被撕开一角；回声随拆除机械声消失，苏晚第一次没有阻止她。",
+        "timeOfDay": null,
+        "title": "让回声成为证词"
+      },
+      {
+        "approvalStatus": "pending",
+        "chapterId": "ch3",
+        "characterIds": [
+          "linxia",
+          "suwan"
+        ],
+        "emotionalArc": "不忍到主动放弃真相的沉重，再到夏末的空洞平静。",
+        "entryState": [
+          "has_recording == true",
+          "林夏决定保护苏晚",
+          "拆除倒计时不可逆"
+        ],
+        "file": "silence_ending.txt",
+        "forbiddenReveals": [
+          "不得说明删除后事故是否被追查",
+          "不得揭示苏晚最终去向",
+          "不得把沉默写成完全救赎"
+        ],
+        "id": "silence_ending",
+        "locationId": null,
+        "minBeats": 24,
+        "povCharacterId": "linxia",
+        "requiredBeats": [
+          "林夏选择删除录音",
+          "两人在拆除前埋下磁带",
+          "回声最后一次出现后沉寂",
+          "苏晚与林夏告别但保留距离"
+        ],
+        "rollingSummary": null,
+        "summary": "林夏删除了录音，把磁带埋进旧校舍花坛；回声在拆除声中最后一次响起，苏晚感谢她，也永远关上了那扇门。",
+        "timeOfDay": null,
+        "title": "把秘密留在夏天"
+      }
+    ],
+    "variables": [
+      {
+        "description": "林夏对苏晚的信任度，影响天台抉择时可选的态度分支。",
+        "id": "linxia_trust",
+        "initialValue": "0",
+        "kind": "integer"
+      },
+      {
+        "description": "林夏是否取得旧校舍广播室里的待销毁磁带与录音。",
+        "id": "has_recording",
+        "initialValue": "false",
+        "kind": "boolean"
+      },
+      {
+        "description": "林夏是否已确认自己能听见旧校舍的回声。",
+        "id": "heard_echo",
+        "initialValue": "false",
+        "kind": "boolean"
+      },
+      {
+        "description": "林夏是否发现校方关于旧校舍事故的静默协议。",
+        "id": "silence_pact_aware",
+        "initialValue": "false",
+        "kind": "boolean"
+      },
+      {
+        "description": "林夏是否在结局前主动选择知晓并承担十年前事故的真相。",
+        "id": "knew_truth",
+        "initialValue": "false",
+        "kind": "boolean"
       }
     ]
   },
-  "model": "deepseek-flash",
-  "promptTokens": 424,
+  "model": "deepseek-v4-flash",
+  "promptTokens": 4355,
   "type": "outline"
 }
