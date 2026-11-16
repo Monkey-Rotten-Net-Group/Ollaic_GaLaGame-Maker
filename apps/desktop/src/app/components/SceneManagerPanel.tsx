@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   X, Plus, FolderOpen, Pencil, Check, Trash2,
 } from 'lucide-react';
@@ -59,23 +59,43 @@ export function SceneManagerPanel({
     }
   }, [projectPath, editChapter, editOutline, onHeaderUpdated]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed bottom-0 right-0 top-12 z-40 flex w-80 flex-col border-l border-border bg-surface-container-lowest shadow-[-8px_0_24px_var(--shadow-soft)]">
-      <div className="flex h-10 items-center justify-between border-b border-border px-3">
-        <span className="flex items-center gap-1.5 font-mono-family text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant">
-          <FolderOpen className="h-3 w-3 text-primary" /> 场景管理
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ollaic-icon-button h-6 w-6"
-          aria-label="关闭场景管理"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
+    <div
+      className="fixed inset-0 z-[60] bg-black/25 backdrop-blur-[1px]"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="场景管理"
+        className="fixed bottom-0 left-0 top-[var(--workspace-topbar-height,84px)] flex w-80 sm:w-96 flex-col border-r border-border bg-surface-container-lowest shadow-[8px_0_24px_var(--shadow-soft)]"
+      >
+        <div className="flex h-11 items-center justify-between border-b border-border px-3.5">
+          <span className="flex items-center gap-2 text-xs font-semibold tracking-wide text-foreground">
+            <FolderOpen className="h-3.5 w-3.5 text-primary" /> 场景管理
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ollaic-icon-button h-7 w-7 text-muted-foreground hover:text-foreground"
+            aria-label="关闭场景管理"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
 
       <div className="flex-1 overflow-y-auto">
         {scenes.length === 0 ? (
@@ -130,8 +150,8 @@ export function SceneManagerPanel({
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-start gap-3 px-3 py-3 hover:bg-surface-container-low transition-colors">
-                      <div className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${isCurrent ? 'bg-secondary' : 'bg-outline-variant/40'}`} />
+                    <div className="flex items-center gap-2 px-3 py-3 hover:bg-surface-container-low transition-colors">
+                      <div className={`h-2 w-2 shrink-0 rounded-full ${isCurrent ? 'bg-secondary' : 'bg-outline-variant/60'}`} />
                       <button
                         type="button"
                         onClick={() => onSwitchScene(sceneName)}
@@ -140,18 +160,19 @@ export function SceneManagerPanel({
                         <div className="truncate text-sm font-semibold text-on-surface">
                           {header.chapter || sceneName.replace(/\.txt$/, '')}
                         </div>
-                        <div className="truncate text-[10px] text-muted-foreground">
+                        <div className="truncate text-[11px] text-muted-foreground">
                           {header.outline || sceneName}
                         </div>
                       </button>
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleEdit(sceneName); }}
-                        className="shrink-0 rounded-full p-1 text-outline-variant/60 hover:bg-surface-container-low hover:text-foreground"
+                        className="flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-surface-container-low px-2.5 py-1 text-[11px] font-medium text-foreground/80 hover:border-border hover:bg-surface-container hover:text-foreground transition-colors"
                         title="编辑章节信息"
                         aria-label="编辑章节信息"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        <Pencil className="h-3 w-3" />
+                        编辑
                       </button>
                       <button
                         type="button"
@@ -160,11 +181,11 @@ export function SceneManagerPanel({
                           void onDeleteScene(sceneName);
                         }}
                         disabled={scenes.length <= 1}
-                        className="flex shrink-0 items-center gap-1 rounded-full border border-transparent px-2.5 py-1 text-[10px] text-outline-variant/70 hover:border-error/30 hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-30"
+                        className="flex shrink-0 items-center gap-1 rounded-full border border-destructive/25 bg-destructive/5 px-2.5 py-1 text-[11px] font-medium text-destructive/90 hover:border-destructive/45 hover:bg-destructive/15 hover:text-destructive disabled:cursor-not-allowed disabled:border-transparent disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-35 transition-colors"
                         title={scenes.length <= 1 ? '至少保留一个场景' : '删除场景'}
                         aria-label="删除场景"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3 w-3" />
                         删除
                       </button>
                     </div>
@@ -193,6 +214,7 @@ export function SceneManagerPanel({
           <X className="h-4 w-4" />
           关闭面板
         </button>
+      </div>
       </div>
     </div>
   );
