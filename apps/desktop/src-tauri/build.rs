@@ -16,6 +16,8 @@ const DOWNLOAD_LIMIT_BYTES: u64 = 150 * 1024 * 1024;
 fn main() {
     // 仅在 build.rs 自身变化时重跑下载检查；模型文件不参与（避免每次都校验大文件）。
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=icons/icon.ico");
+    println!("cargo:rerun-if-changed=tauri.conf.json");
     println!("cargo:rerun-if-env-changed=MATTING_MODEL_PATH");
     println!("cargo:rerun-if-env-changed=MATTING_SKIP_MODEL_DOWNLOAD");
     println!("cargo:rerun-if-env-changed=HF_ENDPOINT");
