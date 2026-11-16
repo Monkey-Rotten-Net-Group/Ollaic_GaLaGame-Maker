@@ -171,8 +171,8 @@
 
   /* ---------- Typography ---------- */
   --font-size: 16px;
-  --font-display: 'Fredoka', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular', 'Yuanti SC', 'STYuanti-SC-Bold', 'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', ui-sans-serif, system-ui, sans-serif;
-  --font-body: 'Quicksand', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular', 'Yuanti SC', 'STYuanti-SC-Regular', 'Hiragino Maru Gothic ProN', 'YouYuan', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Fredoka', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular', 'Yuanti SC', 'STYuanti-SC-Bold', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Quicksand', '资源圆体', 'Resource Han Rounded CN', 'Resource-Han-Rounded-CN-Regular', 'Yuanti SC', 'STYuanti-SC-Regular', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', 'Menlo', monospace;
   --ol-font-size-2xs: 10px;
   --ol-font-size-xs: 11px;
