@@ -625,7 +625,7 @@ export function StoryEditor() {
   // Ctrl+S / Cmd+S shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSave();
       }
@@ -637,7 +637,7 @@ export function StoryEditor() {
   // Cmd+K / Ctrl+K shortcut for Global Search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         const searchInput = document.querySelector<HTMLInputElement>('input[aria-label="全局搜索"]');
         searchInput?.focus();
@@ -652,13 +652,17 @@ export function StoryEditor() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (workflowOwnsProjectRef.current) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
           redo();
         } else {
           undo();
         }
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && key === 'y') {
+        e.preventDefault();
+        redo();
       }
     };
     window.addEventListener('keydown', handler);
@@ -670,13 +674,14 @@ export function StoryEditor() {
     const handler = (e: KeyboardEvent) => {
       if (workflowOwnsProjectRef.current) return;
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
-        if (e.key === 'c' && selectedNode) {
+        const key = e.key.toLowerCase();
+        if (key === 'c' && selectedNode) {
           e.preventDefault();
           copyNode(selectedNode.id);
-        } else if (e.key === 'x' && selectedNode) {
+        } else if (key === 'x' && selectedNode) {
           e.preventDefault();
           cutNode(selectedNode.id);
-        } else if (e.key === 'v' && clipboardNode) {
+        } else if (key === 'v' && clipboardNode) {
           e.preventDefault();
           const currentIndex = nodes.findIndex((n) => n.id === selectedNode?.id);
           pasteNode(currentIndex >= 0 ? currentIndex : nodes.length);
@@ -951,7 +956,7 @@ export function StoryEditor() {
     markDirty();
   }, [scriptSource, markDirty, setNodes, setSelectedNode, setShowScript]);
 
-  const projectName = projectInfo?.config.Game_name || projectPath?.split('/').pop() || '未命名项目';
+  const projectName = projectInfo?.config.Game_name || projectPath?.split(/[/\\]/).filter(Boolean).pop() || '未命名项目';
 
   const reloadAfterSnapshot = useCallback(async () => {
     if (!projectPath) return;

@@ -143,6 +143,9 @@ export function OllaicTopBar({
 }: OllaicTopBarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+  const modKey = isMac ? '⌘' : 'Ctrl+';
+  const redoShortcut = isMac ? '⇧⌘Z' : 'Ctrl+Shift+Z';
   const navigateTo = (path: string) => {
     if (location.pathname === path) return;
     const action = () => navigate(path);
@@ -231,7 +234,7 @@ export function OllaicTopBar({
               onClick={onUndo}
               disabled={!onUndo || fileDisabled}
               className="ollaic-icon-button h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-30"
-              title="撤销 (⌘Z)"
+              title={`撤销 (${modKey}Z)`}
               aria-label="撤销"
             >
               <RotateCcw className="size-3.5" />
@@ -241,7 +244,7 @@ export function OllaicTopBar({
               onClick={onRedo}
               disabled={!onRedo || fileDisabled}
               className="ollaic-icon-button h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-30"
-              title="重做 (⇧⌘Z)"
+              title={`重做 (${redoShortcut})`}
               aria-label="重做"
             >
               <RotateCw className="size-3.5" />
@@ -264,7 +267,7 @@ export function OllaicTopBar({
               className="h-7 w-28 2xl:w-44 rounded-lg border border-border/80 bg-surface-container-low pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:bg-surface-container-lowest focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all outline-none"
               aria-label="全局搜索"
             />
-            <kbd className="pointer-events-none absolute right-1.5 text-[9px] font-mono text-muted-foreground opacity-60">⌘K</kbd>
+            <kbd className="pointer-events-none absolute right-1.5 text-[9px] font-mono text-muted-foreground opacity-60">{modKey}K</kbd>
           </div>
         )}
 
@@ -291,7 +294,7 @@ export function OllaicTopBar({
               type="button"
               onClick={onSave}
               className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors cursor-pointer"
-              title="存在未保存修改，点击即时保存 (⌘S)"
+              title={`存在未保存修改，点击即时保存 (${modKey}S)`}
               role="status"
             >
               <span className="relative flex h-2 w-2">
@@ -299,7 +302,7 @@ export function OllaicTopBar({
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
               </span>
               <span>未保存</span>
-              <kbd className="hidden sm:inline font-mono text-[9px] opacity-75">⌘S</kbd>
+              <kbd className="hidden sm:inline font-mono text-[9px] opacity-75">{modKey}S</kbd>
             </button>
           ) : (
             <span
