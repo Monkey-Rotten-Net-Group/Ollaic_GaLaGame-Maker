@@ -143,6 +143,20 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(decoded) = image::load_from_memory(include_bytes!(
+                    "../icons/128x128@2x.png"
+                )) {
+                    let rgba = decoded.into_rgba8();
+                    let (width, height) = rgba.dimensions();
+                    let _ = window.set_icon(tauri::image::Image::new_owned(
+                        rgba.into_raw(),
+                        width,
+                        height,
+                    ));
+                }
+            }
             let template_dir = resolve_template_dir(app.handle());
             if !template_dir.exists() {
                 eprintln!(
