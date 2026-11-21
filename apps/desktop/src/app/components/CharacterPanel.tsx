@@ -458,11 +458,14 @@ export function CharacterPanel({
 
   const referenceIndex = selected ? referenceSpriteIndex(selected) : -1;
   const referenceSprite = selected && referenceIndex >= 0 ? selected.sprites[referenceIndex] : null;
-  const variantSprites = selected
-    ? selected.sprites
-        .map((sprite, index) => ({ sprite, index }))
-        .filter(({ index }) => index !== referenceIndex)
-    : [];
+  const variantSprites = useMemo(
+    () => selected
+      ? selected.sprites
+          .map((sprite, index) => ({ sprite, index }))
+          .filter(({ index }) => index !== referenceIndex)
+      : [],
+    [referenceIndex, selected],
+  );
 
   useEffect(() => {
     if (!selected || selected.sprites.length === 0) {
@@ -530,8 +533,15 @@ export function CharacterPanel({
   }, [figureAssets, projectPath, selected]);
 
   const hasGeneratedAsset = useCallback((emotion: string): boolean => {
+    const sprite = selected?.sprites.find(
+      (item) => item.emotion.trim().toLowerCase() === emotion.trim().toLowerCase(),
+    );
+    if (sprite?.file) {
+      const tail = figureFileTail(sprite.file);
+      if (figureAssets.some((asset) => figureFileTail(asset.name) === tail)) return true;
+    }
     return findSpriteAssetSrc({ emotion, file: '' }) !== null;
-  }, [findSpriteAssetSrc]);
+  }, [figureAssets, findSpriteAssetSrc, selected]);
 
   const refreshMainCandidates = useCallback(async () => {
     if (!selectedId) {
@@ -796,8 +806,8 @@ export function CharacterPanel({
     setFigureAssetDeleting(asset.name);
     setError(null);
     try {
-      // asset.name 为子目录内平铺文件名，类别携带角色子目录。
-      await deleteAsset(projectPath, `figure/${selectedId}`, figureFileTail(asset.name));
+      // Each asset carries its owning directory, including root-level legacy sprites.
+      await deleteAsset(projectPath, asset.category, figureFileTail(asset.name));
       await refreshFigureAssets();
     } catch (e) {
       setError(String(e));

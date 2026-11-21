@@ -413,63 +413,42 @@ pub(crate) fn find_imported_asset_file(
             Ok(exact.into_iter().next())
         }
         AssetKind::Figure => {
-            let dir = project_path.join("game/figure");
-            if dir.is_dir() {
-                if let Ok(entries) = fs::read_dir(&dir) {
-                    let mut exact = Vec::new();
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if !path.is_file() {
-                            continue;
-                        }
-                        let Some(extension) = path.extension().and_then(|v| v.to_str()) else {
-                            continue;
-                        };
-                        if !is_image_extension(extension) {
-                            continue;
-                        }
-                        let Some(stem) = path.file_stem().and_then(|v| v.to_str()) else {
-                            continue;
-                        };
-                        let filename = path
-                            .file_name()
-                            .map(|v| v.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        if (stem == task.target_stem || stem == task.id)
-                            && reusable_import(project_path, task, &filename)
-                        {
-                            exact.push(filename);
-                        }
-                    }
-                    exact.sort();
-                    if let Some(first) = exact.into_iter().next() {
-                        return Ok(Some(first));
-                    }
-                }
+            let Some(character_id) = task.character_ref.as_deref() else {
+                return Ok(None);
+            };
+            if !crate::story_plan::types::is_webgal_flag_value(character_id) {
+                return Err(format!("invalid figure character id: {character_id}"));
             }
-            if let Some(char_id) = &task.character_ref {
-                let char_json = project_path.join("game/config/characters.json");
-                if char_json.is_file() {
-                    if let Ok(src) = fs::read_to_string(&char_json) {
-                        if let Ok(doc) = serde_json::from_str::<CharactersDocument>(&src) {
-                            if let Some(c) = doc
-                                .characters
-                                .iter()
-                                .find(|c| c.id == *char_id || c.name == *char_id)
-                            {
-                                let wanted_emotion = task.emotion.as_deref().unwrap_or("default");
-                                if let Some(sp) =
-                                    c.sprites.iter().find(|sp| sp.emotion == wanted_emotion)
-                                {
-                                    let sprite_file =
-                                        project_path.join("game/figure").join(&sp.file);
-                                    if sprite_file.is_file()
-                                        && reusable_import(project_path, task, &sp.file)
-                                    {
-                                        return Ok(Some(sp.file.clone()));
-                                    }
-                                }
-                            }
+            let dir = project_path.join("game/figure").join(character_id);
+            if let Some(filename) =
+                find_reusable_figure_in_dir(project_path, task, &dir, character_id)?
+            {
+                return Ok(Some(filename));
+            }
+            let legacy_dir = project_path.join("game/figure");
+            if let Some(filename) =
+                find_reusable_figure_in_dir(project_path, task, &legacy_dir, "")?
+            {
+                return Ok(Some(filename));
+            }
+            let char_json = project_path.join("game/config/characters.json");
+            if let Ok(source) = fs::read_to_string(char_json) {
+                if let Ok(document) = serde_json::from_str::<CharactersDocument>(&source) {
+                    if let Some(sprite) = document
+                        .characters
+                        .iter()
+                        .find(|character| character.id == character_id)
+                        .and_then(|character| {
+                            character.sprites.iter().find(|sprite| {
+                                sprite.emotion == task.emotion.as_deref().unwrap_or("default")
+                            })
+                        })
+                    {
+                        let sprite_path = project_path.join("game/figure").join(&sprite.file);
+                        if sprite_path.is_file()
+                            && reusable_import(project_path, task, &sprite.file)
+                        {
+                            return Ok(Some(sprite.file.clone()));
                         }
                     }
                 }
@@ -478,6 +457,58 @@ pub(crate) fn find_imported_asset_file(
         }
         _ => Ok(None),
     }
+}
+
+fn find_reusable_figure_in_dir(
+    project: &Path,
+    task: &AssetTask,
+    directory: &Path,
+    relative_directory: &str,
+) -> Result<Option<String>, String> {
+    if !directory.is_dir() {
+        return Ok(None);
+    }
+    let entries = fs::read_dir(directory).map_err(|error| {
+        format!(
+            "failed to read figure directory {}: {error}",
+            directory.display()
+        )
+    })?;
+    let mut exact = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| format!("failed to read figure entry: {error}"))?
+            .path();
+        if !path.is_file()
+            || !path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(is_image_extension)
+        {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some(filename) = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+        else {
+            continue;
+        };
+        let qualified_filename = if relative_directory.is_empty() {
+            filename
+        } else {
+            format!("{relative_directory}/{filename}")
+        };
+        if (stem == task.target_stem || stem == task.id)
+            && reusable_import(project, task, &qualified_filename)
+        {
+            exact.push(qualified_filename);
+        }
+    }
+    exact.sort();
+    Ok(exact.into_iter().next())
 }
 
 fn apply_binding_with_source_scoped(
@@ -720,6 +751,18 @@ fn available_target(
     extension: &str,
     scope: BindingScope<'_>,
 ) -> Result<(String, PathBuf), String> {
+    let relative_directory = if task.kind == AssetKind::Figure {
+        let character_id = task
+            .character_ref
+            .as_deref()
+            .ok_or_else(|| format!("figure task {} has no characterRef", task.id))?;
+        if !crate::story_plan::types::is_webgal_flag_value(character_id) {
+            return Err(format!("invalid figure character id: {character_id}"));
+        }
+        Some(character_id.to_string())
+    } else {
+        None
+    };
     let candidates = std::iter::once(format!("{}.{}", task.target_stem, extension))
         .chain(std::iter::once(format!(
             "{}-{}.{}",
@@ -730,16 +773,24 @@ fn available_target(
                 .map(|index| format!("{}-{}-{index}.{}", task.target_stem, task.id, extension)),
         );
     for filename in candidates {
+        let qualified_filename = relative_directory
+            .as_ref()
+            .map(|directory| format!("{directory}/{filename}"))
+            .unwrap_or_else(|| filename.clone());
+        let path = relative_directory
+            .as_ref()
+            .map(|directory| PathBuf::from(directory).join(&filename))
+            .unwrap_or_else(|| PathBuf::from(&filename));
         let target = project_path
             .join("game")
             .join(task.kind.game_dir())
-            .join(&filename);
+            .join(&path);
         if !target.exists()
             || (matches!(scope, BindingScope::Project)
-                && (task.asset_file.as_deref() == Some(filename.as_str())
-                    || scene_task_owns_filename(project_path, task, &filename)?))
+                && (task.asset_file.as_deref() == Some(qualified_filename.as_str())
+                    || scene_task_owns_filename(project_path, task, &qualified_filename)?))
         {
-            return Ok((filename, target));
+            return Ok((qualified_filename, target));
         }
     }
     Err(format!("no available target filename for task {}", task.id))
@@ -1132,12 +1183,28 @@ mod tests {
         bind_asset(&project, &bob).unwrap();
 
         let start = fs::read_to_string(project.join("game/scene/start.txt")).unwrap();
-        assert!(start.contains("changeFigure:alice_default.png -right"));
-        assert!(!start.contains("changeFigure:bob_default.png"));
+        assert!(start.contains("changeFigure:alice/alice_default.png -right"));
+        assert!(!start.contains("changeFigure:bob/bob_default.png"));
         let route = fs::read_to_string(project.join("game/scene/route.txt")).unwrap();
-        assert!(route.contains("changeFigure:alice_default.png;"));
+        assert!(route.contains("changeFigure:alice/alice_default.png;"));
         let other = fs::read_to_string(project.join("game/scene/other.txt")).unwrap();
-        assert!(other.contains("changeFigure:bob_default.png;"));
+        assert!(other.contains("changeFigure:bob/bob_default.png;"));
+        assert!(project
+            .join("game/figure/alice/alice_default.png")
+            .is_file());
+        assert!(project.join("game/figure/bob/bob_default.png").is_file());
+        assert!(!project.join("game/figure/alice_default.png").exists());
+        let characters: CharactersDocument =
+            serde_json::from_slice(&fs::read(project.join("game/config/characters.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            characters.characters[0].sprites[0].file,
+            "alice/alice_default.png"
+        );
+        assert_eq!(
+            characters.characters[1].sprites[0].file,
+            "bob/bob_default.png"
+        );
         let _ = fs::remove_dir_all(project);
     }
 
