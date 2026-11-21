@@ -1141,7 +1141,10 @@ impl AssetGenerator for AnchorOrderProbe {
                     .project
                     .join("game/config/references/alice/anchor_raw.png")
                     .is_file());
-                assert!(self.project.join("game/figure/alice_default.png").is_file());
+                assert!(self
+                    .project
+                    .join("game/figure/alice/alice_default.png")
+                    .is_file());
                 self.variants.fetch_add(1, Ordering::SeqCst);
             }
             Ok(GeneratedArtifact {
@@ -1512,7 +1515,9 @@ async fn setup_queue_binds_anchors_without_touching_existing_scene_scripts() {
     .unwrap();
     assert_eq!(result.tasks.len(), 1);
     assert_eq!(result.tasks[0].status, AssetTaskStatus::Succeeded);
-    assert!(project.join("game/figure/alice_default.png").is_file());
+    assert!(project
+        .join("game/figure/alice/alice_default.png")
+        .is_file());
     assert_eq!(
         std::fs::read(project.join("game/scene/start.txt")).unwrap(),
         original
