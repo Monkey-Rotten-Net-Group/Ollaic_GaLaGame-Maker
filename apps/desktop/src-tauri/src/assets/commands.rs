@@ -394,13 +394,17 @@ fn list_assets_locked(project_path: &str, category: &str) -> Result<Vec<AssetInf
     let subdir = category_to_dir(category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let dir = PathBuf::from(project_path).join("game").join(&subdir);
 
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut assets = list_dir_files(&dir)?;
+    let mut assets = if dir.is_dir() {
+        list_dir_files(&dir)?
+    } else {
+        Vec::new()
+    };
     for a in &mut assets {
         a.category = subdir.to_string();
+    }
+
+    if let Some(character_id) = category.strip_prefix("figure/") {
+        assets.extend(list_legacy_character_figures(project_path, character_id)?);
     }
 
     // The bare "figure" category also surfaces per-character subdirectory sprites
@@ -408,6 +412,9 @@ fn list_assets_locked(project_path: &str, category: &str) -> Result<Vec<AssetInf
     // picker can still browse/select any character's立绘. Per-character listing
     // (category "figure/<id>") returns only that subdir with flat names above.
     if subdir == "figure" {
+        if !dir.is_dir() {
+            return Ok(assets);
+        }
         let entries =
             fs::read_dir(&dir).map_err(|e| format!("无法读取目录 {}: {e}", dir.display()))?;
         for entry in entries {
@@ -426,6 +433,53 @@ fn list_assets_locked(project_path: &str, category: &str) -> Result<Vec<AssetInf
     }
 
     Ok(assets)
+}
+
+fn list_legacy_character_figures(
+    project_path: &str,
+    character_id: &str,
+) -> Result<Vec<AssetInfo>, String> {
+    let characters_path = PathBuf::from(project_path).join("game/config/characters.json");
+    if !characters_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let source = fs::read_to_string(&characters_path)
+        .map_err(|error| format!("读取角色配置失败 {}: {error}", characters_path.display()))?;
+    let document: crate::characters::types::CharactersDocument = serde_json::from_str(&source)
+        .map_err(|error| format!("解析角色配置失败 {}: {error}", characters_path.display()))?;
+    let Some(character) = document
+        .characters
+        .iter()
+        .find(|character| character.id == character_id)
+    else {
+        return Ok(Vec::new());
+    };
+    let legacy_names: std::collections::HashSet<&str> = character
+        .sprites
+        .iter()
+        .map(|sprite| sprite.file.as_str())
+        .filter(|file| {
+            !file.is_empty()
+                && !file.contains('/')
+                && !file.contains('\\')
+                && Path::new(file).file_name().and_then(|name| name.to_str()) == Some(*file)
+        })
+        .collect();
+    if legacy_names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = PathBuf::from(project_path).join("game/figure");
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    Ok(list_dir_files(&root)?
+        .into_iter()
+        .filter(|asset| legacy_names.contains(asset.name.as_str()))
+        .map(|mut asset| {
+            asset.category = "figure".to_string();
+            asset
+        })
+        .collect())
 }
 
 /// List assets across all subdirectories (used for "all" view).
@@ -1101,14 +1155,31 @@ mod tests {
         let figure_dir = tmp.join("game").join("figure");
         fs::create_dir_all(figure_dir.join("char_a")).unwrap();
         fs::create_dir_all(figure_dir.join("char_b")).unwrap();
+        fs::create_dir_all(tmp.join("game/config")).unwrap();
         fs::write(figure_dir.join("legacy.webp"), "x").unwrap();
+        fs::write(figure_dir.join("legacy_only.webp"), "x").unwrap();
         fs::write(figure_dir.join("char_a").join("stand.webp"), "x").unwrap();
         fs::write(figure_dir.join("char_b").join("smile.webp"), "x").unwrap();
+        fs::write(
+            tmp.join("game/config/characters.json"),
+            r#"{"version":1,"characters":[{"id":"char_a","name":"A","sprites":[{"emotion":"default","file":"legacy.webp"}]},{"id":"char_b","name":"B","sprites":[]},{"id":"char_without_folder","name":"C","sprites":[{"emotion":"default","file":"legacy_only.webp"}]}]}"#,
+        )
+        .unwrap();
 
         // Per-character listing only returns that character's sprites (flat names).
         let a = list_assets(project.clone(), "figure/char_a".to_string()).unwrap();
-        assert_eq!(a.len(), 1);
-        assert_eq!(a[0].name, "stand.webp");
+        assert_eq!(a.len(), 2);
+        let a_names: std::collections::HashSet<&str> =
+            a.iter().map(|asset| asset.name.as_str()).collect();
+        assert!(a_names.contains("stand.webp"));
+        assert!(a_names.contains("legacy.webp"));
+        let b = list_assets(project.clone(), "figure/char_b".to_string()).unwrap();
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].name, "smile.webp");
+        let without_folder =
+            list_assets(project.clone(), "figure/char_without_folder".to_string()).unwrap();
+        assert_eq!(without_folder.len(), 1);
+        assert_eq!(without_folder[0].name, "legacy_only.webp");
 
         // Bare "figure" surfaces top-level files plus subdir-qualified sprites.
         let all = list_assets(project.clone(), "figure".to_string()).unwrap();
