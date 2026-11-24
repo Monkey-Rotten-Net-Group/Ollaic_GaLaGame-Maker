@@ -640,6 +640,7 @@ async fn binding_failure_does_not_leave_a_formal_asset() {
         .unwrap();
     assert_eq!(result.tasks[0].status, AssetTaskStatus::Failed);
     assert!(!project.join("game/figure/alice_default.png").exists());
+    assert!(!project.join("game/figure/alice/alice_default.png").exists());
     assert!(project
         .join(".ollaic/artifacts/assets/figure_alice/1.png")
         .is_file());

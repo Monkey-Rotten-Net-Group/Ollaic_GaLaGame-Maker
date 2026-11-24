@@ -394,10 +394,11 @@ fn list_assets_locked(project_path: &str, category: &str) -> Result<Vec<AssetInf
     let subdir = category_to_dir(category).ok_or_else(|| format!("未知素材类型: {category}"))?;
     let dir = PathBuf::from(project_path).join("game").join(&subdir);
 
-    let mut assets = if dir.is_dir() {
-        list_dir_files(&dir)?
-    } else {
-        Vec::new()
+    let mut assets = match fs::metadata(&dir) {
+        Ok(metadata) if metadata.is_dir() => list_dir_files(&dir)?,
+        Ok(_) => return Err(format!("素材目录不是文件夹: {}", dir.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(format!("无法读取素材目录 {}: {error}", dir.display())),
     };
     for a in &mut assets {
         a.category = subdir.to_string();
@@ -412,7 +413,7 @@ fn list_assets_locked(project_path: &str, category: &str) -> Result<Vec<AssetInf
     // picker can still browse/select any character's立绘. Per-character listing
     // (category "figure/<id>") returns only that subdir with flat names above.
     if subdir == "figure" {
-        if !dir.is_dir() {
+        if !dir.exists() {
             return Ok(assets);
         }
         let entries =
@@ -443,13 +444,8 @@ fn list_legacy_character_figures(
     if !characters_path.is_file() {
         return Ok(Vec::new());
     }
-    let source = fs::read_to_string(&characters_path)
-        .map_err(|error| format!("读取角色配置失败 {}: {error}", characters_path.display()))?;
-    let document: crate::characters::types::CharactersDocument = serde_json::from_str(&source)
-        .map_err(|error| format!("解析角色配置失败 {}: {error}", characters_path.display()))?;
-    let Some(character) = document
-        .characters
-        .iter()
+    let Some(character) = crate::characters::commands::list_characters_locked(project_path)?
+        .into_iter()
         .find(|character| character.id == character_id)
     else {
         return Ok(Vec::new());
@@ -501,9 +497,16 @@ fn list_all_assets_locked(project_path: &str) -> Result<Vec<AssetInfo>, String> 
     ];
     let mut all = Vec::new();
     for d in &dirs {
-        let dir = PathBuf::from(project_path).join("game").join(d);
-        if !dir.exists() {
+        if *d == "figure" {
+            all.extend(list_assets_locked(project_path, "figure")?);
             continue;
+        }
+        let dir = PathBuf::from(project_path).join("game").join(d);
+        match fs::metadata(&dir) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(format!("素材目录不是文件夹: {}", dir.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("无法读取素材目录 {}: {error}", dir.display())),
         }
         let mut assets = list_dir_files(&dir)?;
         for a in &mut assets {
@@ -1158,11 +1161,12 @@ mod tests {
         fs::create_dir_all(tmp.join("game/config")).unwrap();
         fs::write(figure_dir.join("legacy.webp"), "x").unwrap();
         fs::write(figure_dir.join("legacy_only.webp"), "x").unwrap();
+        fs::write(figure_dir.join("superseded.webp"), "x").unwrap();
         fs::write(figure_dir.join("char_a").join("stand.webp"), "x").unwrap();
         fs::write(figure_dir.join("char_b").join("smile.webp"), "x").unwrap();
         fs::write(
             tmp.join("game/config/characters.json"),
-            r#"{"version":1,"characters":[{"id":"char_a","name":"A","sprites":[{"emotion":"default","file":"legacy.webp"}]},{"id":"char_b","name":"B","sprites":[]},{"id":"char_without_folder","name":"C","sprites":[{"emotion":"default","file":"legacy_only.webp"}]}]}"#,
+            r#"{"version":1,"characters":[{"id":"char_a","name":"Old A","sprites":[{"emotion":"default","file":"superseded.webp"}]},{"id":"char_b","name":"B","sprites":[]},{"id":"char_without_folder","name":"C","sprites":[{"emotion":"default","file":"legacy_only.webp"}]},{"id":"char_a","name":"A","sprites":[{"emotion":"default","file":"legacy.webp"}]}]}"#,
         )
         .unwrap();
 
@@ -1173,6 +1177,7 @@ mod tests {
             a.iter().map(|asset| asset.name.as_str()).collect();
         assert!(a_names.contains("stand.webp"));
         assert!(a_names.contains("legacy.webp"));
+        assert!(!a_names.contains("superseded.webp"));
         let b = list_assets(project.clone(), "figure/char_b".to_string()).unwrap();
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].name, "smile.webp");
@@ -1188,10 +1193,27 @@ mod tests {
         assert!(names.contains("legacy.webp"));
         assert!(names.contains("char_a/stand.webp"));
         assert!(names.contains("char_b/smile.webp"));
+        let all_assets = list_all_assets_locked(&project).unwrap();
+        let all_names: std::collections::HashSet<String> =
+            all_assets.into_iter().map(|asset| asset.name).collect();
+        assert!(all_names.contains("char_a/stand.webp"));
+
+        fs::write(tmp.join("game/background"), "not a directory").unwrap();
+        assert!(list_assets_locked(&project, "background").is_err());
 
         // Path traversal in the subdirectory segment is rejected.
         assert!(list_assets(project, "figure/../scene".to_string()).is_err());
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_all_assets_returns_empty_for_missing_figure_directory() {
+        let tmp = std::env::temp_dir().join("webgal_test_all_assets_no_figure");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("game")).unwrap();
+        let assets = list_all_assets_locked(&tmp.to_string_lossy()).unwrap();
+        assert!(assets.is_empty());
+        let _ = fs::remove_dir_all(tmp);
     }
 
     #[test]
