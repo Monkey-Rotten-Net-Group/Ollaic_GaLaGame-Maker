@@ -2,9 +2,8 @@
  * Figure sprite → writable filename resolution.
  *
  * A character立绘 in a script is referenced by a figure file under
- * `game/figure/`. Main sprites store the filename directly in `sprite.file`;
- * variant sprites leave `sprite.file` empty and live in the per-character
- * subdirectory `figure/<characterId>/`, resolved by emotion-prefixed filename.
+ * `game/figure/`. Bound sprites store their relative path in `sprite.file`. An unbound variant
+ * can be resolved from its emotion-prefixed filename in `figure/<characterId>/`.
  *
  * This module centralizes that resolution so both the manual editor
  * (DetailPanel) and the AI staging layer (change-set) map a
