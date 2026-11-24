@@ -118,6 +118,18 @@ describe('AI pending preview isolation', () => {
     } as never);
   });
 
+  it('does not send a prompt while the current scene document is loading', async () => {
+    const params = makeParams({ documentReady: false });
+    const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
+
+    await act(async () => { await result.current.sendPrompt('继续完善当前场景'); });
+
+    expect(aiChatTurn).not.toHaveBeenCalled();
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.error?.message).toContain('当前场景仍在加载');
+    expect(result.current.busy).toBe(false);
+  });
+
   it('does not write AI preview content into the saveable buffer (no setNodes/setScriptSource/setDirty)', async () => {
     const params = makeParams();
     const { result } = renderHook(() => useAiAgent(params), { wrapper: MemoryRouter });
