@@ -1513,6 +1513,14 @@ export function useAiAgent(params: UseAiAgentParams) {
   const sendPrompt = useCallback(async (prompt: string, retryAttachmentIds?: string[]) => {
     const text = prompt.trim();
     if (!text || busy || inFlightRef.current || commitInFlightRef.current) return;
+    if (viewParams.documentReady === false) {
+      setError({
+        kind: 'other',
+        retryable: false,
+        message: '当前场景仍在加载，请加载完成后再发送。',
+      });
+      return;
+    }
     if (pendingChangeSet?.status === 'pending') {
       setError({ kind: 'other', retryable: false, message: '当前还有 AI 修改方案待确认。请先同意或拒绝后再继续对话。' });
       return;
@@ -1600,7 +1608,25 @@ export function useAiAgent(params: UseAiAgentParams) {
         if (currentRunIdRef.current === myRunId) currentRunIdRef.current = null;
       }
     }
-  }, [attachedIds, busy, compactMessages, currentSceneName, digest, ensureTitleFromFirstMessage, messages, ownsRun, pendingChangeSet, replaceAssistantMessage, resolveCurrentScopeContext, runAgentLoop, runLegacyTurn, setMessages, summarizeSessionIfNeeded, uploads]);
+  }, [
+    attachedIds,
+    busy,
+    compactMessages,
+    currentSceneName,
+    digest,
+    ensureTitleFromFirstMessage,
+    messages,
+    ownsRun,
+    pendingChangeSet,
+    replaceAssistantMessage,
+    resolveCurrentScopeContext,
+    runAgentLoop,
+    runLegacyTurn,
+    setMessages,
+    summarizeSessionIfNeeded,
+    uploads,
+    viewParams.documentReady,
+  ]);
 
   const retry = useCallback(() => {
     if (!lastRequest || busy || cooldown > 0) return;

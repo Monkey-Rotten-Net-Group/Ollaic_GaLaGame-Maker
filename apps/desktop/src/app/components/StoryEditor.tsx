@@ -225,6 +225,7 @@ export function StoryEditor() {
   }, []);
   const [commandSearchQuery, setCommandSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sceneDocumentReady, setSceneDocumentReady] = useState(true);
   const runtimePreview = useRuntimePreview(projectPath, scriptSource, previewStarted);
 
   const selectedNodeIndex = useMemo(() => {
@@ -781,8 +782,9 @@ export function StoryEditor() {
     const myToken = sceneLoadTokenRef.current + 1;
     sceneLoadTokenRef.current = myToken;
     setCurrentSceneName(sceneName);
-    const scenePath = await getScenePath(projectPath, sceneName);
+    setSceneDocumentReady(false);
     try {
+      const scenePath = await getScenePath(projectPath, sceneName);
       await editorCommitCoordinator.waitForCommit(sceneName);
       // Prefer a cached draft over the saved file
       const draft = editorCommitCoordinator.getDraft<WebGalNode[]>(sceneName);
@@ -806,6 +808,8 @@ export function StoryEditor() {
       if (sceneLoadTokenRef.current !== myToken) return;
       setNodes([]);
       setScriptSource('');
+    } finally {
+      if (sceneLoadTokenRef.current === myToken) setSceneDocumentReady(true);
     }
   }, [projectPath, currentSceneName, dirty, editorCommitCoordinator, nodes, setDirty, setNodes, setScriptSource, setSelectedNode]);
 
@@ -961,23 +965,28 @@ export function StoryEditor() {
   const reloadAfterSnapshot = useCallback(async () => {
     if (!projectPath) return;
     const token = ++sceneLoadTokenRef.current;
-    const info = await openProject(projectPath);
-    const restoredSceneName = info.scenes.includes(currentSceneName)
-      ? currentSceneName : (info.scenes[0] ?? 'start.txt');
-    const scenePath = await getScenePath(projectPath, restoredSceneName);
-    const loaded = await loadScene(scenePath);
-    const source = await serializeScene(loaded);
-    if (sceneLoadTokenRef.current !== token) return;
-    setProjectInfo(info);
-    setCurrentSceneName(restoredSceneName);
-    nodesRef.current = loaded;
-    setNodes(loaded);
-    setScriptSource(source);
-    editorCommitCoordinator.clearDrafts();
-    setDirty(false);
-    setSelectedNode(null);
-    setAiUploadsRevision((revision) => revision + 1);
-    await Promise.all([refreshSceneGraph(projectPath, info.scenes), refreshCharactersForAi()]);
+    setSceneDocumentReady(false);
+    try {
+      const info = await openProject(projectPath);
+      const restoredSceneName = info.scenes.includes(currentSceneName)
+        ? currentSceneName : (info.scenes[0] ?? 'start.txt');
+      const scenePath = await getScenePath(projectPath, restoredSceneName);
+      const loaded = await loadScene(scenePath);
+      const source = await serializeScene(loaded);
+      if (sceneLoadTokenRef.current !== token) return;
+      setProjectInfo(info);
+      setCurrentSceneName(restoredSceneName);
+      nodesRef.current = loaded;
+      setNodes(loaded);
+      setScriptSource(source);
+      editorCommitCoordinator.clearDrafts();
+      setDirty(false);
+      setSelectedNode(null);
+      setAiUploadsRevision((revision) => revision + 1);
+      await Promise.all([refreshSceneGraph(projectPath, info.scenes), refreshCharactersForAi()]);
+    } finally {
+      if (sceneLoadTokenRef.current === token) setSceneDocumentReady(true);
+    }
   }, [currentSceneName, editorCommitCoordinator, projectPath, refreshCharactersForAi,
     refreshSceneGraph, setDirty, setNodes, setScriptSource, setSelectedNode, nodesRef]);
 
@@ -1073,7 +1082,7 @@ export function StoryEditor() {
   const aiAgent = useAiAgent({
     projectId,
     projectPath,
-    documentReady: !loading,
+    documentReady: !loading && sceneDocumentReady,
     uploadsRevision: aiUploadsRevision,
     currentSceneName,
     sceneHeaders,
