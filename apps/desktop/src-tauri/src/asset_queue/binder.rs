@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::assets::commands::{SceneAssetCard, VoiceAssetCard};
-use crate::characters::types::{CharacterSprite, CharactersDocument};
+use crate::characters::types::{Character, CharacterSprite, CharactersDocument};
 use crate::webgal::parser;
 use crate::webgal::serializer;
 use crate::webgal::types::{CommandType, WebGalNode};
@@ -13,6 +13,54 @@ use super::types::{AssetKind, AssetTask};
 /// generated artifact, so the asset library can tell manual picks apart.
 pub(crate) const IMPORTED_SOURCE_TAG: &str = "source:imported";
 pub(crate) const BUNDLED_MOOD_SOURCE_TAG: &str = "source:bundled_mood";
+
+fn resolve_figure_character(project: &Path, character_ref: &str) -> Result<Character, String> {
+    crate::characters::commands::list_characters_locked(&project.to_string_lossy())?
+        .into_iter()
+        .find(|character| character.id == character_ref || character.name == character_ref)
+        .ok_or_else(|| format!("character not found: {character_ref}"))
+}
+
+fn validate_figure_destination(project: &Path, target: &Path) -> Result<(), String> {
+    let project_root = project
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve project: {error}"))?;
+    let figure_root = project.join("game/figure");
+    let mut ancestor = target
+        .parent()
+        .ok_or_else(|| "figure target has no parent".to_string())?;
+    while !ancestor.exists() {
+        ancestor = ancestor
+            .parent()
+            .ok_or_else(|| "figure target has no existing project ancestor".to_string())?;
+    }
+    let resolved_ancestor = ancestor
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve figure target parent: {error}"))?;
+    if !resolved_ancestor.starts_with(&project_root) {
+        return Err("figure target parent escapes project".into());
+    }
+    if figure_root.exists() {
+        let resolved_figure_root = figure_root
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve figure directory: {error}"))?;
+        if !resolved_figure_root.is_dir() {
+            return Err("figure asset root is not a directory".into());
+        }
+        if !resolved_ancestor.starts_with(&resolved_figure_root) {
+            return Err("figure target parent escapes figure directory".into());
+        }
+    }
+    if target.exists() {
+        let resolved_target = target
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve figure target: {error}"))?;
+        if !resolved_target.starts_with(&project_root) {
+            return Err("figure target escapes project".into());
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum BindingScope<'a> {
@@ -129,6 +177,9 @@ impl BindingTransaction {
             .ok_or_else(|| format!("artifact has no safe extension: {}", artifact.display()))?;
         validate_stem(&task.target_stem)?;
         let (filename, target) = available_target(project_path, task, extension, scope)?;
+        if task.kind == AssetKind::Figure {
+            validate_figure_destination(project_path, &target)?;
+        }
         let snapshots = snapshot_binding_files(project_path, &target)?;
         let binding = (|| {
             let bytes = fs::read(&artifact).map_err(|error| {
@@ -140,6 +191,9 @@ impl BindingTransaction {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|error| format!("failed to create asset directory: {error}"))?;
+            }
+            if task.kind == AssetKind::Figure {
+                validate_figure_destination(project_path, &target)?;
             }
             crate::json_store::write_crash_safe(&target, &bytes).map_err(|error| {
                 format!("failed to promote asset {}: {error}", target.display())
@@ -413,45 +467,32 @@ pub(crate) fn find_imported_asset_file(
             Ok(exact.into_iter().next())
         }
         AssetKind::Figure => {
-            let Some(character_id) = task.character_ref.as_deref() else {
+            let Some(character_ref) = task.character_ref.as_deref() else {
                 return Ok(None);
             };
-            if !crate::story_plan::types::is_webgal_flag_value(character_id) {
-                return Err(format!("invalid figure character id: {character_id}"));
-            }
-            let dir = project_path.join("game/figure").join(character_id);
-            if let Some(filename) =
-                find_reusable_figure_in_dir(project_path, task, &dir, character_id)?
+            let character = resolve_figure_character(project_path, character_ref)?;
+            if let Some(sprite) = character
+                .sprites
+                .iter()
+                .find(|sprite| sprite.emotion == task.emotion.as_deref().unwrap_or("default"))
             {
-                return Ok(Some(filename));
-            }
-            let legacy_dir = project_path.join("game/figure");
-            if let Some(filename) =
-                find_reusable_figure_in_dir(project_path, task, &legacy_dir, "")?
-            {
-                return Ok(Some(filename));
-            }
-            let char_json = project_path.join("game/config/characters.json");
-            if let Ok(source) = fs::read_to_string(char_json) {
-                if let Ok(document) = serde_json::from_str::<CharactersDocument>(&source) {
-                    if let Some(sprite) = document
-                        .characters
-                        .iter()
-                        .find(|character| character.id == character_id)
-                        .and_then(|character| {
-                            character.sprites.iter().find(|sprite| {
-                                sprite.emotion == task.emotion.as_deref().unwrap_or("default")
-                            })
-                        })
-                    {
-                        let sprite_path = project_path.join("game/figure").join(&sprite.file);
-                        if sprite_path.is_file()
-                            && reusable_import(project_path, task, &sprite.file)
-                        {
-                            return Ok(Some(sprite.file.clone()));
-                        }
-                    }
+                if !sprite.file.is_empty()
+                    && scoped_imported_asset(project_path, task, &sprite.file).is_ok()
+                {
+                    return Ok(Some(sprite.file.clone()));
                 }
+            }
+            let directory = project_path.join("game/figure").join(&character.id);
+            if let Some(filename) =
+                find_reusable_figure_in_dir(project_path, task, &directory, &character.id)?
+            {
+                return Ok(Some(filename));
+            }
+            let legacy_directory = project_path.join("game/figure");
+            if let Some(filename) =
+                find_reusable_figure_in_dir(project_path, task, &legacy_directory, "")?
+            {
+                return Ok(Some(filename));
             }
             Ok(None)
         }
@@ -752,14 +793,15 @@ fn available_target(
     scope: BindingScope<'_>,
 ) -> Result<(String, PathBuf), String> {
     let relative_directory = if task.kind == AssetKind::Figure {
-        let character_id = task
+        let character_ref = task
             .character_ref
             .as_deref()
             .ok_or_else(|| format!("figure task {} has no characterRef", task.id))?;
-        if !crate::story_plan::types::is_webgal_flag_value(character_id) {
-            return Err(format!("invalid figure character id: {character_id}"));
+        let character = resolve_figure_character(project_path, character_ref)?;
+        if !crate::story_plan::types::is_webgal_flag_value(&character.id) {
+            return Err(format!("invalid figure character id: {}", character.id));
         }
-        Some(character_id.to_string())
+        Some(character.id)
     } else {
         None
     };
@@ -1124,6 +1166,82 @@ mod tests {
         assert!(validate_transparent_figure("webp", &png(0)).is_err());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn figure_destination_rejects_character_directory_symlink_escape() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let project = std::env::temp_dir().join(format!("ollaic_figure_target_{nonce}"));
+        let outside = std::env::temp_dir().join(format!("ollaic_figure_outside_{nonce}"));
+        fs::create_dir_all(project.join("game/figure")).unwrap();
+        fs::create_dir_all(project.join("game/scene")).unwrap();
+        fs::create_dir_all(project.join("game/config")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(project.join("game/scene/start.txt"), ":Start;\n").unwrap();
+        fs::write(
+            project.join("game/config/characters.json"),
+            r#"{"version":1,"characters":[{"id":"alice","name":"Alice"}]}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("game/figure/alice")).unwrap();
+        let artifact = project.join(".ollaic/artifacts/assets/figure_alice/1.png");
+        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        fs::write(&artifact, png(0)).unwrap();
+        let task = AssetTask {
+            id: "figure_alice".into(),
+            kind: AssetKind::Figure,
+            target_stem: "alice_default".into(),
+            character_ref: Some("Alice".into()),
+            emotion: Some("default".into()),
+            attempts: vec![AssetAttempt {
+                attempt: 1,
+                started_at: 0,
+                finished_at: 1,
+                artifact: Some(artifact.to_string_lossy().into_owned()),
+                imported_file: None,
+                error: None,
+                used_local_fallback: false,
+            }],
+            ..Default::default()
+        };
+        assert!(bind_asset(&project, &task).is_err());
+        assert!(fs::read_dir(&outside).unwrap().next().is_none());
+        let _ = fs::remove_dir_all(project);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn imported_figure_prefers_the_character_bound_sprite_over_filename_matches() {
+        let project = std::env::temp_dir().join("ollaic_bound_figure_priority");
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("game/figure/alice")).unwrap();
+        fs::create_dir_all(project.join("game/config")).unwrap();
+        fs::write(project.join("game/figure/alice/chosen.png"), png(0)).unwrap();
+        fs::write(project.join("game/figure/alice/alice_default.png"), png(0)).unwrap();
+        fs::write(
+            project.join("game/config/characters.json"),
+            r#"{"version":1,"characters":[{"id":"alice","name":"Alice","sprites":[{"emotion":"default","file":"alice/chosen.png"}]}]}"#,
+        )
+        .unwrap();
+        let task = AssetTask {
+            kind: AssetKind::Figure,
+            id: "figure_alice".into(),
+            target_stem: "alice_default".into(),
+            character_ref: Some("Alice".into()),
+            emotion: Some("default".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            find_imported_asset_file(&project, &task)
+                .unwrap()
+                .as_deref(),
+            Some("alice/chosen.png")
+        );
+        let _ = fs::remove_dir_all(project);
+    }
+
     #[test]
     fn figure_without_scene_ref_binds_every_scene_containing_character() {
         let project = std::env::temp_dir().join("ollaic_figure_bind_all");
@@ -1151,7 +1269,7 @@ mod tests {
             target_stem: "alice_default".into(),
             prompt: "Alice".into(),
             scene_ref: None,
-            character_ref: Some("alice".into()),
+            character_ref: Some("Alice".into()),
             emotion: Some("default".into()),
             reference_image: None,
             aspect_ratio: None,

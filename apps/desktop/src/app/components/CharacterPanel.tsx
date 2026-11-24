@@ -47,6 +47,17 @@ import {
 } from '../lib/assets-ipc';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
+import { buttonVariants } from './ui/button';
+import {
   aiGenerateImage,
   removeBackground,
   getAiImageConfig,
@@ -109,6 +120,14 @@ type PendingSpriteGeneration = {
   batch?: boolean;
 };
 
+type FigureDeleteDialog = {
+  asset: AssetInfo;
+  characterReferences: string[];
+  sceneUsages: AssetUsage[];
+  loading: boolean;
+  lookupError?: string;
+};
+
 function sanitizeFilenamePart(value: string, fallback: string): string {
   const normalized = value
     .trim()
@@ -160,6 +179,13 @@ function figureFileTail(file: string): string {
   return slash >= 0 ? file.slice(slash + 1) : file;
 }
 
+function figureAssetFile(asset: AssetInfo): string {
+  const directory = asset.category.startsWith('figure/')
+    ? asset.category.slice('figure/'.length)
+    : '';
+  return [directory, asset.name].filter(Boolean).join('/');
+}
+
 export function CharacterPanel({
   projectPath,
   onClose,
@@ -187,6 +213,7 @@ export function CharacterPanel({
   const [figureAssetsLoading, setFigureAssetsLoading] = useState(true);
   const [figureAssetImporting, setFigureAssetImporting] = useState(false);
   const [figureAssetDeleting, setFigureAssetDeleting] = useState<string | null>(null);
+  const [figureDeleteDialog, setFigureDeleteDialog] = useState<FigureDeleteDialog | null>(null);
   // 主体图候选（存于 figure/<角色ID>/main/，与下方素材库隔离）。
   const [mainCandidates, setMainCandidates] = useState<AssetInfo[]>([]);
   const [mainCandidateDeleting, setMainCandidateDeleting] = useState<string | null>(null);
@@ -520,8 +547,7 @@ export function CharacterPanel({
   const findSpriteAssetSrc = useCallback((sprite: CharacterSprite): string | null => {
     if (!selected) return null;
     if (sprite.file) {
-      const tail = figureFileTail(sprite.file);
-      const match = figureAssets.find((asset) => figureFileTail(asset.name) === tail);
+      const match = figureAssets.find((asset) => figureAssetFile(asset) === sprite.file);
       if (match) return convertFileSrc(match.path);
       return convertFileSrc(`${projectPath}/game/figure/${sprite.file}`);
     }
@@ -537,8 +563,7 @@ export function CharacterPanel({
       (item) => item.emotion.trim().toLowerCase() === emotion.trim().toLowerCase(),
     );
     if (sprite?.file) {
-      const tail = figureFileTail(sprite.file);
-      if (figureAssets.some((asset) => figureFileTail(asset.name) === tail)) return true;
+      if (figureAssets.some((asset) => figureAssetFile(asset) === sprite.file)) return true;
     }
     return findSpriteAssetSrc({ emotion, file: '' }) !== null;
   }, [figureAssets, findSpriteAssetSrc, selected]);
@@ -801,20 +826,56 @@ export function CharacterPanel({
     }
   }, [projectPath, refreshFigureAssets, selectedId]);
 
-  const removeFigureAsset = useCallback(async (asset: AssetInfo) => {
-    if (!selectedId) return;
-    setFigureAssetDeleting(asset.name);
+  const requestFigureAssetDelete = useCallback(async (asset: AssetInfo) => {
+    setFigureDeleteDialog({
+      asset,
+      characterReferences: characters
+        .filter((character) => character.sprites.some((sprite) => sprite.file === figureAssetFile(asset)))
+        .map((character) => `${character.name || character.id} (${character.id})`),
+      sceneUsages: [],
+      loading: true,
+    });
+    try {
+      const sceneUsages = await findAssetUsages(projectPath, figureAssetFile(asset), 'figure');
+      setFigureDeleteDialog((current) => current?.asset.path === asset.path
+        ? { ...current, sceneUsages, loading: false }
+        : current);
+    } catch (e) {
+      setError(String(e));
+      setFigureDeleteDialog((current) => current?.asset.path === asset.path
+        ? { ...current, loading: false, lookupError: String(e) }
+        : current);
+    }
+  }, [characters, projectPath]);
+
+  const unbindFigureForSelectedCharacter = useCallback(async () => {
+    if (!figureDeleteDialog || !selected) return;
+    const filename = figureAssetFile(figureDeleteDialog.asset);
+    const updated = {
+      ...selected,
+      sprites: selected.sprites.map((sprite) =>
+        sprite.file === filename ? { ...sprite, file: '' } : sprite,
+      ),
+    };
+    const saved = await persistCharacter(updated, { showSavedBadge: false });
+    if (saved) setFigureDeleteDialog(null);
+  }, [figureDeleteDialog, persistCharacter, selected]);
+
+  const deleteFigureAsset = useCallback(async () => {
+    if (!figureDeleteDialog) return;
+    const { asset } = figureDeleteDialog;
+    setFigureAssetDeleting(asset.path);
     setError(null);
     try {
-      // Each asset carries its owning directory, including root-level legacy sprites.
       await deleteAsset(projectPath, asset.category, figureFileTail(asset.name));
+      setFigureDeleteDialog(null);
       await refreshFigureAssets();
     } catch (e) {
       setError(String(e));
     } finally {
       setFigureAssetDeleting(null);
     }
-  }, [projectPath, refreshFigureAssets, selectedId]);
+  }, [figureDeleteDialog, projectPath, refreshFigureAssets]);
 
   useEffect(() => {
     if (!generationRequestToken) return;
@@ -1465,7 +1526,7 @@ export function CharacterPanel({
                                       <div className="grid grid-cols-3 gap-1.5">
                                         {figureAssets.map((asset) => {
                                           const tail = figureFileTail(asset.name);
-                                          const qualified = `${selected.id}/${tail}`;
+                                          const qualified = figureAssetFile(asset);
                                           const isCurrent = sprite.file === qualified;
                                           return (
                                             <button
@@ -1581,11 +1642,11 @@ export function CharacterPanel({
                                 <div className="truncate text-[10px] font-medium" title={asset.name}>{asset.name}</div>
                                 <button
                                   type="button"
-                                  onClick={() => removeFigureAsset(asset)}
-                                  disabled={figureAssetDeleting === asset.name}
+                                  onClick={() => { void requestFigureAssetDelete(asset); }}
+                                  disabled={figureAssetDeleting === asset.path}
                                   className="w-full px-1.5 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 text-[10px] disabled:opacity-50"
                                 >
-                                  {figureAssetDeleting === asset.name ? '删除中' : '删除'}
+                                  {figureAssetDeleting === asset.path ? '删除中' : '删除'}
                                 </button>
                               </div>
                             </div>
@@ -1666,6 +1727,71 @@ export function CharacterPanel({
           </main>
         </div>
       )}
+      <AlertDialog
+        open={figureDeleteDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setFigureDeleteDialog(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除立绘素材</AlertDialogTitle>
+            <AlertDialogDescription className="max-h-64 overflow-y-auto">
+              {figureDeleteDialog && (
+                <div className="space-y-2">
+                  <p className="break-all">{figureAssetFile(figureDeleteDialog.asset)}</p>
+                  {figureDeleteDialog.loading ? (
+                    <p>正在检查引用…</p>
+                  ) : figureDeleteDialog.lookupError ? (
+                    <p role="alert" className="text-destructive">引用检查失败：{figureDeleteDialog.lookupError}</p>
+                  ) : (
+                    <>
+                      <p>
+                        角色引用：{figureDeleteDialog.characterReferences.length > 0
+                          ? figureDeleteDialog.characterReferences.join('、')
+                          : '无'}
+                      </p>
+                      <p>
+                        剧本引用：{figureDeleteDialog.sceneUsages.length > 0
+                          ? figureDeleteDialog.sceneUsages
+                              .map((usage) => `${usage.sceneFile} 第 ${usage.lineNumber} 行`)
+                              .join('、')
+                          : '无'}
+                      </p>
+                    </>
+                  )}
+                  <p>删除文件会影响上面列出的所有引用。</p>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            {selected && figureDeleteDialog
+              && selected.sprites.some((sprite) => sprite.file === figureAssetFile(figureDeleteDialog.asset)) && (
+                <AlertDialogAction
+                  className={buttonVariants({ variant: 'outline' })}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void unbindFigureForSelectedCharacter();
+                  }}
+                >
+                  仅解除当前角色绑定
+                </AlertDialogAction>
+              )}
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
+              disabled={!figureDeleteDialog || figureDeleteDialog.loading || Boolean(figureDeleteDialog.lookupError)}
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteFigureAsset();
+              }}
+            >
+              删除项目素材
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {pendingDeleteId && (() => {
         const target = characters.find((c) => c.id === pendingDeleteId);
         const name = target?.name?.trim() || '未命名角色';
