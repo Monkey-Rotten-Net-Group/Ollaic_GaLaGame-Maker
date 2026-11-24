@@ -20,7 +20,7 @@ where
 pub struct CharacterSprite {
     /// Emotion label, e.g. "default", "happy", "sad", "angry", "surprised".
     pub emotion: String,
-    /// Filename relative to game/figure/, e.g. "girl_happy.webp".
+    /// Path relative to game/figure/, e.g. "hero/girl_happy.webp".
     pub file: String,
     /// Custom generation prompt for this sprite variant.
     #[serde(default)]

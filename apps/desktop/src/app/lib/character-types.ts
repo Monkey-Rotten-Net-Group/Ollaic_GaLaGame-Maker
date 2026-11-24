@@ -4,7 +4,7 @@
 
 export interface CharacterSprite {
   emotion: string; // "default", "happy", "sad", "angry", etc.
-  file: string;    // filename in game/figure/
+  file: string;    // path relative to game/figure/
   prompt?: string; // custom generation prompt for this sprite
 }
 
